@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { SpatialHotspot } from "@/lib/api";
 import { HotspotConfigModal } from "./HotspotConfigModal";
+import { useNetworkState } from "@/hooks/useNetworkState";
 
 interface Props {
   imageUrl: string;
@@ -17,8 +18,10 @@ interface Props {
 export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspotId, onHotspotCreated, onHotspotClick, onCancelEdit }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentPoints, setCurrentPoints] = useState<{ x: number; y: number }[]>([]);
+  const { isOnline } = useNetworkState();
   const [isDrawing, setIsDrawing] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [hoveredHotspotId, setHoveredHotspotId] = useState<string | null>(null);
 
   const getNormalizedPoint = (e: React.PointerEvent) => {
     if (!containerRef.current) return { x: 0, y: 0 };
@@ -29,7 +32,7 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (!isEditing) return;
+    if (!isEditing || !isOnline) return;
     e.preventDefault();
     containerRef.current?.setPointerCapture(e.pointerId);
     setIsDrawing(true);
@@ -37,13 +40,13 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isEditing || !isDrawing) return;
+    if (!isEditing || !isDrawing || !isOnline) return;
     e.preventDefault();
     setCurrentPoints((prev) => [...prev, getNormalizedPoint(e)]);
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    if (!isEditing || !isDrawing) return;
+    if (!isEditing || !isDrawing || !isOnline) return;
     e.preventDefault();
     containerRef.current?.releasePointerCapture(e.pointerId);
     setIsDrawing(false);

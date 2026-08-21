@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import imageCompression from 'browser-image-compression'
+import { db } from './db'
 
 export type Room = {
   id: string
@@ -68,6 +69,9 @@ export interface ComponentLocation {
 }
 
 export async function getRooms(): Promise<Room[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    return await db.rooms.orderBy('order_index').toArray();
+  }
   const { data, error } = await supabase.from("rooms").select("*").order("order_index");
   if (error) throw error;
   return data as Room[];
@@ -80,12 +84,18 @@ export async function createRoom(name: string): Promise<Room> {
 }
 
 export async function getPhotosForRoom(roomId: string): Promise<SpatialPhoto[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    return (await db.spatial_photos.where('room_id').equals(roomId).toArray());
+  }
   const { data, error } = await supabase.from("spatial_photos").select("*").eq("room_id", roomId).order("order_index");
   if (error) throw error;
   return data as SpatialPhoto[];
 }
 
 export async function getHotspotsForPhoto(photoId: string): Promise<SpatialHotspot[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    return await db.spatial_hotspots.where('photo_id').equals(photoId).toArray();
+  }
   const { data, error } = await supabase.from("spatial_hotspots").select("*").eq("photo_id", photoId);
   if (error) throw error;
   return data as SpatialHotspot[];
@@ -93,7 +103,32 @@ export async function getHotspotsForPhoto(photoId: string): Promise<SpatialHotsp
 
 // Phase 4 Functions
 export async function getInventory(search: string = ""): Promise<ComponentWithTotals[]> {
-  // We'll fetch all components, their tags, and their totals
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const allComps = await db.components.toArray();
+    const allTotals = await db.component_totals.toArray();
+    const allTags = await db.tags.toArray();
+    const allCompTags = await db.component_tags.toArray();
+
+    const totalsMap = new Map(allTotals.map(t => [t.component_id, t]));
+    const tagMap = new Map(allTags.map(t => [t.id, t]));
+
+    let results = allComps.filter(c => !c.pending_delete);
+    
+    if (search) {
+      const s = search.toLowerCase();
+      results = results.filter(c => c.name.toLowerCase().includes(s) || (c.notes && c.notes.toLowerCase().includes(s)));
+    }
+
+    return results.map(c => {
+      const cTags = allCompTags.filter(ct => ct.component_id === c.id).map(ct => tagMap.get(ct.tag_id)).filter(Boolean) as Tag[];
+      return {
+        ...c,
+        tags: cTags,
+        totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 }
+      }
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   let query = supabase.from("components").select(`
     *,
     component_tags(tags(*))
@@ -139,6 +174,31 @@ export async function upsertTag(name: string): Promise<Tag> {
 }
 
 export async function getComponentDetails(id: string): Promise<{ component: ComponentWithTotals, locations: ComponentLocation[] }> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const comp = await db.components.get(id);
+    if (!comp) throw new Error("Component not found");
+    const totals = await db.component_totals.get(id) || { component_id: id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 };
+    
+    const cTags = await db.component_tags.where('component_id').equals(id).toArray();
+    const tags = await Promise.all(cTags.map(ct => db.tags.get(ct.tag_id)));
+    
+    const component: ComponentWithTotals = {
+      ...comp,
+      tags: tags.filter(Boolean) as Tag[],
+      totals
+    };
+
+    const locs = await db.component_locations.where('component_id').equals(id).toArray();
+    const locations = await Promise.all(locs.map(async l => {
+      const hotspot = await db.spatial_hotspots.get(l.hotspot_id);
+      const photo = hotspot ? await db.spatial_photos.get(hotspot.photo_id) : undefined;
+      const room = photo ? await db.rooms.get(photo.room_id) : undefined;
+      return { ...l, hotspot, photo, room };
+    }));
+
+    return { component, locations };
+  }
+
   // get component
   const { data: comp, error: compErr } = await supabase.from("components").select(`*, component_tags(tags(*))`).eq("id", id).single();
   if (compErr) throw compErr;
@@ -226,7 +286,6 @@ export async function getFullHotspotPath(hotspotId: string) {
   return chain;
 }
 
-import imageCompression from 'browser-image-compression';
 
 export async function uploadImage(file: File, pathPrefix: string): Promise<string> {
   const options = {
@@ -311,6 +370,15 @@ export interface ProjectComponent {
 }
 
 export async function getProjects(): Promise<(Project & { active_count: number })[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const allProj = await db.projects.orderBy('created_at').reverse().toArray();
+    const allProjComps = await db.project_components.toArray();
+    return allProj.map(p => {
+      const active = allProjComps.filter(pc => pc.project_id === p.id && !pc.returned_at).reduce((acc, pc) => acc + pc.quantity, 0);
+      return { ...p, active_count: active };
+    });
+  }
+
   const { data, error } = await supabase.from('projects').select('*, project_components(quantity, returned_at)').order('created_at', { ascending: false });
   if (error) throw error;
   
@@ -333,6 +401,19 @@ export async function updateProjectStatus(id: string, status: 'planning' | 'acti
 }
 
 export async function getProjectDetails(id: string): Promise<{ project: Project, items: ProjectComponent[] }> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const project = await db.projects.get(id);
+    if (!project) throw new Error("Project not found");
+    const rawItems = await db.project_components.where('project_id').equals(id).toArray();
+    const items = await Promise.all(rawItems.map(async pc => {
+      const component = await db.components.get(pc.component_id);
+      const source_hotspot = await db.spatial_hotspots.get(pc.source_location_id);
+      return { ...pc, component, source_hotspot };
+    }));
+    items.sort((a, b) => new Date(b.checked_out_at).getTime() - new Date(a.checked_out_at).getTime());
+    return { project, items };
+  }
+
   const { data: project, error } = await supabase.from('projects').select('*').eq('id', id).single();
   if (error) throw error;
   
@@ -379,21 +460,28 @@ export async function deleteComponent(id: string): Promise<void> {
 }
 
 export async function searchLeafHotspots(query: string = ""): Promise<{ id: string, pathLabel: string }[]> {
-  // Return leaf hotspots (for dropdown search)
-  // Since we need to compute full path, we fetch all rooms, photos, hotspots.
-  const [rooms, photos, hotspots] = await Promise.all([
-    supabase.from('rooms').select('*'),
-    supabase.from('spatial_photos').select('*'),
-    supabase.from('spatial_hotspots').select('*')
-  ]);
+  let roomsData, photosData, hotspotsData;
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    roomsData = await db.rooms.toArray();
+    photosData = await db.spatial_photos.toArray();
+    hotspotsData = await db.spatial_hotspots.toArray();
+  } else {
+    const [rooms, photos, hotspots] = await Promise.all([
+      supabase.from('rooms').select('*'),
+      supabase.from('spatial_photos').select('*'),
+      supabase.from('spatial_hotspots').select('*')
+    ]);
+    if (rooms.error || photos.error || hotspots.error) throw new Error("Failed to fetch spatial data for search");
+    roomsData = rooms.data;
+    photosData = photos.data;
+    hotspotsData = hotspots.data;
+  }
   
-  if (rooms.error || photos.error || hotspots.error) throw new Error("Failed to fetch spatial data for search");
+  const roomMap = new Map(roomsData.map(r => [r.id, r]));
+  const photoMap = new Map(photosData.map(p => [p.id, p]));
+  const hotspotMap = new Map(hotspotsData.map(h => [h.id, h]));
   
-  const roomMap = new Map(rooms.data.map(r => [r.id, r]));
-  const photoMap = new Map(photos.data.map(p => [p.id, p]));
-  const hotspotMap = new Map(hotspots.data.map(h => [h.id, h]));
-  
-  const leaves = hotspots.data.filter(h => h.is_leaf);
+  const leaves = hotspotsData.filter(h => h.is_leaf);
   const results = [];
   
   for (const leaf of leaves) {

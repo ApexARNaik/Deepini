@@ -5,6 +5,7 @@ import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, up
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { ChevronRight, Plus, Edit2 } from "lucide-react";
+import { useNetworkState } from "@/hooks/useNetworkState";
 
 interface Props {
   roomId: string;
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function RoomView({ roomId, locateHotspotId }: Props) {
+  const { isOnline } = useNetworkState();
   const [photos, setPhotos] = useState<SpatialPhoto[]>([]);
   const [hotspots, setHotspots] = useState<SpatialHotspot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -265,13 +267,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             </button>
           ))}
           
-          <div className="mt-2">
-            <ImageUploadDropzone 
-              onUpload={handleUploadRootPhoto} 
-              isUploading={uploading}
-              label="Add Perspective"
-            />
-          </div>
+          {isOnline && (
+            <div className="mt-2">
+              <ImageUploadDropzone 
+                onUpload={handleUploadRootPhoto} 
+                isUploading={uploading}
+                label="Add Perspective"
+              />
+            </div>
+          )}
         </div>
 
         {/* Main Canvas Area */}

@@ -1,49 +1,55 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { ComponentWithTotals, getInventory } from "@/lib/api";
 import { InventoryTable } from "@/components/inventory/InventoryTable";
-import { Search } from "lucide-react";
+import { Search, Plus } from "lucide-react";
 import Link from "next/link";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useNetworkState } from "@/hooks/useNetworkState";
 
 export default function InventoryPage() {
   const [components, setComponents] = useState<ComponentWithTotals[]>([]);
   const [loading, setLoading] = useState(true);
+  const { isOnline } = useNetworkState();
   const [search, setSearch] = useState("");
   
   const debouncedSearch = useDebounce(search, 300);
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      try {
-        const data = await getInventory(debouncedSearch);
-        setComponents(data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    }
     load();
   }, [debouncedSearch]);
 
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await getInventory(debouncedSearch);
+      setComponents(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full overflow-hidden p-6">
-      {/* Header */}
-      <div className="mb-8 flex justify-between items-end">
-        <div>
-          <h1 className="font-serif text-4xl font-bold text-white mb-2">INVENTORY</h1>
-          <p className="text-brand-text-muted italic">Every component, wherever it currently lives.</p>
+    <div className="flex flex-col h-full overflow-hidden bg-brand-bg">
+      <div className="p-6 border-b border-[#222] bg-[#151515] shrink-0">
+        <div className="flex justify-between items-end mb-6">
+          <div>
+            <h1 className="font-serif text-4xl font-bold text-white mb-2">INVENTORY</h1>
+            <p className="text-brand-text-muted italic">All tracked components in the workshop.</p>
+          </div>
+          {isOnline && (
+            <Link 
+              href="/inventory/new" 
+              className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors"
+            >
+              <Plus className="h-4 w-4 mr-1" /> Add Component
+            </Link>
+          )}
         </div>
-        <Link 
-          href="/inventory/new" 
-          className="px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors"
-        >
-          Add Component
-        </Link>
-      </div>
 
       {/* Filters Area */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 pb-6 border-b border-[#222]">

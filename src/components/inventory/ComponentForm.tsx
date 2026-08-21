@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage } from "@/lib/api";
 import { X, Plus, UploadCloud } from "lucide-react";
+import { useNetworkState } from "@/hooks/useNetworkState";
 
 interface Props {
   initialData?: Component;
@@ -12,6 +13,7 @@ interface Props {
 
 export function ComponentForm({ initialData, initialTags }: Props) {
   const router = useRouter();
+  const { isOnline } = useNetworkState();
   
   // Standard Fields
   const [name, setName] = useState(initialData?.name || "");
@@ -127,6 +129,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
 
   return (
     <form onSubmit={onSubmit} className="max-w-4xl mx-auto space-y-8 pb-20">
+      <fieldset disabled={!isOnline} className="space-y-8">
       
       {/* Top section: Photo + Main details */}
       <div className="flex flex-col md:flex-row gap-8">
@@ -337,38 +340,47 @@ export function ComponentForm({ initialData, initialTags }: Props) {
         </div>
       </div>
 
+      </fieldset>
       <div className="fixed bottom-0 inset-x-0 ml-64 bg-[#111] border-t border-[#222] p-4 flex justify-between items-center">
-        {initialData ? (
-          <button 
-            type="button" 
-            onClick={() => {
-              if (confirm("Are you sure you want to delete this component? If it has active checkouts, it will be marked as pending delete until returned.")) {
-                import('@/lib/api').then(({ deleteComponent }) => {
-                  setLoading(true);
-                  deleteComponent(initialData.id).then(() => {
-                    router.push('/inventory');
-                  }).catch(err => {
-                    console.error(err);
-                    alert("Failed to delete component");
-                    setLoading(false);
-                  });
-                });
-              }
-            }} 
-            className="px-4 py-2 text-brand-accent hover:text-red-400 text-xs font-bold uppercase tracking-widest transition-colors"
-          >
-            Delete Component
-          </button>
-        ) : <div/>}
+        {isOnline ? (
+          <>
+            {initialData ? (
+              <button 
+                type="button" 
+                onClick={() => {
+                  if (confirm("Are you sure you want to delete this component? If it has active checkouts, it will be marked as pending delete until returned.")) {
+                    import('@/lib/api').then(({ deleteComponent }) => {
+                      setLoading(true);
+                      deleteComponent(initialData.id).then(() => {
+                        router.push('/inventory');
+                      }).catch(err => {
+                        console.error(err);
+                        alert("Failed to delete component");
+                        setLoading(false);
+                      });
+                    });
+                  }
+                }} 
+                className="px-4 py-2 text-brand-accent hover:text-red-400 text-xs font-bold uppercase tracking-widest transition-colors"
+              >
+                Delete Component
+              </button>
+            ) : <div/>}
 
-        <div className="flex gap-4">
-          <button type="button" onClick={() => router.back()} className="px-6 py-2 text-brand-text-muted hover:text-white text-sm">
-            Cancel
-          </button>
-          <button type="submit" disabled={loading} className="px-8 py-2 bg-brand-accent text-white font-bold tracking-widest text-sm rounded-sm hover:bg-brand-accent-hover disabled:opacity-50">
-            {loading ? "SAVING..." : "SAVE COMPONENT"}
-          </button>
-        </div>
+            <div className="flex gap-4">
+              <button type="button" onClick={() => router.back()} className="px-6 py-2 text-brand-text-muted hover:text-white text-sm">
+                Cancel
+              </button>
+              <button type="submit" disabled={loading} className="px-8 py-2 bg-brand-accent text-white font-bold tracking-widest text-sm rounded-sm hover:bg-brand-accent-hover disabled:opacity-50">
+                {loading ? "SAVING..." : "SAVE COMPONENT"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="w-full text-center text-brand-text-muted text-sm font-bold tracking-widest uppercase py-2">
+            Read Only Mode - Go online to edit
+          </div>
+        )}
       </div>
     </form>
   );

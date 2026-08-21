@@ -10,13 +10,16 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.5",
+    "@serwist/next": "^9.5.12",
     "@supabase/supabase-js": "^2.109.0",
     "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.1",
+    "dexie": "^4.4.5",
     "lucide-react": "^1.33.0",
     "next": "16.3.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "serwist": "^9.5.12",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {

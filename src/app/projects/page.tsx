@@ -4,10 +4,12 @@ import { useState, useEffect } from "react";
 import { Project, getProjects, createProject } from "@/lib/api";
 import Link from "next/link";
 import { Plus, ChevronRight } from "lucide-react";
+import { useNetworkState } from "@/hooks/useNetworkState";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<(Project & { active_count: number })[]>([]);
   const [loading, setLoading] = useState(true);
+  const { isOnline } = useNetworkState();
   
   const [showNewModal, setShowNewModal] = useState(false);
   const [newName, setNewName] = useState("");
@@ -51,12 +53,14 @@ export default function ProjectsPage() {
           <h1 className="font-serif text-4xl font-bold text-white mb-2">PROJECTS</h1>
           <p className="text-brand-text-muted italic">Checkout ledger and active build tracking.</p>
         </div>
-        <button 
-          onClick={() => setShowNewModal(true)}
-          className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors"
-        >
-          <Plus className="h-4 w-4 mr-1" /> New Project
-        </button>
+        {isOnline && (
+          <button 
+            onClick={() => setShowNewModal(true)}
+            className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors"
+          >
+            <Plus className="h-4 w-4 mr-1" /> New Project
+          </button>
+        )}
       </div>
 
       {loading ? (

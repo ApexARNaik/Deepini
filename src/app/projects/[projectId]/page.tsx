@@ -7,10 +7,12 @@ import { CheckOutModal } from "@/components/projects/CheckOutModal";
 import { CheckInModal } from "@/components/projects/CheckInModal";
 import { ArrowLeft, CheckCircle2, Clock, MapPin, PackagePlus } from "lucide-react";
 import Link from "next/link";
+import { useNetworkState } from "@/hooks/useNetworkState";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams();
   const router = useRouter();
+  const { isOnline } = useNetworkState();
   
   const [project, setProject] = useState<Project | null>(null);
   const [items, setItems] = useState<ProjectComponent[]>([]);
@@ -66,23 +68,25 @@ export default function ProjectDetailPage() {
             <h1 className="font-serif text-4xl font-bold text-white mb-2">{project.name}</h1>
             <p className="text-brand-text-muted">{project.description}</p>
           </div>
-          <div className="flex items-center gap-4">
-            <select 
-              value={project.status} 
-              onChange={e => handleStatusChange(e.target.value as any)}
-              className="bg-[#222] border border-[#333] text-brand-text-muted text-xs font-bold uppercase tracking-widest p-2 rounded focus:outline-none focus:border-brand-accent"
-            >
-              <option value="planning">Planning</option>
-              <option value="active">Active</option>
-              <option value="completed">Completed</option>
-            </select>
-            <button 
-              onClick={() => setShowCheckOut(true)}
-              className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors"
-            >
-              <PackagePlus className="h-4 w-4 mr-2" /> Check Out Component
-            </button>
-          </div>
+          {isOnline && (
+            <div className="flex items-center gap-4">
+              <select 
+                value={project.status} 
+                onChange={e => handleStatusChange(e.target.value as any)}
+                className="bg-[#222] border border-[#333] text-brand-text-muted text-xs font-bold uppercase tracking-widest p-2 rounded focus:outline-none focus:border-brand-accent"
+              >
+                <option value="planning">Planning</option>
+                <option value="active">Active</option>
+                <option value="completed">Completed</option>
+              </select>
+              <button 
+                onClick={() => setShowCheckOut(true)}
+                className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors"
+              >
+                <PackagePlus className="h-4 w-4 mr-2" /> Check Out Component
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -123,12 +127,14 @@ export default function ProjectDetailPage() {
                     <div className="flex items-center text-xs text-brand-text-muted">
                       <MapPin className="h-3 w-3 mr-1" /> {item.source_hotspot?.label || 'Unknown Source'}
                     </div>
-                    <button 
-                      onClick={() => setCheckInItem(item)}
-                      className="px-3 py-1 bg-brand-accent/20 text-brand-accent text-[10px] font-bold uppercase tracking-widest rounded hover:bg-brand-accent hover:text-white transition-colors"
-                    >
-                      Check In
-                    </button>
+                    {isOnline && (
+                      <button 
+                        onClick={() => setCheckInItem(item)}
+                        className="px-3 py-1 bg-brand-accent/20 text-brand-accent text-[10px] font-bold uppercase tracking-widest rounded hover:bg-brand-accent hover:text-white transition-colors"
+                      >
+                        Check In
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
