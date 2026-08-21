@@ -12,7 +12,6 @@ import {
   Settings,
   Search,
   Bell,
-  HelpCircle,
   User
 } from "lucide-react";
 
@@ -90,13 +89,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               className="hover:text-white transition-colors"
             >
               <Bell className="h-5 w-5" />
-            </button>
-            <button 
-              onClick={() => alert("Help documentation module coming soon.")}
-              title="Help & Documentation"
-              className="hover:text-white transition-colors"
-            >
-              <HelpCircle className="h-5 w-5" />
             </button>
             <button 
               onClick={() => {
