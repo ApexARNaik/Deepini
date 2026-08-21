@@ -1,16 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { ChevronRight, Plus, Edit2 } from "lucide-react";
 
 interface Props {
   roomId: string;
+  locateHotspotId?: string;
 }
 
-export function RoomView({ roomId }: Props) {
+export function RoomView({ roomId, locateHotspotId }: Props) {
   const [photos, setPhotos] = useState<SpatialPhoto[]>([]);
   const [hotspots, setHotspots] = useState<SpatialHotspot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,10 +21,12 @@ export function RoomView({ roomId }: Props) {
   // Breadcrumb/drill-down state
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
   const [breadcrumbChain, setBreadcrumbChain] = useState<{ id: string; label: string }[]>([]);
+  // We'll highlight the specific hotspot if locating
+  const [highlightedHotspotId, setHighlightedHotspotId] = useState<string | null>(null);
 
   useEffect(() => {
     loadRoomData();
-  }, [roomId]);
+  }, [roomId, locateHotspotId]);
 
   useEffect(() => {
     if (activePhotoId) {
@@ -39,12 +42,28 @@ export function RoomView({ roomId }: Props) {
       const allPhotos = await getPhotosForRoom(roomId);
       setPhotos(allPhotos);
       
-      // If we don't have an active photo, set it to the first root photo
-      if (!activePhotoId && allPhotos.length > 0) {
-        const rootPhotos = allPhotos.filter(p => p.parent_hotspot_id === null);
-        if (rootPhotos.length > 0) {
-          setActivePhotoId(rootPhotos[0].id);
-          setBreadcrumbChain([{ id: rootPhotos[0].id, label: rootPhotos[0].label || 'Root' }]);
+      if (locateHotspotId) {
+        // Compute path and set state
+        const path = await getFullHotspotPath(locateHotspotId);
+        if (path.length > 0) {
+          // The last element is the leaf hotspot.
+          // The elements before it are photos and drill hotspots.
+          // The breadcrumb chain tracks PHOTOS. 
+          const photoNodes = path.filter(p => p.type === 'photo');
+          if (photoNodes.length > 0) {
+            setBreadcrumbChain(photoNodes.map(p => ({ id: p.id, label: p.label })));
+            setActivePhotoId(photoNodes[photoNodes.length - 1].id);
+            setHighlightedHotspotId(locateHotspotId);
+          }
+        }
+      } else {
+        // If we don't have an active photo, set it to the first root photo
+        if (!activePhotoId && allPhotos.length > 0) {
+          const rootPhotos = allPhotos.filter(p => p.parent_hotspot_id === null);
+          if (rootPhotos.length > 0) {
+            setActivePhotoId(rootPhotos[0].id);
+            setBreadcrumbChain([{ id: rootPhotos[0].id, label: rootPhotos[0].label || 'Root' }]);
+          }
         }
       }
     } catch (err) {
@@ -262,6 +281,7 @@ export function RoomView({ roomId }: Props) {
               imageUrl={activePhoto.image_url} 
               hotspots={hotspots}
               isEditing={isEditing}
+              highlightedHotspotId={highlightedHotspotId}
               onCancelEdit={() => setIsEditing(false)}
               onHotspotCreated={handleHotspotCreated}
               onHotspotClick={handleHotspotClick}

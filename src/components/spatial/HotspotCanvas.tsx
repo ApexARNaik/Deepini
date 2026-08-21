@@ -8,12 +8,13 @@ interface Props {
   imageUrl: string;
   hotspots: SpatialHotspot[];
   isEditing: boolean;
+  highlightedHotspotId?: string | null;
   onHotspotCreated: (shapePoints: { x: number; y: number }[], label: string, isLeaf: boolean) => void;
   onHotspotClick: (hotspot: SpatialHotspot) => void;
   onCancelEdit: () => void;
 }
 
-export function HotspotCanvas({ imageUrl, hotspots, isEditing, onHotspotCreated, onHotspotClick, onCancelEdit }: Props) {
+export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspotId, onHotspotCreated, onHotspotClick, onCancelEdit }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentPoints, setCurrentPoints] = useState<{ x: number; y: number }[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -84,24 +85,24 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, onHotspotCreated,
           preserveAspectRatio="none"
         >
           {/* Existing Hotspots */}
-          {hotspots.map(h => (
-            <g key={h.id} className={isEditing ? 'opacity-30' : 'group pointer-events-auto cursor-pointer'} onClick={() => !isEditing && onHotspotClick(h)}>
-              <polygon 
-                points={toPolygonString(h.shape_points)} 
-                className="fill-transparent stroke-brand-accent/50 stroke-[0.2] transition-all duration-200 group-hover:fill-brand-accent/10 group-hover:stroke-brand-accent group-hover:stroke-[0.4]"
+          {hotspots.map((hs) => {
+            const isHovered = hoveredHotspotId === hs.id;
+            const isHighlighted = highlightedHotspotId === hs.id;
+            
+            return (
+              <polygon
+                key={hs.id}
+                points={hs.shape_points.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
+                fill={isHovered ? "rgba(239, 68, 68, 0.4)" : isHighlighted ? "rgba(239, 68, 68, 0.2)" : "rgba(255, 255, 255, 0.1)"}
+                stroke={isHovered || isHighlighted ? "#ef4444" : "rgba(255,255,255,0.5)"}
+                strokeWidth={isHighlighted ? "0.6" : "0.3"}
+                className={`transition-all duration-300 ${isHighlighted ? 'animate-pulse' : ''} ${!isEditing ? "cursor-pointer pointer-events-auto" : "pointer-events-none"}`}
+                onMouseEnter={() => !isEditing && setHoveredHotspotId(hs.id)}
+                onMouseLeave={() => setHoveredHotspotId(null)}
+                onClick={() => !isEditing && onHotspotClick(hs)}
               />
-              {/* Label positioned at the first point */}
-              {!isEditing && h.shape_points.length > 0 && (
-                <text 
-                  x={h.shape_points[0].x * 100} 
-                  y={(h.shape_points[0].y * 100) - 1} 
-                  className="fill-white text-[1px] font-sans opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md"
-                >
-                  {h.label} {h.is_leaf ? '(Storage)' : '→'}
-                </text>
-              )}
-            </g>
-          ))}
+            );
+          })}
 
           {/* Current Drawing */}
           {isDrawing && currentPoints.length > 0 && (
