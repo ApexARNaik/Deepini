@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { PasswordGate } from "@/components/PasswordGate";
-import { Sidebar } from "@/components/layout/Sidebar";
+import { AppShell } from "@/components/AppShell";
 import { NetworkProvider } from "@/components/NetworkProvider";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
@@ -33,10 +33,9 @@ export default function RootLayout({
       <body className="antialiased text-brand-text bg-brand-bg font-sans h-full overflow-hidden flex">
         <NetworkProvider>
           <PasswordGate>
-            <Sidebar />
-            <main className="flex-1 flex flex-col h-full overflow-hidden relative z-0">
+            <AppShell>
               {children}
-            </main>
+            </AppShell>
           </PasswordGate>
         </NetworkProvider>
       </body>

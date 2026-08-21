@@ -66,14 +66,14 @@ export default function ProjectsPage() {
       {loading ? (
         <div className="text-brand-text-muted">Loading projects...</div>
       ) : projects.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-12 text-brand-text-muted border border-[#333] rounded-lg">
+        <div className="flex flex-col items-center justify-center p-12 text-brand-text-muted border border-[#332f2a] rounded-lg">
           <p>No projects found. Create one to start checking out components.</p>
         </div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {projects.map(p => (
             <Link key={p.id} href={`/projects/${p.id}`} className="block group">
-              <div className="bg-[#151515] border border-[#222] hover:border-[#444] rounded-lg p-6 transition-all duration-200 h-full flex flex-col">
+              <div className="bg-[#1a1816] border border-[#332f2a] hover:border-[#332f2a] rounded-lg p-6 transition-all duration-200 h-full flex flex-col">
                 <div className="flex justify-between items-start mb-4">
                   <h2 className="font-bold text-lg text-white group-hover:text-brand-accent transition-colors">{p.name}</h2>
                   <span className={`px-2 py-1 text-[9px] uppercase tracking-widest rounded-sm font-bold ${
@@ -87,7 +87,7 @@ export default function ProjectsPage() {
                 <p className="text-sm text-brand-text-muted flex-1 line-clamp-3 mb-6">
                   {p.description || "No description provided."}
                 </p>
-                <div className="flex justify-between items-end border-t border-[#222] pt-4 mt-auto">
+                <div className="flex justify-between items-end border-t border-[#332f2a] pt-4 mt-auto">
                   <div>
                     <div className="text-2xl font-serif text-white leading-none mb-1">{p.active_count}</div>
                     <div className="text-[9px] text-brand-text-muted uppercase tracking-widest">Active Components</div>
@@ -102,16 +102,16 @@ export default function ProjectsPage() {
 
       {showNewModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#151515] border border-[#333] p-6 rounded-lg w-full max-w-md">
+          <div className="bg-[#1a1816] border border-[#332f2a] p-6 rounded-lg w-full max-w-md">
             <h2 className="text-lg font-bold text-white mb-4">Create New Project</h2>
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <label className="block text-[10px] uppercase tracking-widest text-brand-text-muted mb-1">Project Name</label>
-                <input required autoFocus type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full bg-[#111] border border-[#333] p-2 text-white focus:border-brand-accent focus:outline-none" />
+                <input required autoFocus type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full bg-[#1a1816] border border-[#332f2a] p-2 text-white focus:border-brand-accent focus:outline-none" />
               </div>
               <div>
                 <label className="block text-[10px] uppercase tracking-widest text-brand-text-muted mb-1">Description</label>
-                <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} className="w-full h-24 bg-[#111] border border-[#333] p-2 text-white focus:border-brand-accent focus:outline-none resize-none" />
+                <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} className="w-full h-24 bg-[#1a1816] border border-[#332f2a] p-2 text-white focus:border-brand-accent focus:outline-none resize-none" />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowNewModal(false)} className="px-4 py-2 text-xs text-brand-text-muted hover:text-white uppercase tracking-widest">Cancel</button>

@@ -59,7 +59,7 @@ export default function ProjectDetailPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-brand-bg">
-      <div className="p-6 border-b border-[#222] bg-[#151515] shrink-0">
+      <div className="p-6 border-b border-[#332f2a] bg-[#1a1816] shrink-0">
         <button onClick={() => router.push('/projects')} className="flex items-center text-xs text-brand-text-muted hover:text-white uppercase tracking-widest mb-6 transition-colors">
           <ArrowLeft className="h-3 w-3 mr-2" /> Back to Projects
         </button>
@@ -73,7 +73,7 @@ export default function ProjectDetailPage() {
               <select 
                 value={project.status} 
                 onChange={e => handleStatusChange(e.target.value as any)}
-                className="bg-[#222] border border-[#333] text-brand-text-muted text-xs font-bold uppercase tracking-widest p-2 rounded focus:outline-none focus:border-brand-accent"
+                className="bg-[#222] border border-[#332f2a] text-brand-text-muted text-xs font-bold uppercase tracking-widest p-2 rounded focus:outline-none focus:border-brand-accent"
               >
                 <option value="planning">Planning</option>
                 <option value="active">Active</option>
@@ -94,23 +94,23 @@ export default function ProjectDetailPage() {
         
         {/* Active Checkouts */}
         <section>
-          <h2 className="flex items-center text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#333] pb-2 mb-4">
+          <h2 className="flex items-center text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">
             <Clock className="h-4 w-4 mr-2 text-brand-accent" /> Active Checkouts ({activeItems.length})
           </h2>
           
           {activeItems.length === 0 ? (
-            <div className="text-sm text-brand-text-muted italic bg-[#151515] p-6 rounded border border-[#222] text-center">
+            <div className="text-sm text-brand-text-muted italic bg-[#1a1816] p-6 rounded border border-[#332f2a] text-center">
               No active checkouts for this project.
             </div>
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {activeItems.map(item => (
-                <div key={item.id} className="bg-[#151515] border border-brand-accent/30 rounded p-4 flex flex-col gap-4 relative overflow-hidden group">
+                <div key={item.id} className="bg-[#1a1816] border border-brand-accent/30 rounded p-4 flex flex-col gap-4 relative overflow-hidden group">
                   <div className="absolute top-0 left-0 w-1 h-full bg-brand-accent" />
                   <div className="flex gap-4 items-start pl-2">
                     {item.component?.photo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={item.component.photo_url} alt="" className="h-12 w-12 object-cover rounded border border-[#333]" />
+                      <img src={item.component.photo_url} alt="" className="h-12 w-12 object-cover rounded border border-[#332f2a]" />
                     ) : (
                       <div className="h-12 w-12 bg-[#222] rounded flex items-center justify-center text-[#555] text-[10px]">No Img</div>
                     )}
@@ -123,7 +123,7 @@ export default function ProjectDetailPage() {
                       <div className="text-[9px] text-brand-text-muted uppercase tracking-widest">Units</div>
                     </div>
                   </div>
-                  <div className="flex justify-between items-center pl-2 pt-4 border-t border-[#222]">
+                  <div className="flex justify-between items-center pl-2 pt-4 border-t border-[#332f2a]">
                     <div className="flex items-center text-xs text-brand-text-muted">
                       <MapPin className="h-3 w-3 mr-1" /> {item.source_hotspot?.label || 'Unknown Source'}
                     </div>
@@ -144,13 +144,13 @@ export default function ProjectDetailPage() {
 
         {/* History */}
         <section>
-          <h2 className="flex items-center text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#333] pb-2 mb-4">
+          <h2 className="flex items-center text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">
             <CheckCircle2 className="h-4 w-4 mr-2 text-green-500" /> History ({historyItems.length})
           </h2>
           
           <div className="space-y-2 opacity-70">
             {historyItems.map(item => (
-              <div key={item.id} className="bg-[#111] border border-[#222] rounded p-3 flex justify-between items-center text-sm">
+              <div key={item.id} className="bg-[#1a1816] border border-[#332f2a] rounded p-3 flex justify-between items-center text-sm">
                 <div className="flex items-center gap-3">
                   <div className="font-bold text-brand-text-muted w-8 text-right">{item.quantity}x</div>
                   <div className="text-gray-400 font-medium">{item.component?.name}</div>

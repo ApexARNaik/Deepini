@@ -68,9 +68,9 @@ export function CheckOutModal({ projectId, onClose, onSuccess }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-[#151515] border border-[#333] rounded-lg w-full max-w-2xl flex flex-col max-h-[90vh]">
+      <div className="bg-[#1a1816] border border-[#332f2a] rounded-lg w-full max-w-2xl flex flex-col max-h-[90vh]">
         
-        <div className="flex justify-between items-center p-6 border-b border-[#222]">
+        <div className="flex justify-between items-center p-6 border-b border-[#332f2a]">
           <h2 className="text-xl font-bold text-white font-serif">Check Out Component</h2>
           <button onClick={onClose} className="text-brand-text-muted hover:text-white transition-colors">
             <X className="h-5 w-5" />
@@ -89,12 +89,12 @@ export function CheckOutModal({ projectId, onClose, onSuccess }: Props) {
                   placeholder="Search inventory..." 
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full bg-[#111] border border-[#333] pl-10 pr-4 py-3 text-sm text-white focus:border-brand-accent focus:outline-none transition-colors rounded"
+                  className="w-full bg-[#1a1816] border border-[#332f2a] pl-10 pr-4 py-3 text-sm text-white focus:border-brand-accent focus:outline-none transition-colors rounded"
                 />
               </div>
 
               {search && searchResults.length === 0 && (
-                <div className="text-center text-sm text-brand-text-muted py-8 border border-dashed border-[#333] rounded">
+                <div className="text-center text-sm text-brand-text-muted py-8 border border-dashed border-[#332f2a] rounded">
                   No available components match your search.
                 </div>
               )}
@@ -104,12 +104,12 @@ export function CheckOutModal({ projectId, onClose, onSuccess }: Props) {
                   <button 
                     key={c.id} 
                     onClick={() => handleSelectComponent(c.id)}
-                    className="w-full flex items-center justify-between p-3 bg-[#111] border border-[#222] hover:border-brand-accent rounded text-left transition-colors group"
+                    className="w-full flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] hover:border-brand-accent rounded text-left transition-colors group"
                   >
                     <div className="flex items-center gap-4">
                       {c.photo_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={c.photo_url} alt="" className="h-10 w-10 object-cover rounded border border-[#333]" />
+                        <img src={c.photo_url} alt="" className="h-10 w-10 object-cover rounded border border-[#332f2a]" />
                       ) : (
                         <div className="h-10 w-10 bg-[#222] rounded flex items-center justify-center text-[#555]"><Package className="h-5 w-5" /></div>
                       )}
@@ -137,7 +137,7 @@ export function CheckOutModal({ projectId, onClose, onSuccess }: Props) {
                   {locations.map(loc => (
                     <label 
                       key={loc.id} 
-                      className={`block flex justify-between items-center p-4 border rounded cursor-pointer transition-colors ${selectedLoc?.id === loc.id ? 'bg-brand-accent/10 border-brand-accent' : 'bg-[#111] border-[#222] hover:border-[#444]'}`}
+                      className={`block flex justify-between items-center p-4 border rounded cursor-pointer transition-colors ${selectedLoc?.id === loc.id ? 'bg-brand-accent/10 border-brand-accent' : 'bg-[#1a1816] border-[#332f2a] hover:border-[#332f2a]'}`}
                     >
                       <div className="flex items-center gap-3">
                         <input 
@@ -162,7 +162,7 @@ export function CheckOutModal({ projectId, onClose, onSuccess }: Props) {
               )}
 
               {selectedLoc && (
-                <div className="flex items-end gap-4 bg-[#111] p-4 border border-[#333] rounded">
+                <div className="flex items-end gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
                   <div className="flex-1">
                     <label className="block text-[10px] uppercase tracking-widest text-brand-text-muted mb-2">Quantity to Check Out</label>
                     <input 
@@ -171,7 +171,7 @@ export function CheckOutModal({ projectId, onClose, onSuccess }: Props) {
                       max={selectedLoc.quantity} 
                       value={qty}
                       onChange={e => setQty(e.target.value)}
-                      className="w-full bg-[#151515] border border-[#444] p-3 text-white focus:border-brand-accent focus:outline-none"
+                      className="w-full bg-[#1a1816] border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
                     />
                   </div>
                   <button type="submit" disabled={loading} className="px-8 py-3 bg-brand-accent text-white font-bold tracking-widest text-sm rounded-sm hover:bg-brand-accent-hover disabled:opacity-50">

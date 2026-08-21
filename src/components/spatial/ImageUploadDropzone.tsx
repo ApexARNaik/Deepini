@@ -47,7 +47,7 @@ export function ImageUploadDropzone({ onUpload, isUploading, label = "Upload Ima
   return (
     <div
       className={`relative flex flex-col items-center justify-center p-12 border-2 border-dashed rounded-lg transition-colors ${
-        isDragging ? "border-brand-accent bg-brand-accent/5" : "border-[#333] bg-[#1a1a1a]"
+        isDragging ? "border-brand-accent bg-brand-accent/5" : "border-[#332f2a] bg-[#1a1816]"
       }`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

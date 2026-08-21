@@ -28,13 +28,13 @@ export default function ComponentDetailPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-brand-bg">
-      <div className="p-6 border-b border-[#222] bg-[#151515] shrink-0">
+      <div className="p-6 border-b border-[#332f2a] bg-[#1a1816] shrink-0">
         <button onClick={() => router.push('/inventory')} className="flex items-center text-xs text-brand-text-muted hover:text-white uppercase tracking-widest mb-6 transition-colors">
           <ArrowLeft className="h-3 w-3 mr-2" /> Back to Inventory
         </button>
         <div className="flex justify-between items-start">
           <div className="flex gap-6">
-            <div className="h-24 w-24 bg-[#111] border border-[#333] rounded shrink-0 overflow-hidden">
+            <div className="h-24 w-24 bg-[#1a1816] border border-[#332f2a] rounded shrink-0 overflow-hidden">
               {component.photo_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={component.photo_url} alt={component.name} className="w-full h-full object-cover" />
@@ -46,7 +46,7 @@ export default function ComponentDetailPage() {
               <h1 className="font-serif text-3xl font-bold text-white mb-2">{component.name}</h1>
               <div className="flex flex-wrap gap-2 mb-3">
                 {component.tags.map(t => (
-                  <span key={t.id} className="px-2 py-0.5 text-[10px] uppercase tracking-widest border border-[#444] rounded text-brand-text-muted bg-[#1a1a1a]">
+                  <span key={t.id} className="px-2 py-0.5 text-[10px] uppercase tracking-widest border border-[#332f2a] rounded text-brand-text-muted bg-[#1a1816]">
                     {t.name}
                   </span>
                 ))}
@@ -58,7 +58,7 @@ export default function ComponentDetailPage() {
           </div>
           <Link 
             href={`/inventory/${component.id}/edit`}
-            className="flex items-center px-4 py-2 bg-[#1a1a1a] border border-[#333] text-brand-text text-xs font-bold uppercase tracking-widest hover:border-[#555] transition-colors"
+            className="flex items-center px-4 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text text-xs font-bold uppercase tracking-widest hover:border-[#4a443c] transition-colors"
           >
             <Edit2 className="h-3 w-3 mr-2" /> Edit Component
           </Link>
@@ -69,8 +69,8 @@ export default function ComponentDetailPage() {
         <div className="flex-1 space-y-8">
           
           <section>
-            <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#333] pb-2 mb-4">Details</h2>
-            <div className="grid grid-cols-2 gap-4 bg-[#151515] p-4 border border-[#222] rounded">
+            <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Details</h2>
+            <div className="grid grid-cols-2 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
               <div>
                 <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Total Owned</div>
                 <div className="text-xl font-serif text-white">{component.totals.total_owned_qty}</div>
@@ -92,7 +92,7 @@ export default function ComponentDetailPage() {
 
           {(component.purchase_source || component.datasheet_link || component.notes) && (
             <section>
-              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#333] pb-2 mb-4">Resources</h2>
+              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Resources</h2>
               <div className="space-y-4 text-sm text-brand-text">
                 {component.purchase_source && (
                   <div className="flex gap-2">
@@ -113,7 +113,7 @@ export default function ComponentDetailPage() {
                 {component.notes && (
                   <div>
                     <div className="text-brand-text-muted mb-1">Notes:</div>
-                    <p className="bg-[#151515] border border-[#222] p-4 rounded whitespace-pre-wrap">{component.notes}</p>
+                    <p className="bg-[#1a1816] border border-[#332f2a] p-4 rounded whitespace-pre-wrap">{component.notes}</p>
                   </div>
                 )}
               </div>
@@ -122,16 +122,16 @@ export default function ComponentDetailPage() {
 
           {Object.keys(component.custom_fields).length > 0 && (
             <section>
-              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#333] pb-2 mb-4">Custom Specs</h2>
+              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Custom Specs</h2>
               <div className="grid grid-cols-2 gap-4">
                 {Object.entries(component.custom_fields).map(([key, field]) => (
-                  <div key={key} className="bg-[#151515] p-3 border border-[#222] rounded">
+                  <div key={key} className="bg-[#1a1816] p-3 border border-[#332f2a] rounded">
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">{key}</div>
                     {field.type === 'link' ? (
                       <a href={field.value} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline text-sm truncate block">{field.value}</a>
                     ) : field.type === 'image' ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#333] rounded mt-1" />
+                      <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#332f2a] rounded mt-1" />
                     ) : (
                       <div className="text-white text-sm">{field.value}</div>
                     )}
@@ -145,15 +145,15 @@ export default function ComponentDetailPage() {
 
         <div className="w-full lg:w-96 shrink-0 space-y-6">
           <section>
-            <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#333] pb-2 mb-4">Storage Locations</h2>
+            <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Storage Locations</h2>
             {locations.length === 0 ? (
-              <div className="text-sm text-brand-text-muted italic bg-[#151515] p-4 rounded border border-[#222]">
+              <div className="text-sm text-brand-text-muted italic bg-[#1a1816] p-4 rounded border border-[#332f2a]">
                 Not currently stored in any physical location.
               </div>
             ) : (
               <div className="space-y-3">
                 {locations.map(loc => (
-                  <div key={loc.id} className="bg-[#151515] border border-[#333] rounded p-4 flex flex-col gap-3">
+                  <div key={loc.id} className="bg-[#1a1816] border border-[#332f2a] rounded p-4 flex flex-col gap-3">
                     <div className="flex justify-between items-start">
                       <div>
                         <div className="text-white font-bold mb-1">{loc.hotspot?.label}</div>

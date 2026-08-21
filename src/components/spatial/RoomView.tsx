@@ -207,7 +207,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               className={`flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-colors ${
                 isEditing 
                   ? 'bg-brand-accent border-brand-accent text-white' 
-                  : 'bg-[#1a1a1a] border-[#333] text-brand-text hover:border-[#555]'
+                  : 'bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c]'
               }`}
             >
               {isEditing ? 'Cancel Edit' : (
@@ -217,7 +217,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             <button 
               onClick={() => setIsEditing(true)}
               disabled={isEditing}
-              className="flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest bg-[#1a1a1a] border border-[#333] text-brand-text hover:border-[#555] disabled:opacity-50"
+              className="flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest bg-[#1a1816] border border-[#332f2a] text-brand-text hover:border-[#4a443c] disabled:opacity-50"
             >
               <Plus className="h-3 w-3 mr-2" /> Add Hotspot
             </button>
@@ -279,7 +279,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         </div>
 
         {/* Main Canvas Area */}
-        <div className="flex-1 bg-black/40 rounded-lg overflow-hidden border border-[#222]">
+        <div className="flex-1 bg-black/40 rounded-lg overflow-hidden border border-[#332f2a]">
           {activePhoto ? (
             <HotspotCanvas 
               imageUrl={activePhoto.image_url} 

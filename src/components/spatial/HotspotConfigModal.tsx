@@ -20,7 +20,7 @@ export function HotspotConfigModal({ onClose, onSubmit }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="bg-[#1a1a1a] border border-[#333] rounded-lg shadow-2xl w-full max-w-md p-6">
+      <div className="bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl w-full max-w-md p-6">
         <div className="flex justify-between items-center mb-6">
           <h2 className="font-serif text-2xl font-bold text-white">Configure Hotspot</h2>
           <button onClick={onClose} className="text-brand-text-muted hover:text-white">
@@ -39,7 +39,7 @@ export function HotspotConfigModal({ onClose, onSubmit }: Props) {
               onChange={(e) => setLabel(e.target.value)}
               placeholder="e.g. Blue Drawer"
               autoFocus
-              className="w-full bg-[#121212] border border-[#333] p-3 text-white focus:border-brand-accent focus:outline-none"
+              className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
             />
           </div>
 
@@ -48,13 +48,13 @@ export function HotspotConfigModal({ onClose, onSubmit }: Props) {
               Hotspot Type
             </label>
             <div className="space-y-3">
-              <label className={`flex items-start p-3 border rounded cursor-pointer transition-colors ${type === 'drill' ? 'border-brand-accent bg-brand-accent/5' : 'border-[#333] hover:border-[#444]'}`}>
+              <label className={`flex items-start p-3 border rounded cursor-pointer transition-colors ${type === 'drill' ? 'border-brand-accent bg-brand-accent/5' : 'border-[#332f2a] hover:border-[#332f2a]'}`}>
                 <input
                   type="radio"
                   name="type"
                   checked={type === "drill"}
                   onChange={() => setType("drill")}
-                  className="mt-1 mr-3 text-brand-accent focus:ring-brand-accent bg-[#121212] border-[#333]"
+                  className="mt-1 mr-3 text-brand-accent focus:ring-brand-accent bg-brand-bg border-[#332f2a]"
                 />
                 <div>
                   <div className="text-white font-medium">Opens into more storage</div>
@@ -62,13 +62,13 @@ export function HotspotConfigModal({ onClose, onSubmit }: Props) {
                 </div>
               </label>
 
-              <label className={`flex items-start p-3 border rounded cursor-pointer transition-colors ${type === 'leaf' ? 'border-brand-accent bg-brand-accent/5' : 'border-[#333] hover:border-[#444]'}`}>
+              <label className={`flex items-start p-3 border rounded cursor-pointer transition-colors ${type === 'leaf' ? 'border-brand-accent bg-brand-accent/5' : 'border-[#332f2a] hover:border-[#332f2a]'}`}>
                 <input
                   type="radio"
                   name="type"
                   checked={type === "leaf"}
                   onChange={() => setType("leaf")}
-                  className="mt-1 mr-3 text-brand-accent focus:ring-brand-accent bg-[#121212] border-[#333]"
+                  className="mt-1 mr-3 text-brand-accent focus:ring-brand-accent bg-brand-bg border-[#332f2a]"
                 />
                 <div>
                   <div className="text-white font-medium">This is a storage location</div>
@@ -78,7 +78,7 @@ export function HotspotConfigModal({ onClose, onSubmit }: Props) {
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-[#333]">
+          <div className="flex justify-end gap-3 pt-4 border-t border-[#332f2a]">
             <button
               type="button"
               onClick={onClose}

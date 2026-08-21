@@ -64,7 +64,7 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
   };
 
   return (
-    <div className="relative w-full h-full min-h-[600px] flex items-center justify-center bg-[#0a0a0a] border border-[#222] overflow-hidden rounded-lg">
+    <div className="relative w-full h-full min-h-[600px] flex items-center justify-center bg-[#0f0e0c] border border-[#332f2a] overflow-hidden rounded-lg">
       <div 
         ref={containerRef}
         className={`relative max-w-full max-h-full inline-block touch-none select-none ${isEditing ? 'cursor-crosshair' : 'cursor-default'}`}

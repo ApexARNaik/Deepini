@@ -137,7 +137,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
           <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase">
             Component Image
           </label>
-          <div className="relative h-48 border border-[#333] rounded overflow-hidden bg-[#151515] group">
+          <div className="relative h-48 border border-[#332f2a] rounded overflow-hidden bg-[#1a1816] group">
             {photoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={photoUrl} alt="Preview" className="w-full h-full object-cover" />
@@ -169,7 +169,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="e.g. ESP32 WROOM-32D"
-              className="w-full bg-[#121212] border border-[#333] p-3 text-white focus:border-brand-accent focus:outline-none font-bold text-lg"
+              className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none font-bold text-lg"
             />
           </div>
 
@@ -183,7 +183,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
                 step="0.01"
                 value={price}
                 onChange={e => setPrice(e.target.value)}
-                className="w-full bg-[#121212] border border-[#333] p-3 text-white focus:border-brand-accent focus:outline-none"
+                className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
               />
             </div>
             <div>
@@ -194,14 +194,14 @@ export function ComponentForm({ initialData, initialTags }: Props) {
                 type="number"
                 value={lowStock}
                 onChange={e => setLowStock(e.target.value)}
-                className="w-full bg-[#121212] border border-[#333] p-3 text-white focus:border-brand-accent focus:outline-none"
+                className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
               />
             </div>
           </div>
         </div>
       </div>
 
-      <hr className="border-[#222]" />
+      <hr className="border-[#332f2a]" />
 
       {/* Tags */}
       <div>
@@ -210,7 +210,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
         </label>
         <div className="flex flex-wrap gap-2 mb-3">
           {tags.map(t => (
-            <span key={t.id} className="inline-flex items-center gap-1 px-3 py-1 bg-[#1a1a1a] border border-[#444] rounded text-xs text-brand-text">
+            <span key={t.id} className="inline-flex items-center gap-1 px-3 py-1 bg-[#1a1816] border border-[#332f2a] rounded text-xs text-brand-text">
               {t.name}
               <button type="button" onClick={() => handleRemoveTag(t.id)} className="text-brand-text-muted hover:text-white">
                 <X className="h-3 w-3" />
@@ -225,19 +225,19 @@ export function ComponentForm({ initialData, initialTags }: Props) {
             onChange={e => setTagInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleAddTag(e)}
             placeholder="Add new or existing tag..."
-            className="flex-1 bg-[#121212] border border-[#333] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+            className="flex-1 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
             list="available-tags"
           />
           <datalist id="available-tags">
             {availableTags.map(t => <option key={t.id} value={t.name} />)}
           </datalist>
-          <button type="button" onClick={handleAddTag} className="px-3 bg-[#1a1a1a] border border-[#333] text-brand-text hover:bg-[#222]">
+          <button type="button" onClick={handleAddTag} className="px-3 bg-[#1a1816] border border-[#332f2a] text-brand-text hover:bg-[#222]">
             Add
           </button>
         </div>
       </div>
 
-      <hr className="border-[#222]" />
+      <hr className="border-[#332f2a]" />
 
       {/* Links & Notes */}
       <div className="grid md:grid-cols-2 gap-6">
@@ -250,7 +250,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
               type="url"
               value={purchaseSource}
               onChange={e => setPurchaseSource(e.target.value)}
-              className="w-full bg-[#121212] border border-[#333] p-3 text-sm text-white focus:border-brand-accent focus:outline-none"
+              className="w-full bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none"
             />
           </div>
           <div>
@@ -261,7 +261,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
               type="url"
               value={datasheetLink}
               onChange={e => setDatasheetLink(e.target.value)}
-              className="w-full bg-[#121212] border border-[#333] p-3 text-sm text-white focus:border-brand-accent focus:outline-none"
+              className="w-full bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none"
             />
           </div>
         </div>
@@ -272,12 +272,12 @@ export function ComponentForm({ initialData, initialTags }: Props) {
           <textarea
             value={notes}
             onChange={e => setNotes(e.target.value)}
-            className="w-full h-32 bg-[#121212] border border-[#333] p-3 text-sm text-white focus:border-brand-accent focus:outline-none resize-none"
+            className="w-full h-32 bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none resize-none"
           />
         </div>
       </div>
 
-      <hr className="border-[#222]" />
+      <hr className="border-[#332f2a]" />
 
       {/* Custom Fields Builder */}
       <div>
@@ -294,17 +294,17 @@ export function ComponentForm({ initialData, initialTags }: Props) {
               </div>
               <div className="flex-1">
                 {field.type === 'text' && (
-                  <input type="text" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-[#121212] border border-[#333] p-2 text-sm text-white" />
+                  <input type="text" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
                 )}
                 {field.type === 'number' && (
-                  <input type="number" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-[#121212] border border-[#333] p-2 text-sm text-white" />
+                  <input type="number" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
                 )}
                 {field.type === 'link' && (
-                  <input type="url" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-[#121212] border border-[#333] p-2 text-sm text-white" />
+                  <input type="url" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
                 )}
                 {field.type === 'image' && (
                   <div className="flex items-center gap-4">
-                    {field.value && <img src={field.value} alt={key} className="h-10 w-10 object-cover border border-[#333] rounded" />}
+                    {field.value && <img src={field.value} alt={key} className="h-10 w-10 object-cover border border-[#332f2a] rounded" />}
                     <input type="file" accept="image/*" onChange={e => e.target.files?.[0] && handleCustomFieldImageUpload(key, e.target.files[0])} className="text-xs text-brand-text-muted" />
                   </div>
                 )}
@@ -316,18 +316,18 @@ export function ComponentForm({ initialData, initialTags }: Props) {
           ))}
         </div>
 
-        <div className="flex gap-2 p-4 border border-dashed border-[#333] bg-[#1a1a1a] rounded items-center">
+        <div className="flex gap-2 p-4 border border-dashed border-[#332f2a] bg-[#1a1816] rounded items-center">
           <input
             type="text"
             placeholder="New Field Name"
             value={newFieldName}
             onChange={e => setNewFieldName(e.target.value)}
-            className="flex-1 bg-[#121212] border border-[#333] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+            className="flex-1 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
           />
           <select 
             value={newFieldType}
             onChange={e => setNewFieldType(e.target.value as any)}
-            className="w-32 bg-[#121212] border border-[#333] p-2 text-sm text-white focus:outline-none"
+            className="w-32 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:outline-none"
           >
             <option value="text">Text</option>
             <option value="number">Number</option>
@@ -341,7 +341,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
       </div>
 
       </fieldset>
-      <div className="fixed bottom-0 inset-x-0 ml-64 bg-[#111] border-t border-[#222] p-4 flex justify-between items-center">
+      <div className="fixed bottom-0 inset-x-0 ml-64 bg-[#1a1816] border-t border-[#332f2a] p-4 flex justify-between items-center">
         {isOnline ? (
           <>
             {initialData ? (

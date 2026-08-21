@@ -12,16 +12,16 @@ interface Props {
 export function InventoryTable({ components }: Props) {
   if (components.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 text-brand-text-muted border border-[#333] rounded-lg">
+      <div className="flex flex-col items-center justify-center p-12 text-brand-text-muted border border-[#332f2a] rounded-lg">
         <p>No components found.</p>
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-[#222]">
+    <div className="overflow-x-auto rounded-lg border border-[#332f2a]">
       <table className="w-full text-left text-sm whitespace-nowrap">
-        <thead className="bg-[#1a1a1a] text-brand-text-muted text-[10px] uppercase tracking-widest border-b border-[#222]">
+        <thead className="bg-[#1a1816] text-brand-text-muted text-[10px] uppercase tracking-widest border-b border-[#332f2a]">
           <tr>
             <th className="px-6 py-4 font-medium">Img</th>
             <th className="px-6 py-4 font-medium">Component Name</th>
@@ -37,11 +37,11 @@ export function InventoryTable({ components }: Props) {
             const isLowStock = c.low_stock_threshold !== null && c.low_stock_threshold !== undefined && c.totals.total_owned_qty <= c.low_stock_threshold;
             
             return (
-              <tr key={c.id} className="hover:bg-[#151515] transition-colors group">
+              <tr key={c.id} className="hover:bg-[#1a1816] transition-colors group">
                 <td className="px-6 py-4">
                   {c.photo_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={c.photo_url} alt={c.name} className="h-10 w-10 object-cover rounded border border-[#333]" />
+                    <img src={c.photo_url} alt={c.name} className="h-10 w-10 object-cover rounded border border-[#332f2a]" />
                   ) : (
                     <div className="h-10 w-10 bg-[#222] rounded flex items-center justify-center text-[#555] text-xs">
                       No Img
@@ -57,7 +57,7 @@ export function InventoryTable({ components }: Props) {
                 <td className="px-6 py-4">
                   <div className="flex gap-2 flex-wrap max-w-[200px]">
                     {c.tags.map(t => (
-                      <span key={t.id} className="px-2 py-0.5 text-[9px] uppercase tracking-widest border border-[#444] rounded text-brand-text-muted bg-[#1a1a1a]">
+                      <span key={t.id} className="px-2 py-0.5 text-[9px] uppercase tracking-widest border border-[#332f2a] rounded text-brand-text-muted bg-[#1a1816]">
                         {t.name}
                       </span>
                     ))}

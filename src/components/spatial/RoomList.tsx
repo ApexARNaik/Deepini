@@ -58,7 +58,7 @@ export function RoomList() {
       ))}
 
       {/* Create Room Form */}
-      <div className="bg-[#1a1a1a] border border-dashed border-[#333] p-6 rounded relative">
+      <div className="bg-[#1a1816] border border-dashed border-[#332f2a] p-6 rounded relative">
         <form onSubmit={handleCreate} className="flex flex-col gap-4">
           <label className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">
             Create New Room
@@ -69,7 +69,7 @@ export function RoomList() {
               value={newRoomName}
               onChange={(e) => setNewRoomName(e.target.value)}
               placeholder="e.g. Workshop, Garage"
-              className="flex-1 bg-[#121212] border border-[#2a2a2a] px-3 py-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+              className="flex-1 bg-brand-bg border border-[#2a2a2a] px-3 py-2 text-sm text-white focus:border-brand-accent focus:outline-none"
               disabled={isCreating}
             />
             <button 

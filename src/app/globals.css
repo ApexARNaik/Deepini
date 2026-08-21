@@ -1,16 +1,16 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-bg: #121212;
-  --color-brand-panel: #1a1a1a;
-  --color-brand-border: #2a2a2a;
-  --color-brand-accent: #c97a59;
-  --color-brand-accent-hover: #b86745;
-  --color-brand-text: #ededed;
-  --color-brand-text-muted: #999999;
-  --color-brand-gold: #d4a373;
-  --color-brand-error: #2a1111;
-  --color-brand-error-border: #5a2020;
+  --color-brand-bg: #141211;
+  --color-brand-panel: #1a1816;
+  --color-brand-border: #2a2723;
+  --color-brand-accent: #bc7353;
+  --color-brand-accent-hover: #a56143;
+  --color-brand-text: #eae8e3;
+  --color-brand-text-muted: #969188;
+  --color-brand-gold: #ac8a5e;
+  --color-brand-error: #2a1511;
+  --color-brand-error-border: #5a2a20;
   --color-brand-error-text: #e57373;
 
   --font-serif: "Playfair Display", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
