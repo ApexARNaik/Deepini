@@ -3,8 +3,7 @@ import { RoomList } from "@/components/spatial/RoomList";
 
 export default function RoomsPage() {
   return (
-    <AppShell>
-      <div className="max-w-5xl">
+    <div className="max-w-5xl">
         <h1 className="font-serif text-5xl font-bold text-white mb-2 leading-tight">
           Spatial Map
         </h1>
@@ -13,6 +12,5 @@ export default function RoomsPage() {
         </p>
         <RoomList />
       </div>
-    </AppShell>
   );
 }

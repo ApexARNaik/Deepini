@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useState, useEffect } from "react";
 import { ComponentWithTotals, getInventory } from "@/lib/api";
 import { InventoryTable } from "@/components/inventory/InventoryTable";
 import { Search, Plus } from "lucide-react";
@@ -65,6 +64,7 @@ export default function InventoryPage() {
         </div>
         
         {/* We can add tag dropdown here later if needed */}
+      </div>
       </div>
 
       {/* Table */}

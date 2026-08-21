@@ -13,8 +13,8 @@ export default async function RoomPage({
   const locateHotspot = typeof resolvedSearchParams.locateHotspot === 'string' ? resolvedSearchParams.locateHotspot : undefined;
 
   return (
-    <AppShell>
+    <>
       <RoomView roomId={roomId} locateHotspotId={locateHotspot} />
-    </AppShell>
+    </>
   );
 }
