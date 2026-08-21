@@ -328,7 +328,7 @@ export async function uploadPhotoAndCreate(file: File, roomId: string, parentHot
     if (updateError) throw updateError
   }
 
-  return data as SpatialPhoto
+  return photoData as SpatialPhoto
 }
 
 export async function createHotspot(
@@ -417,7 +417,7 @@ export async function getProjectDetails(id: string): Promise<{ project: Project,
   const { data: project, error } = await supabase.from('projects').select('*').eq('id', id).single();
   if (error) throw error;
   
-  const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components(*), source_hotspot:spatial_hotspots(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
+  const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components(*), source_hotspot:spatial_hotspots!project_components_source_location_id_fkey(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
   if (itemsErr) throw itemsErr;
   
   return { project, items };

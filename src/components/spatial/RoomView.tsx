@@ -214,13 +214,6 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 <><Edit2 className="h-3 w-3 mr-2" /> Edit Map</>
               )}
             </button>
-            <button 
-              onClick={() => setIsEditing(true)}
-              disabled={isEditing}
-              className="flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest bg-[#1a1816] border border-[#332f2a] text-brand-text hover:border-[#4a443c] disabled:opacity-50"
-            >
-              <Plus className="h-3 w-3 mr-2" /> Add Hotspot
-            </button>
           </div>
         )}
       </div>

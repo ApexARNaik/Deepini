@@ -107,7 +107,6 @@ export function ComponentForm({ initialData, initialTags }: Props) {
     setLoading(true);
     try {
       const payload: Partial<Component> = {
-        id: initialData?.id,
         name: name.trim(),
         price: price ? parseFloat(price) : null,
         purchase_source: purchaseSource || null,
@@ -117,6 +116,9 @@ export function ComponentForm({ initialData, initialTags }: Props) {
         photo_url: photoUrl || null,
         custom_fields: customFields
       };
+      if (initialData?.id) {
+        payload.id = initialData.id;
+      }
 
       await upsertComponent(payload, tags.map(t => t.id));
       router.push("/inventory");
