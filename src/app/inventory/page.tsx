@@ -37,8 +37,8 @@ export default function InventoryPage() {
       <div className="p-6 border-b border-[#332f2a] bg-[#1a1816] shrink-0">
         <div className="flex justify-between items-end mb-6">
           <div>
-            <h1 className="font-serif text-4xl font-bold text-white mb-2">INVENTORY</h1>
-            <p className="text-brand-text-muted italic">All tracked components in the workshop.</p>
+            <h1 className="font-serif text-[28px] font-bold tracking-widest text-white uppercase">INVENTORY</h1>
+            <p className="mt-1 text-[10px] tracking-[0.2em] text-brand-gold uppercase">All tracked components in the workshop.</p>
           </div>
           {isOnline && (
             <Link 

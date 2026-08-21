@@ -50,13 +50,14 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-5xl">
-        <h1 className="font-serif text-5xl font-bold text-white mb-2 leading-tight">
-          Good evening.<br />
-          Here&apos;s what&apos;s in your workshop.
-        </h1>
-        <p className="text-brand-text-muted text-lg mb-12">
-          {stats.loading ? "Loading system statistics..." : "System nominal. Ready for operations."}
-        </p>
+        <div className="mb-12">
+          <h1 className="font-serif text-[28px] font-bold tracking-widest text-white uppercase">
+            Dashboard
+          </h1>
+          <p className="mt-1 text-[10px] tracking-[0.2em] text-brand-gold uppercase">
+            {stats.loading ? "Loading system statistics..." : "System nominal. Ready for operations."}
+          </p>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Total Components Card */}

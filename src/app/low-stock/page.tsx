@@ -27,8 +27,8 @@ export default function LowStockPage() {
     <div className="flex flex-col h-full overflow-hidden p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="font-serif text-4xl font-bold text-brand-accent mb-2">LOW STOCK ALERTS</h1>
-        <p className="text-brand-text-muted italic">Components at or below their minimum threshold.</p>
+        <h1 className="font-serif text-[28px] font-bold tracking-widest text-white uppercase">LOW STOCK ALERTS</h1>
+        <p className="mt-1 text-[10px] tracking-[0.2em] text-brand-gold uppercase">Components at or below their minimum threshold.</p>
       </div>
 
       {/* Table */}

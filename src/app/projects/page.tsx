@@ -50,8 +50,8 @@ export default function ProjectsPage() {
     <div className="flex flex-col h-full p-6 bg-brand-bg overflow-y-auto">
       <div className="mb-8 flex justify-between items-end">
         <div>
-          <h1 className="font-serif text-4xl font-bold text-white mb-2">PROJECTS</h1>
-          <p className="text-brand-text-muted italic">Checkout ledger and active build tracking.</p>
+          <h1 className="font-serif text-[28px] font-bold tracking-widest text-white uppercase">PROJECTS</h1>
+          <p className="mt-1 text-[10px] tracking-[0.2em] text-brand-gold uppercase">Checkout ledger and active build tracking.</p>
         </div>
         {isOnline && (
           <button 

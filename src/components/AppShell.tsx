@@ -66,20 +66,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* Bottom Navigation */}
-        <div className="p-4 border-t border-[#332f2a]">
-          <Link
-            href="/settings"
-            className={`flex items-center px-4 py-3 text-sm font-medium transition-colors ${
-              pathname === "/settings"
-                ? "text-brand-accent"
-                : "text-brand-text-muted hover:text-white"
-            }`}
-          >
-            <Settings className="mr-4 h-5 w-5" />
-            Settings
-          </Link>
-        </div>
+
       </div>
 
       {/* Main Content Area */}
@@ -97,13 +84,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             />
           </div>
           <div className="flex items-center space-x-6 text-brand-text-muted">
-            <button className="hover:text-white transition-colors">
+            <button 
+              onClick={() => alert("No new notifications")}
+              title="Notifications"
+              className="hover:text-white transition-colors"
+            >
               <Bell className="h-5 w-5" />
             </button>
-            <button className="hover:text-white transition-colors">
+            <button 
+              onClick={() => alert("Help documentation module coming soon.")}
+              title="Help & Documentation"
+              className="hover:text-white transition-colors"
+            >
               <HelpCircle className="h-5 w-5" />
             </button>
-            <button className="h-8 w-8 rounded bg-[#24211e] flex items-center justify-center hover:bg-[#333333] transition-colors border border-[#332f2a]">
+            <button 
+              onClick={() => {
+                sessionStorage.removeItem("unlocked");
+                window.location.reload();
+              }}
+              title="Lock Workspace"
+              className="h-8 w-8 rounded bg-[#24211e] flex items-center justify-center hover:bg-[#333333] hover:text-brand-accent transition-colors border border-[#332f2a]"
+            >
               <User className="h-4 w-4" />
             </button>
           </div>
