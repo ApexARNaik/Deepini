@@ -288,3 +288,143 @@ export async function createHotspot(
   if (error) throw error
   return data as SpatialHotspot
 }
+
+export interface Project {
+  id: string;
+  name: string;
+  status: 'planning' | 'active' | 'completed';
+  description: string | null;
+  created_at: string;
+}
+
+export interface ProjectComponent {
+  id: string;
+  project_id: string;
+  component_id: string;
+  source_location_id: string;
+  quantity: number;
+  checked_out_at: string;
+  returned_at: string | null;
+  returned_location_id: string | null;
+  component?: Component;
+  source_hotspot?: SpatialHotspot;
+}
+
+export async function getProjects(): Promise<(Project & { active_count: number })[]> {
+  const { data, error } = await supabase.from('projects').select('*, project_components(quantity, returned_at)').order('created_at', { ascending: false });
+  if (error) throw error;
+  
+  return data.map(p => {
+    const active = p.project_components.filter((pc: any) => !pc.returned_at).reduce((acc: number, pc: any) => acc + pc.quantity, 0);
+    return { ...p, active_count: active };
+  });
+}
+
+export async function createProject(name: string, description: string = ''): Promise<Project> {
+  const { data, error } = await supabase.from('projects').insert([{ name, description, status: 'planning' }]).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateProjectStatus(id: string, status: 'planning' | 'active' | 'completed'): Promise<Project> {
+  const { data, error } = await supabase.from('projects').update({ status }).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getProjectDetails(id: string): Promise<{ project: Project, items: ProjectComponent[] }> {
+  const { data: project, error } = await supabase.from('projects').select('*').eq('id', id).single();
+  if (error) throw error;
+  
+  const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components(*), source_hotspot:spatial_hotspots(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
+  if (itemsErr) throw itemsErr;
+  
+  return { project, items };
+}
+
+export async function checkoutComponent(projectId: string, componentId: string, sourceLocationId: string, quantity: number): Promise<void> {
+  const { error } = await supabase.rpc('checkout_component', {
+    p_project_id: projectId,
+    p_component_id: componentId,
+    p_source_location_id: sourceLocationId,
+    p_quantity: quantity
+  });
+  if (error) throw error;
+}
+
+export async function checkinComponent(projectComponentId: string, returnLocationId: string): Promise<void> {
+  const { error } = await supabase.rpc('checkin_component', {
+    p_project_component_id: projectComponentId,
+    p_return_location_id: returnLocationId
+  });
+  if (error) throw error;
+}
+
+export async function deleteComponent(id: string): Promise<void> {
+  const { count, error: countErr } = await supabase.from('project_components').select('*', { count: 'exact', head: true }).eq('component_id', id).is('returned_at', null);
+  if (countErr) throw countErr;
+  
+  if (count === 0) {
+    // Hard delete
+    const { error } = await supabase.from('components').delete().eq('id', id);
+    if (error) throw error;
+  } else {
+    // Soft delete
+    const { error: locErr } = await supabase.from('component_locations').delete().eq('component_id', id);
+    if (locErr) throw locErr;
+    
+    const { error: compErr } = await supabase.from('components').update({ pending_delete: true }).eq('id', id);
+    if (compErr) throw compErr;
+  }
+}
+
+export async function searchLeafHotspots(query: string = ""): Promise<{ id: string, pathLabel: string }[]> {
+  // Return leaf hotspots (for dropdown search)
+  // Since we need to compute full path, we fetch all rooms, photos, hotspots.
+  const [rooms, photos, hotspots] = await Promise.all([
+    supabase.from('rooms').select('*'),
+    supabase.from('spatial_photos').select('*'),
+    supabase.from('spatial_hotspots').select('*')
+  ]);
+  
+  if (rooms.error || photos.error || hotspots.error) throw new Error("Failed to fetch spatial data for search");
+  
+  const roomMap = new Map(rooms.data.map(r => [r.id, r]));
+  const photoMap = new Map(photos.data.map(p => [p.id, p]));
+  const hotspotMap = new Map(hotspots.data.map(h => [h.id, h]));
+  
+  const leaves = hotspots.data.filter(h => h.is_leaf);
+  const results = [];
+  
+  for (const leaf of leaves) {
+    let path = [leaf.label];
+    let currentPhotoId = leaf.photo_id;
+    
+    while (currentPhotoId) {
+      const p = photoMap.get(currentPhotoId);
+      if (!p) break;
+      path.unshift(p.label || 'Perspective');
+      
+      if (p.parent_hotspot_id) {
+        const hs = hotspotMap.get(p.parent_hotspot_id);
+        if (hs) {
+          path.unshift(hs.label);
+          currentPhotoId = hs.photo_id;
+        } else {
+          break;
+        }
+      } else {
+        const r = roomMap.get(p.room_id);
+        if (r) path.unshift(r.name);
+        break;
+      }
+    }
+    
+    const pathStr = path.join(" > ");
+    if (!query || pathStr.toLowerCase().includes(query.toLowerCase())) {
+      results.push({ id: leaf.id, pathLabel: pathStr });
+    }
+  }
+  
+  return results.slice(0, 50); // limit
+}

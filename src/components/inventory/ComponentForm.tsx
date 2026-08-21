@@ -337,8 +337,31 @@ export function ComponentForm({ initialData, initialTags }: Props) {
         </div>
       </div>
 
-      <div className="fixed bottom-0 inset-x-0 ml-64 bg-[#111] border-t border-[#222] p-4 flex justify-end">
-        <div className="max-w-4xl w-full mx-auto flex justify-end gap-4">
+      <div className="fixed bottom-0 inset-x-0 ml-64 bg-[#111] border-t border-[#222] p-4 flex justify-between items-center">
+        {initialData ? (
+          <button 
+            type="button" 
+            onClick={() => {
+              if (confirm("Are you sure you want to delete this component? If it has active checkouts, it will be marked as pending delete until returned.")) {
+                import('@/lib/api').then(({ deleteComponent }) => {
+                  setLoading(true);
+                  deleteComponent(initialData.id).then(() => {
+                    router.push('/inventory');
+                  }).catch(err => {
+                    console.error(err);
+                    alert("Failed to delete component");
+                    setLoading(false);
+                  });
+                });
+              }
+            }} 
+            className="px-4 py-2 text-brand-accent hover:text-red-400 text-xs font-bold uppercase tracking-widest transition-colors"
+          >
+            Delete Component
+          </button>
+        ) : <div/>}
+
+        <div className="flex gap-4">
           <button type="button" onClick={() => router.back()} className="px-6 py-2 text-brand-text-muted hover:text-white text-sm">
             Cancel
           </button>
