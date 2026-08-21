@@ -105,6 +105,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
     if (!name.trim()) return;
     
     setLoading(true);
+    let success = false;
     try {
       const payload: Partial<Component> = {
         name: name.trim(),
@@ -121,11 +122,15 @@ export function ComponentForm({ initialData, initialTags }: Props) {
       }
 
       await upsertComponent(payload, tags.map(t => t.id));
-      router.push("/inventory");
-    } catch (err) {
-      console.error(err);
-      alert("Failed to save component");
+      success = true;
+    } catch (err: any) {
+      console.error("Full error:", err);
+      alert(`Failed to save component: ${err?.message || String(err)}`);
       setLoading(false);
+    }
+    
+    if (success) {
+      router.push("/inventory");
     }
   };
 

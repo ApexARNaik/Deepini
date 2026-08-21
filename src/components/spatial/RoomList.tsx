@@ -32,12 +32,17 @@ export function RoomList() {
     if (!newRoomName.trim()) return;
     
     setIsCreating(true);
+    let newRoomId = "";
     try {
       const newRoom = await createRoom(newRoomName.trim());
-      router.push(`/rooms/${newRoom.id}`);
+      newRoomId = newRoom.id;
     } catch (err) {
       console.error("Failed to create room", err);
       setIsCreating(false);
+    }
+    
+    if (newRoomId) {
+      router.push(`/rooms/${newRoomId}`);
     }
   };
 

@@ -201,7 +201,7 @@ export async function getComponentDetails(id: string): Promise<{ component: Comp
 
   // get component
   const { data: comp, error: compErr } = await supabase.from("components").select(`*, component_tags(tags(*))`).eq("id", id).single();
-  if (compErr) throw compErr;
+  if (compErr) throw new Error(compErr.message || "Failed to fetch component");
   
   const { data: totalsData } = await supabase.from("component_totals").select("*").eq("component_id", id).single();
   
@@ -216,13 +216,13 @@ export async function getComponentDetails(id: string): Promise<{ component: Comp
     *,
     spatial_hotspots(
       *,
-      spatial_photos(
+      spatial_photos!spatial_hotspots_photo_id_fkey(
         *,
         rooms(*)
       )
     )
   `).eq("component_id", id);
-  if (locErr) throw locErr;
+  if (locErr) throw new Error(locErr.message || "Failed to fetch component locations");
 
   const locations = locs.map((l: any) => ({
     id: l.id,
@@ -244,21 +244,32 @@ export async function upsertComponent(
   let compId = componentData.id;
   if (!compId) {
     const { data, error } = await supabase.from("components").insert([componentData]).select().single();
-    if (error) throw error;
+    if (error) {
+      console.error("Insert Error in upsertComponent:", error);
+      throw new Error(error.message || "Failed to insert component");
+    }
     compId = data.id;
   } else {
     const { data, error } = await supabase.from("components").update(componentData).eq("id", compId).select().single();
-    if (error) throw error;
+    if (error) {
+      console.error("Update Error in upsertComponent:", error);
+      throw new Error(error.message || "Failed to update component");
+    }
   }
 
   // update tags
   await supabase.from("component_tags").delete().eq("component_id", compId);
   if (tagIds.length > 0) {
     const tagInserts = tagIds.map(tId => ({ component_id: compId, tag_id: tId }));
-    await supabase.from("component_tags").insert(tagInserts);
+    const { error: tagErr } = await supabase.from("component_tags").insert(tagInserts);
+    if (tagErr) {
+      console.error("Tag Insert Error in upsertComponent:", tagErr);
+      throw new Error(tagErr.message || "Failed to insert tags");
+    }
   }
 
-  const { data } = await supabase.from("components").select("*").eq("id", compId).single();
+  const { data, error: selErr } = await supabase.from("components").select("*").eq("id", compId).single();
+  if (selErr) throw new Error(selErr.message || "Failed to fetch inserted component");
   return data;
 }
 

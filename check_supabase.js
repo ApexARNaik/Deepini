@@ -1,31 +1,31 @@
-const { createClient } = require('@supabase/supabase-js');
 
+
+// Let's just simulate the EXACT logic from api.ts
+const { createClient } = require('@supabase/supabase-js');
 const supabaseUrl = 'https://lkbcqnzhiuinqgfledsc.supabase.co';
 const supabaseAnonKey = 'sb_publishable_vRm_nsFn8m8M4reOSiHNbg_YAIx-PTI';
-
 const supabase = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
 
-// Shim fetch to avoid node-fetch / websocket issues for this simple test
-// Or just let it run.
-
 async function test() {
-  const componentData = {
-    id: undefined,
-    name: 'Test Component JS Client',
-    price: null,
-    purchase_source: null,
-    datasheet_link: null,
-    low_stock_threshold: null,
-    notes: null,
-    photo_url: null,
-    custom_fields: {}
-  };
-  const { data, error } = await supabase.from('components').insert([componentData]).select().single();
-  console.log('Error:', error);
-  console.log('Data:', data);
+  const { data: locs, error: locErr } = await supabase.from("component_locations").select(`
+    *,
+    spatial_hotspots(
+      *,
+      spatial_photos(
+        *,
+        rooms(*)
+      )
+    )
+  `);
+  
+  if (locErr) {
+    console.log("Error hint:", locErr.hint);
+    console.log("Error details:", locErr.details);
+  } else {
+    console.log("Success:", locs);
+  }
 }
+test();
 
-test();
-test();
 
 
