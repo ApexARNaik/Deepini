@@ -202,7 +202,10 @@ A project can have many `project_components` rows (multiple components, and the 
 
 - **Room selector**: top-level UI lets the owner switch between rooms, and create a new room (name only — photos added after).
 - **Side photos**: within a room, owner uploads 1 or more root photos ("sides" — e.g. 3 walls with storage; the 4th skipped since it's bare). Each is a `spatial_photos` row with `parent_hotspot_id = null`. Shown as tabs or thumbnail strip.
-- **Hotspot drawing (edit mode)**: owner enters an edit mode on a photo, traces a **freeform polygon** lasso around a storage feature (cupboard, shelf, bin) using pointer/touch, and labels it. After drawing, owner chooses:
+- **Hotspot drawing (edit mode)**: owner enters an edit mode on a photo, and can choose between two drawing tools:
+  - **Freehand**: continuous click-and-drag tracing around a storage feature (cupboard, shelf, bin).
+  - **Polygon**: click-each-vertex style (like a polygonal lasso) to create straight-edged shapes, closed by pressing Enter or clicking the start point.
+  After drawing and labeling, owner chooses:
   - **"This is a storage location"** → sets `is_leaf = true`. Components can now be assigned to it directly.
   - **"This opens into more storage"** → prompts photo upload for the next level (e.g. open the cupboard door, photograph the inside); creates a new `spatial_photos` row with `parent_hotspot_id` = this hotspot, sets `child_photo_id` accordingly.
 - **View mode**: hovering/tapping a hotspot highlights its traced outline; clicking a non-leaf hotspot navigates into its child photo (with a breadcrumb trail back up: `Room 1 > Left wall > Blue cupboard > Top drawer`); clicking a leaf hotspot opens a side panel/drawer showing:
@@ -278,6 +281,7 @@ A project can have many `project_components` rows (multiple components, and the 
 ## 7. UI Starting Point
 
 - Owner will generate a base template in **Stitch** and upload it directly into Antigravity.
+- The **login page (PasswordGate) UI** serves as the primary visual reference and base design language for the entire project.
 - Agent should treat the Stitch output as the **visual/component style baseline** (colors, spacing, base components) and build the actual pages/routes/logic above on top of it — not as a fixed final layout. Where the Stitch template doesn't cover a screen (e.g. the hotspot editor canvas), match its established visual language rather than introducing a new style.
 
 ---
@@ -309,7 +313,7 @@ No user accounts, but the app is protected by a single shared password, checked 
 
 ## 9. Open Assumptions the Agent Should Follow (owner has not specified further detail — proceed with these rather than asking)
 
-1. Hotspot polygon editor: **continuous click-and-drag freehand tracing** (press, drag around the shape's outline in one motion, release to auto-close the loop) — matches the owner's "trace by hand" preference, as opposed to a click-each-vertex polygon tool.
+1. Hotspot polygon editor: supports both **continuous click-and-drag freehand tracing** and a **click-each-vertex polygon mode** for precise, straight edges (added per user request).
 2. No hard cap on number of rooms, hotspots, depth, or components.
 3. `custom_fields` are per-component only (not a reusable template across components) — matches "add my own fields for any item" as stated.
 4. Tag autocomplete ranks by `usage_count`; component-name autocomplete ranks by prefix match then recency.

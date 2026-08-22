@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
-import { ChevronRight, Plus, Edit2 } from "lucide-react";
+import { ChevronRight, Plus, Edit2, X, Search, Archive } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 
 interface Props {
@@ -23,6 +23,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   // Breadcrumb/drill-down state
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
   const [breadcrumbChain, setBreadcrumbChain] = useState<{ id: string; label: string }[]>([]);
+
+  // Side Drawer State
+  const [selectedLeafHotspot, setSelectedLeafHotspot] = useState<SpatialHotspot | null>(null);
+  const [leafComponents, setLeafComponents] = useState<any[]>([]);
+  const [allInventory, setAllInventory] = useState<ComponentWithTotals[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    getInventory().then(setAllInventory).catch(console.error);
+  }, []);
   // We'll highlight the specific hotspot if locating
   const [highlightedHotspotId, setHighlightedHotspotId] = useState<string | null>(null);
 
@@ -150,9 +160,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     setActivePhotoId(childPhotoId);
   };
 
-  const handleHotspotClick = (hotspot: SpatialHotspot) => {
+  const handleHotspotClick = async (hotspot: SpatialHotspot) => {
     if (hotspot.is_leaf) {
-      alert(`Leaf location: ${hotspot.label}. Components would be shown in a side drawer here.`);
+      setSelectedLeafHotspot(hotspot);
+      try {
+        const comps = await getHotspotComponents(hotspot.id);
+        setLeafComponents(comps);
+      } catch (err) {
+        console.error(err);
+      }
     } else {
       if (hotspot.child_photo_id) {
         navigateToDrilldown(hotspot, hotspot.child_photo_id);
@@ -166,6 +182,20 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     const target = breadcrumbChain[index];
     setActivePhotoId(target.id);
     setBreadcrumbChain(prev => prev.slice(0, index + 1));
+  };
+
+  const handleUpdateLeafComponents = async (newComps: any[]) => {
+    if (!selectedLeafHotspot) return;
+    setLeafComponents(newComps);
+    try {
+      await updateHotspotComponents(
+        selectedLeafHotspot.id, 
+        newComps.map(c => ({ component_id: c.component_id, quantity: c.quantity }))
+      );
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update components");
+    }
   };
 
   const activePhoto = photos.find(p => p.id === activePhotoId);
@@ -294,6 +324,100 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             </div>
           )}
         </div>
+
+        {/* Side Drawer for Leaf Hotspot */}
+        {selectedLeafHotspot && (
+          <div className="w-80 shrink-0 bg-[#1a1816] border border-[#332f2a] rounded-lg flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-[#332f2a] shrink-0">
+              <h2 className="font-serif text-lg font-bold text-white tracking-widest uppercase">{selectedLeafHotspot.label}</h2>
+              <button onClick={() => setSelectedLeafHotspot(null)} className="text-brand-text-muted hover:text-white transition-colors">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="p-4 flex-1 overflow-y-auto">
+              <div className="text-[10px] tracking-widest text-brand-text-muted uppercase mb-3">Contents</div>
+              {leafComponents.length === 0 ? (
+                <div className="text-sm text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded">
+                  This location is empty.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {leafComponents.map(lc => (
+                    <div key={lc.component_id} className="flex items-center justify-between bg-black/40 border border-[#332f2a] p-3 rounded">
+                      <div className="flex flex-col flex-1 min-w-0 mr-3">
+                        <span className="text-sm text-white font-medium truncate">{lc.components?.name || "Unknown Component"}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {isEditing ? (
+                          <input 
+                            type="number" 
+                            min="1" 
+                            value={lc.quantity}
+                            onChange={(e) => {
+                              const qty = parseInt(e.target.value, 10);
+                              if (!isNaN(qty) && qty > 0) {
+                                handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: qty } : c));
+                              }
+                            }}
+                            className="w-16 bg-[#1a1816] border border-[#332f2a] text-white p-1 text-xs text-center focus:border-brand-accent focus:outline-none"
+                          />
+                        ) : (
+                          <span className="text-xs font-bold text-brand-accent px-2 py-1 bg-brand-accent/10 rounded">x{lc.quantity}</span>
+                        )}
+                        
+                        {isEditing && (
+                          <button 
+                            onClick={() => handleUpdateLeafComponents(leafComponents.filter(c => c.component_id !== lc.component_id))}
+                            className="text-brand-text-muted hover:text-red-400"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {isEditing && (
+                <div className="mt-6 border-t border-[#332f2a] pt-4">
+                  <div className="text-[10px] tracking-widest text-brand-text-muted uppercase mb-3">Add Components</div>
+                  <div className="relative mb-3">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-brand-text-muted" />
+                    <input 
+                      type="text" 
+                      placeholder="Search inventory..."
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      className="w-full bg-black/40 border border-[#332f2a] text-white text-sm pl-9 pr-3 py-2 focus:border-brand-accent focus:outline-none"
+                    />
+                  </div>
+                  
+                  <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+                    {allInventory
+                      .filter(c => !leafComponents.some(lc => lc.component_id === c.id))
+                      .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                      .slice(0, 50)
+                      .map(c => (
+                      <button 
+                        key={c.id}
+                        onClick={() => {
+                          handleUpdateLeafComponents([...leafComponents, { component_id: c.id, quantity: 1, components: c }]);
+                          setSearchQuery("");
+                        }}
+                        className="flex items-center justify-between p-2 text-left hover:bg-[#332f2a] rounded transition-colors group"
+                      >
+                        <span className="text-sm text-brand-text group-hover:text-white truncate pr-2">{c.name}</span>
+                        <Plus className="h-4 w-4 text-brand-text-muted group-hover:text-brand-accent shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

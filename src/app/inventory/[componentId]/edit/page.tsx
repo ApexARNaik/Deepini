@@ -7,13 +7,13 @@ import { useParams } from "next/navigation";
 
 export default function EditComponentPage() {
   const { componentId } = useParams();
-  const [data, setData] = useState<{ component: ComponentWithTotals, tags: Tag[] } | null>(null);
+  const [data, setData] = useState<{ component: ComponentWithTotals, tags: Tag[], locations: any[] } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (typeof componentId !== 'string') return;
     getComponentDetails(componentId).then(res => {
-      setData({ component: res.component, tags: res.component.tags });
+      setData({ component: res.component, tags: res.component.tags, locations: res.locations });
       setLoading(false);
     }).catch(console.error);
   }, [componentId]);
@@ -27,7 +27,7 @@ export default function EditComponentPage() {
         <h1 className="font-serif text-3xl font-bold text-white mb-1">Edit {data.component.name}</h1>
         <p className="text-sm text-brand-text-muted">Update details and custom fields.</p>
       </div>
-      <ComponentForm initialData={data.component} initialTags={data.tags} />
+      <ComponentForm initialData={data.component} initialTags={data.tags} initialLocations={data.locations} />
     </div>
   );
 }

@@ -33,7 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="w-64 flex-shrink-0 flex flex-col bg-[#1a1816] border-r border-[#332f2a]">
         {/* Logo Area */}
         <div className="h-20 flex items-center px-6 border-b border-[#332f2a] shrink-0">
-          <div className="flex items-center">
+          <Link href="/" className="flex items-center hover:opacity-80 transition-opacity">
             <div className="bg-brand-accent text-white font-serif font-bold h-8 w-8 flex items-center justify-center mr-3">
               D
             </div>
@@ -41,7 +41,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="font-serif font-bold text-white tracking-widest text-lg leading-none uppercase">Deepini</div>
               <div className="text-[9px] tracking-[0.15em] text-brand-gold mt-1 uppercase font-semibold">Personal Component Archive</div>
             </div>
-          </div>
+          </Link>
         </div>
 
         {/* Navigation */}

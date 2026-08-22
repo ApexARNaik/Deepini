@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { SpatialHotspot } from "@/lib/api";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { useNetworkState } from "@/hooks/useNetworkState";
@@ -23,6 +23,26 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
   const [showConfig, setShowConfig] = useState(false);
   const [hoveredHotspotId, setHoveredHotspotId] = useState<string | null>(null);
 
+  const [drawMode, setDrawMode] = useState<'freehand' | 'polygon'>('freehand');
+  const [polygonMousePos, setPolygonMousePos] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isEditing || !isOnline || drawMode !== 'polygon') return;
+      if (e.key === 'Enter' && currentPoints.length > 2) {
+        setIsDrawing(false);
+        setShowConfig(true);
+        setPolygonMousePos(null);
+      } else if (e.key === 'Escape') {
+        setIsDrawing(false);
+        setCurrentPoints([]);
+        setPolygonMousePos(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isEditing, isOnline, drawMode, currentPoints]);
+
   const getNormalizedPoint = (e: React.PointerEvent) => {
     if (!containerRef.current) return { x: 0, y: 0 };
     const rect = containerRef.current.getBoundingClientRect();
@@ -34,24 +54,50 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!isEditing || !isOnline) return;
     e.preventDefault();
-    containerRef.current?.setPointerCapture(e.pointerId);
-    setIsDrawing(true);
-    setCurrentPoints([getNormalizedPoint(e)]);
+    
+    if (drawMode === 'freehand') {
+      containerRef.current?.setPointerCapture(e.pointerId);
+      setIsDrawing(true);
+      setCurrentPoints([getNormalizedPoint(e)]);
+    } else {
+      const pt = getNormalizedPoint(e);
+      if (currentPoints.length === 0) {
+        setIsDrawing(true);
+        setCurrentPoints([pt]);
+      } else {
+        const start = currentPoints[0];
+        const dist = Math.hypot(pt.x - start.x, pt.y - start.y);
+        // snap to close if clicking near start
+        if (currentPoints.length > 2 && dist < 0.03) {
+          setIsDrawing(false);
+          setShowConfig(true);
+          setPolygonMousePos(null);
+        } else {
+          setCurrentPoints([...currentPoints, pt]);
+        }
+      }
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isEditing || !isDrawing || !isOnline) return;
+    if (!isEditing || !isOnline) return;
     e.preventDefault();
-    setCurrentPoints((prev) => [...prev, getNormalizedPoint(e)]);
+    if (drawMode === 'freehand') {
+      if (!isDrawing) return;
+      setCurrentPoints((prev) => [...prev, getNormalizedPoint(e)]);
+    } else {
+      if (!isDrawing) return;
+      setPolygonMousePos(getNormalizedPoint(e));
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    if (!isEditing || !isDrawing || !isOnline) return;
+    if (!isEditing || !isOnline || drawMode !== 'freehand') return;
     e.preventDefault();
+    if (!isDrawing) return;
     containerRef.current?.releasePointerCapture(e.pointerId);
     setIsDrawing(false);
     
-    // Only open config if we drew a reasonable shape (more than 3 points)
     if (currentPoints.length > 3) {
       setShowConfig(true);
     } else {
@@ -65,6 +111,22 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
 
   return (
     <div className="relative w-full h-full min-h-[600px] flex items-center justify-center bg-[#0f0e0c] border border-[#332f2a] overflow-hidden rounded-lg">
+      {isEditing && (
+        <div className="absolute top-4 left-4 z-10 flex gap-2 bg-[#1a1816] p-2 rounded border border-[#332f2a]">
+          <button 
+            onClick={() => { setDrawMode('freehand'); setCurrentPoints([]); setIsDrawing(false); }}
+            className={`px-3 py-1 text-xs font-medium rounded ${drawMode === 'freehand' ? 'bg-brand-accent text-white' : 'text-brand-text-muted hover:text-white'}`}
+          >
+            Freehand
+          </button>
+          <button 
+            onClick={() => { setDrawMode('polygon'); setCurrentPoints([]); setIsDrawing(false); }}
+            className={`px-3 py-1 text-xs font-medium rounded ${drawMode === 'polygon' ? 'bg-brand-accent text-white' : 'text-brand-text-muted hover:text-white'}`}
+          >
+            Polygon
+          </button>
+        </div>
+      )}
       <div 
         ref={containerRef}
         className={`relative max-w-full max-h-full inline-block touch-none select-none ${isEditing ? 'cursor-crosshair' : 'cursor-default'}`}
@@ -110,7 +172,7 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
           {/* Current Drawing */}
           {isDrawing && currentPoints.length > 0 && (
             <polyline 
-              points={toPolygonString(currentPoints)} 
+              points={toPolygonString(drawMode === 'polygon' && polygonMousePos ? [...currentPoints, polygonMousePos] : currentPoints)} 
               className="fill-transparent stroke-brand-accent stroke-[0.3] border-dashed"
             />
           )}

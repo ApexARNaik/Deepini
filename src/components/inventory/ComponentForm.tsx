@@ -2,16 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage } from "@/lib/api";
+import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, getAllLeafHotspots } from "@/lib/api";
 import { X, Plus, UploadCloud } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 
 interface Props {
   initialData?: Component;
   initialTags?: Tag[];
+  initialLocations?: any[];
 }
 
-export function ComponentForm({ initialData, initialTags }: Props) {
+export function ComponentForm({ initialData, initialTags, initialLocations }: Props) {
   const router = useRouter();
   const { isOnline } = useNetworkState();
   
@@ -29,6 +30,18 @@ export function ComponentForm({ initialData, initialTags }: Props) {
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [tagInput, setTagInput] = useState("");
   
+  // Locations
+  const [locations, setLocations] = useState<{ hotspot_id: string, quantity: number, label?: string }[]>(
+    initialLocations?.map(l => ({ 
+      hotspot_id: l.hotspot_id, 
+      quantity: l.quantity, 
+      label: l.spatial_hotspots?.label || "Unknown Location" 
+    })) || []
+  );
+  const [availableHotspots, setAvailableHotspots] = useState<any[]>([]);
+  const [selectedHotspot, setSelectedHotspot] = useState("");
+  const [locationQuantity, setLocationQuantity] = useState("1");
+  
   // Custom Fields
   const [customFields, setCustomFields] = useState(initialData?.custom_fields || {});
   const [newFieldName, setNewFieldName] = useState("");
@@ -38,6 +51,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
 
   useEffect(() => {
     getTags().then(setAvailableTags).catch(console.error);
+    getAllLeafHotspots().then(setAvailableHotspots).catch(console.error);
   }, []);
 
   const handleAddTag = async (e?: React.FormEvent) => {
@@ -56,6 +70,28 @@ export function ComponentForm({ initialData, initialTags }: Props) {
 
   const handleRemoveTag = (id: string) => {
     setTags(tags.filter(t => t.id !== id));
+  };
+
+  const handleAddLocation = () => {
+    if (!selectedHotspot) return;
+    const qty = parseInt(locationQuantity, 10);
+    if (isNaN(qty) || qty <= 0) return;
+    
+    const hs = availableHotspots.find(h => h.id === selectedHotspot);
+    if (!hs) return;
+
+    const existing = locations.find(l => l.hotspot_id === selectedHotspot);
+    if (existing) {
+      setLocations(locations.map(l => l.hotspot_id === selectedHotspot ? { ...l, quantity: l.quantity + qty } : l));
+    } else {
+      setLocations([...locations, { hotspot_id: selectedHotspot, quantity: qty, label: hs.fullLabel }]);
+    }
+    setSelectedHotspot("");
+    setLocationQuantity("1");
+  };
+
+  const handleRemoveLocation = (id: string) => {
+    setLocations(locations.filter(l => l.hotspot_id !== id));
   };
 
   const handleAddCustomField = () => {
@@ -121,7 +157,7 @@ export function ComponentForm({ initialData, initialTags }: Props) {
         payload.id = initialData.id;
       }
 
-      await upsertComponent(payload, tags.map(t => t.id));
+      await upsertComponent(payload, tags.map(t => t.id), locations);
       success = true;
     } catch (err: any) {
       console.error("Full error:", err);
@@ -239,6 +275,56 @@ export function ComponentForm({ initialData, initialTags }: Props) {
             {availableTags.map(t => <option key={t.id} value={t.name} />)}
           </datalist>
           <button type="button" onClick={handleAddTag} className="px-3 bg-[#1a1816] border border-[#332f2a] text-brand-text hover:bg-[#222]">
+            Add
+          </button>
+        </div>
+      </div>
+
+      <hr className="border-[#332f2a]" />
+
+      {/* Storage Locations */}
+      <div>
+        <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
+          Storage Locations
+        </label>
+        {locations.length > 0 && (
+          <div className="flex flex-col gap-2 mb-3">
+            {locations.map(l => (
+              <div key={l.hotspot_id} className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] rounded">
+                <div className="text-sm text-white">{l.label}</div>
+                <div className="flex items-center gap-4">
+                  <div className="text-sm text-brand-text-muted">Qty: <span className="text-brand-accent font-bold">{l.quantity}</span></div>
+                  <button type="button" onClick={() => handleRemoveLocation(l.hotspot_id)} className="text-brand-text-muted hover:text-red-400 transition-colors">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2 items-end">
+          <div className="flex-1">
+            <select
+              value={selectedHotspot}
+              onChange={e => setSelectedHotspot(e.target.value)}
+              className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+            >
+              <option value="">Select a location on the map...</option>
+              {availableHotspots.map(hs => (
+                <option key={hs.id} value={hs.id}>{hs.fullLabel}</option>
+              ))}
+            </select>
+          </div>
+          <div className="w-24">
+            <input
+              type="number"
+              min="1"
+              value={locationQuantity}
+              onChange={e => setLocationQuantity(e.target.value)}
+              className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+            />
+          </div>
+          <button type="button" onClick={handleAddLocation} disabled={!selectedHotspot} className="px-4 py-2 bg-brand-accent text-white font-medium hover:bg-brand-accent-hover disabled:opacity-50">
             Add
           </button>
         </div>

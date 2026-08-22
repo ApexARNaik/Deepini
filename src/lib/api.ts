@@ -239,7 +239,8 @@ export async function getComponentDetails(id: string): Promise<{ component: Comp
 
 export async function upsertComponent(
   componentData: Partial<Component>,
-  tagIds: string[]
+  tagIds: string[],
+  locations: { hotspot_id: string, quantity: number }[] = []
 ): Promise<Component> {
   let compId = componentData.id;
   if (!compId) {
@@ -265,6 +266,17 @@ export async function upsertComponent(
     if (tagErr) {
       console.error("Tag Insert Error in upsertComponent:", tagErr);
       throw new Error(tagErr.message || "Failed to insert tags");
+    }
+  }
+
+  // update locations
+  await supabase.from("component_locations").delete().eq("component_id", compId);
+  if (locations.length > 0) {
+    const locInserts = locations.map(l => ({ component_id: compId, hotspot_id: l.hotspot_id, quantity: l.quantity }));
+    const { error: locErr } = await supabase.from("component_locations").insert(locInserts);
+    if (locErr) {
+      console.error("Location Insert Error in upsertComponent:", locErr);
+      throw new Error(locErr.message || "Failed to insert component locations");
     }
   }
 
@@ -295,6 +307,34 @@ export async function getFullHotspotPath(hotspotId: string) {
     currentHotspotId = photo.parent_hotspot_id;
   }
   return chain;
+}
+
+export async function getAllLeafHotspots() {
+  const { data, error } = await supabase.from('spatial_hotspots').select('*').eq('is_leaf', true);
+  if (error) throw new Error(error.message || "Failed to fetch leaf hotspots");
+  
+  const hotspotsWithPaths = await Promise.all(data.map(async (hs) => {
+    const path = await getFullHotspotPath(hs.id);
+    const label = path.map(p => p.label).join(' → ');
+    return { ...hs, fullLabel: label };
+  }));
+  
+  return hotspotsWithPaths.sort((a, b) => a.fullLabel.localeCompare(b.fullLabel));
+}
+
+export async function getHotspotComponents(hotspotId: string) {
+  const { data, error } = await supabase.from('component_locations').select('*, components(*)').eq('hotspot_id', hotspotId);
+  if (error) throw new Error(error.message || "Failed to fetch components for hotspot");
+  return data;
+}
+
+export async function updateHotspotComponents(hotspotId: string, updates: { component_id: string, quantity: number }[]) {
+  await supabase.from('component_locations').delete().eq('hotspot_id', hotspotId);
+  if (updates.length > 0) {
+    const inserts = updates.map(u => ({ hotspot_id: hotspotId, component_id: u.component_id, quantity: u.quantity }));
+    const { error } = await supabase.from('component_locations').insert(inserts);
+    if (error) throw new Error(error.message || "Failed to update hotspot components");
+  }
 }
 
 
