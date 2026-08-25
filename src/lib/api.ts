@@ -83,6 +83,17 @@ export async function createRoom(name: string): Promise<Room> {
   return data as Room;
 }
 
+export async function getRoom(id: string): Promise<Room> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const room = await db.rooms.get(id);
+    if (!room) throw new Error("Room not found");
+    return room;
+  }
+  const { data, error } = await supabase.from("rooms").select("*").eq("id", id).single();
+  if (error) throw error;
+  return data as Room;
+}
+
 export async function getPhotosForRoom(roomId: string): Promise<SpatialPhoto[]> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
     return (await db.spatial_photos.where('room_id').equals(roomId).toArray());
@@ -302,7 +313,7 @@ export async function getFullHotspotPath(hotspotId: string) {
     
     const { data: photo }: any = await supabase.from("spatial_photos").select("*").eq("id", hs.photo_id).single();
     if (!photo) break;
-    chain.unshift({ type: 'photo', id: photo.id, label: photo.label || 'Perspective' });
+    chain.unshift({ type: 'photo', id: photo.id, label: photo.label || 'View' });
     
     currentHotspotId = photo.parent_hotspot_id;
   }
@@ -356,7 +367,7 @@ export async function uploadImage(file: File, pathPrefix: string): Promise<strin
   return data.publicUrl;
 }
 
-export async function uploadPhotoAndCreate(file: File, roomId: string, parentHotspotId: string | null = null, label: string = 'Perspective') {
+export async function uploadPhotoAndCreate(file: File, roomId: string, parentHotspotId: string | null = null, label: string = 'View') {
   const publicUrl = await uploadImage(file, 'media');
   
   // Create DB record
@@ -380,6 +391,11 @@ export async function uploadPhotoAndCreate(file: File, roomId: string, parentHot
   }
 
   return photoData as SpatialPhoto
+}
+
+export async function updatePhotoLabel(photoId: string, label: string) {
+  const { error } = await supabase.from('spatial_photos').update({ label }).eq('id', photoId);
+  if (error) throw error;
 }
 
 export async function createHotspot(
@@ -542,7 +558,7 @@ export async function searchLeafHotspots(query: string = ""): Promise<{ id: stri
     while (currentPhotoId) {
       const p = photoMap.get(currentPhotoId);
       if (!p) break;
-      path.unshift(p.label || 'Perspective');
+      path.unshift(p.label || 'View');
       
       if (p.parent_hotspot_id) {
         const hs = hotspotMap.get(p.parent_hotspot_id);

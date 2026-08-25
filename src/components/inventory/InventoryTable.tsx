@@ -4,12 +4,15 @@ import { ComponentWithTotals } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 interface Props {
   components: ComponentWithTotals[];
 }
 
 export function InventoryTable({ components }: Props) {
+  const router = useRouter();
+
   if (components.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center p-12 text-brand-text-muted border border-[#332f2a] rounded-lg">
@@ -37,7 +40,11 @@ export function InventoryTable({ components }: Props) {
             const isLowStock = c.low_stock_threshold !== null && c.low_stock_threshold !== undefined && c.totals.total_owned_qty <= c.low_stock_threshold;
             
             return (
-              <tr key={c.id} className="hover:bg-[#1a1816] transition-colors group">
+              <tr 
+                key={c.id} 
+                onClick={() => router.push(`/inventory/${c.id}`)}
+                className="hover:bg-[#1a1816] transition-colors group cursor-pointer"
+              >
                 <td className="px-6 py-4">
                   {c.photo_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -78,10 +85,10 @@ export function InventoryTable({ components }: Props) {
                   <div className={`inline-block h-2 w-2 rounded-full ${isLowStock ? 'bg-brand-accent shadow-[0_0_8px_rgba(239,68,68,0.8)]' : 'bg-green-500/80 shadow-[0_0_8px_rgba(34,197,94,0.4)]'}`} />
                 </td>
                 <td className="px-6 py-4 text-right">
-                  <Link href={`/inventory/${c.id}`} className="inline-flex items-center text-brand-text-muted hover:text-white transition-colors opacity-0 group-hover:opacity-100">
+                  <div className="inline-flex items-center text-brand-text-muted group-hover:text-white transition-colors opacity-0 group-hover:opacity-100">
                     <span className="text-[10px] uppercase tracking-widest mr-1">View</span>
                     <ChevronRight className="h-4 w-4" />
-                  </Link>
+                  </div>
                 </td>
               </tr>
             );

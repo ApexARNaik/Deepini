@@ -49,7 +49,7 @@ export default function Dashboard() {
   }, []);
 
   return (
-    <div className="max-w-5xl p-6">
+    <div className="max-w-5xl p-4 md:p-6">
         <div className="mb-12">
           <h1 className="font-serif text-[28px] font-bold tracking-widest text-white uppercase">
             Dashboard

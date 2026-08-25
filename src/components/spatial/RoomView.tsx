@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { ChevronRight, Plus, Edit2, X, Search, Archive } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
+import Link from "next/link";
 
 interface Props {
   roomId: string;
@@ -23,6 +24,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   // Breadcrumb/drill-down state
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
   const [breadcrumbChain, setBreadcrumbChain] = useState<{ id: string; label: string }[]>([]);
+  const [roomName, setRoomName] = useState("Workshop");
+  const [isEditingPhotoLabel, setIsEditingPhotoLabel] = useState(false);
+  const [editingLabel, setEditingLabel] = useState("");
 
   // Side Drawer State
   const [selectedLeafHotspot, setSelectedLeafHotspot] = useState<SpatialHotspot | null>(null);
@@ -51,6 +55,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const loadRoomData = async () => {
     setLoading(true);
     try {
+      const room = await getRoom(roomId);
+      setRoomName(room.name);
+
       const allPhotos = await getPhotosForRoom(roomId);
       setPhotos(allPhotos);
       
@@ -97,11 +104,11 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const handleUploadRootPhoto = async (file: File) => {
     setUploading(true);
     try {
-      const newPhoto = await uploadPhotoAndCreate(file, roomId, null, `Perspective ${photos.filter(p => !p.parent_hotspot_id).length + 1}`);
+      const newPhoto = await uploadPhotoAndCreate(file, roomId, null, `View ${photos.filter(p => !p.parent_hotspot_id).length + 1}`);
       setPhotos(prev => [...prev, newPhoto]);
       if (!activePhotoId) {
         setActivePhotoId(newPhoto.id);
-        setBreadcrumbChain([{ id: newPhoto.id, label: newPhoto.label || 'Perspective' }]);
+        setBreadcrumbChain([{ id: newPhoto.id, label: newPhoto.label || 'View' }]);
       }
     } catch (err) {
       console.error(err);
@@ -201,6 +208,36 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const activePhoto = photos.find(p => p.id === activePhotoId);
   const rootPhotos = photos.filter(p => p.parent_hotspot_id === null);
 
+  const handleSavePhotoLabel = async () => {
+    if (!activePhotoId || !editingLabel.trim()) {
+      setIsEditingPhotoLabel(false);
+      return;
+    }
+    
+    const newLabel = editingLabel.trim();
+    try {
+      await updatePhotoLabel(activePhotoId, newLabel);
+      
+      // Update local state
+      setPhotos(prev => prev.map(p => p.id === activePhotoId ? { ...p, label: newLabel } : p));
+      
+      // Update breadcrumb
+      setBreadcrumbChain(prev => {
+        const newChain = [...prev];
+        if (newChain.length > 0) {
+          newChain[newChain.length - 1].label = newLabel;
+        }
+        return newChain;
+      });
+      
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update perspective name");
+    } finally {
+      setIsEditingPhotoLabel(false);
+    }
+  };
+
   if (loading) return <div className="text-brand-text-muted">Loading room map...</div>;
 
   return (
@@ -209,7 +246,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       <div className="mb-6 flex justify-between items-start">
         <div>
           <div className="flex items-center text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
-            <span>WORKSHOP</span>
+            <Link href="/rooms" className="hover:text-brand-accent transition-colors" title="Back to Spatial Map">
+              {roomName.length > 10 ? roomName.slice(0, 10) + '...' : roomName}
+            </Link>
             {breadcrumbChain.map((bc, idx) => (
               <span key={bc.id} className="flex items-center">
                 <ChevronRight className="h-3 w-3 mx-1" />
@@ -222,8 +261,30 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               </span>
             ))}
           </div>
-          <h1 className="font-serif text-3xl font-bold text-white mb-1">
-            {breadcrumbChain[breadcrumbChain.length - 1]?.label || 'Storage Array'}
+          <h1 className="font-serif text-3xl font-bold text-white mb-1 group flex items-center h-10">
+            {isEditingPhotoLabel ? (
+              <input
+                 type="text"
+                 value={editingLabel}
+                 onChange={e => setEditingLabel(e.target.value)}
+                 onBlur={handleSavePhotoLabel}
+                 onKeyDown={e => e.key === 'Enter' && handleSavePhotoLabel()}
+                 className="bg-transparent border-b border-brand-accent focus:outline-none min-w-[200px]"
+                 autoFocus
+              />
+            ) : (
+              <>
+                {breadcrumbChain[breadcrumbChain.length - 1]?.label || 'Storage Array'}
+                {activePhoto && (
+                  <button onClick={() => {
+                    setEditingLabel(breadcrumbChain[breadcrumbChain.length - 1]?.label || 'View');
+                    setIsEditingPhotoLabel(true);
+                  }} className="ml-3 opacity-0 group-hover:opacity-100 text-brand-text-muted hover:text-white transition-opacity" title="Rename view">
+                    <Edit2 className="h-4 w-4" />
+                  </button>
+                )}
+              </>
+            )}
           </h1>
           <p className="text-sm text-brand-text-muted">
             Interactive schematic of the primary electronics workbench and cabinetry.
@@ -261,22 +322,22 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         </div>
       )}
 
-      <div className="flex flex-1 gap-8 min-h-0">
-        {/* Left Sidebar: Root Perspectives */}
-        <div className="w-48 shrink-0 flex flex-col gap-4 overflow-y-auto">
+      <div className="flex flex-col lg:flex-row flex-1 gap-4 lg:gap-8 min-h-0 relative">
+        {/* Views Thumbnails */}
+        <div className="w-full lg:w-64 shrink-0 flex flex-row lg:flex-col gap-4 overflow-x-auto lg:overflow-y-auto pb-2 lg:pr-2 lg:pb-4 hide-scrollbar">
           <div className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">
-            Perspectives
+            Views
           </div>
           {rootPhotos.map(p => (
             <button
               key={p.id}
               onClick={() => {
                 setActivePhotoId(p.id);
-                setBreadcrumbChain([{ id: p.id, label: p.label || 'Perspective' }]);
+                setBreadcrumbChain([{ id: p.id, label: p.label || 'View' }]);
                 setPendingChildUpload(null);
                 setIsEditing(false);
               }}
-              className={`relative h-24 rounded overflow-hidden border-2 transition-all ${
+              className={`relative h-24 w-36 lg:h-32 lg:w-full shrink-0 rounded overflow-hidden border-2 transition-all ${
                 breadcrumbChain[0]?.id === p.id 
                   ? 'border-brand-accent opacity-100' 
                   : 'border-transparent opacity-60 hover:opacity-100'
@@ -284,19 +345,27 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={p.image_url} alt={p.label || ''} className="w-full h-full object-cover" />
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 p-2 text-left">
-                <span className="text-[10px] font-bold text-white tracking-wider">{p.label}</span>
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 p-2 text-left flex justify-between items-end">
+                <span className="text-[10px] font-bold text-white tracking-wider truncate">{p.label}</span>
               </div>
             </button>
           ))}
           
           {isOnline && (
-            <div className="mt-2">
-              <ImageUploadDropzone 
-                onUpload={handleUploadRootPhoto} 
-                isUploading={uploading}
-                label="Add Perspective"
-              />
+            <div className="mt-2 lg:mt-2 shrink-0 h-24 w-36 lg:h-auto lg:w-full flex items-center justify-center">
+              <label className="flex flex-col lg:flex-row items-center justify-center gap-2 w-full h-full lg:p-3 border border-dashed border-[#332f2a] rounded text-brand-text-muted hover:text-white hover:border-brand-accent cursor-pointer transition-colors bg-black/20 hover:bg-black/40">
+                {uploading ? <span className="text-[10px] lg:text-xs">Uploading...</span> : (
+                  <>
+                    <Plus className="h-4 w-4" />
+                    <span className="text-[10px] lg:text-xs uppercase tracking-widest font-bold text-center">Add View</span>
+                  </>
+                )}
+                <input type="file" className="hidden" accept="image/*" onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleUploadRootPhoto(e.target.files[0]);
+                  }
+                }} disabled={uploading} />
+              </label>
             </div>
           )}
         </div>
@@ -315,7 +384,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             />
           ) : (
             <div className="flex items-center justify-center h-full text-brand-text-muted flex-col">
-              <p className="mb-4 text-center">No perspectives uploaded for this room yet.</p>
+              <p className="mb-4 text-center">No views uploaded for this room yet.</p>
               {!uploading && (
                 <div className="w-72">
                   <ImageUploadDropzone onUpload={handleUploadRootPhoto} isUploading={uploading} label="Upload First Photo" />
@@ -327,7 +396,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
 
         {/* Side Drawer for Leaf Hotspot */}
         {selectedLeafHotspot && (
-          <div className="w-80 shrink-0 bg-[#1a1816] border border-[#332f2a] rounded-lg flex flex-col overflow-hidden">
+          <div className="fixed inset-x-0 bottom-16 top-16 lg:static lg:w-80 shrink-0 bg-[#1a1816] border-t lg:border border-[#332f2a] lg:rounded-lg flex flex-col overflow-hidden z-40 lg:z-auto">
             <div className="flex items-center justify-between p-4 border-b border-[#332f2a] shrink-0">
               <h2 className="font-serif text-lg font-bold text-white tracking-widest uppercase">{selectedLeafHotspot.label}</h2>
               <button onClick={() => setSelectedLeafHotspot(null)} className="text-brand-text-muted hover:text-white transition-colors">
