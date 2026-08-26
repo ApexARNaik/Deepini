@@ -30,9 +30,9 @@ export async function syncToLocalDB() {
 
     // Use transaction for bulk put
     await db.transaction('rw', 
-      db.rooms, db.spatial_photos, db.spatial_hotspots, 
+      [db.rooms, db.spatial_photos, db.spatial_hotspots, 
       db.components, db.tags, db.component_tags, db.component_locations,
-      db.projects, db.project_components, db.component_totals,
+      db.projects, db.project_components, db.component_totals],
       async () => {
         if (rooms.data) await db.rooms.bulkPut(rooms.data);
         if (photos.data) await db.spatial_photos.bulkPut(photos.data);

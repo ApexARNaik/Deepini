@@ -145,12 +145,12 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     try {
       const payload: Partial<Component> = {
         name: name.trim(),
-        price: price ? parseFloat(price) : null,
-        purchase_source: purchaseSource || null,
-        datasheet_link: datasheetLink || null,
-        low_stock_threshold: lowStock ? parseInt(lowStock, 10) : null,
-        notes: notes || null,
-        photo_url: photoUrl || null,
+        price: price ? parseFloat(price) : undefined,
+        purchase_source: purchaseSource || undefined,
+        datasheet_link: datasheetLink || undefined,
+        low_stock_threshold: lowStock ? parseInt(lowStock, 10) : undefined,
+        notes: notes || undefined,
+        photo_url: photoUrl || undefined,
         custom_fields: customFields
       };
       if (initialData?.id) {

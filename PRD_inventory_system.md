@@ -57,7 +57,7 @@ This system solves both with two linked views of the same data:
 | Hotspot drawing | **HTML5 Canvas or SVG overlay with freeform polygon lasso tool** | Freeform tracing was explicitly requested over simple rectangles. |
 | Search | **Postgres full-text search (`tsvector`) or simple `ilike` for v1 scale** | No need for external search service at this data volume. |
 
-**Repo/clone model:** No env-baked secrets in code. A single `.env.local` holds the Supabase URL + anon key. Cloning to a new domain = new Supabase project + new Vercel deploy + new `.env.local`. Document this in the README.
+**Repo/clone model:** No env-baked secrets in code. A single `.env.local` holds the Supabase URL + publishable key. Cloning to a new domain = new Supabase project + new Vercel deploy + new `.env.local`. Document this in the README.
 
 ---
 

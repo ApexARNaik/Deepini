@@ -1,6 +1,6 @@
 import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
-import { Serwist } from "serwist";
+import { Serwist, StaleWhileRevalidate, ExpirationPlugin } from "serwist";
 
 // This declares the value of `injectionPoint` to TypeScript.
 // `injectionPoint` is the string that specifies where the precache manifest
@@ -11,7 +11,7 @@ declare global {
   }
 }
 
-declare const self: ServiceWorkerGlobalScope;
+declare const self: WorkerGlobalScope;
 
 const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
@@ -22,14 +22,15 @@ const serwist = new Serwist({
     ...defaultCache,
     {
       matcher: ({ url }) => url.hostname.includes("supabase.co") && url.pathname.includes("/storage/v1/object/public/"),
-      handler: "StaleWhileRevalidate",
-      options: {
+      handler: new StaleWhileRevalidate({
         cacheName: "supabase-images",
-        expiration: {
-          maxEntries: 100,
-          maxAgeSeconds: 30 * 24 * 60 * 60, // 30 Days
-        },
-      },
+        plugins: [
+          new ExpirationPlugin({
+            maxEntries: 100,
+            maxAgeSeconds: 30 * 24 * 60 * 60, // 30 Days
+          }),
+        ],
+      }),
     },
   ],
 });

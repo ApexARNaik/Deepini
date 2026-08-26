@@ -11,7 +11,7 @@ export class DeepiniDB extends Dexie {
   component_locations!: Table<ComponentLocation, string>;
   projects!: Table<Project, string>;
   project_components!: Table<ProjectComponent, string>;
-  component_totals!: Table<{ component_id: string, total_owned_qty: number, total_checked_out: number, in_storage_qty: number }, string>;
+  component_totals!: Table<{ component_id: string, total_owned_qty: number, checked_out_qty: number, in_storage_qty: number }, string>;
 
   constructor() {
     super('DeepiniDB');

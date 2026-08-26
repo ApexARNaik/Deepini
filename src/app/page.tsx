@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Layers, Cuboid, TriangleAlert } from "lucide-react";
-import { getInventory, ComponentWithTotals } from "@/lib/api";
+import { Layers, Cuboid, TriangleAlert, Compass } from "lucide-react";
+import { getInventory, ComponentWithTotals, getProjects } from "@/lib/api";
 import Link from "next/link";
 
 export default function Dashboard() {
@@ -10,13 +10,14 @@ export default function Dashboard() {
     totalComponents: 0,
     totalUnits: 0,
     lowStockCount: 0,
+    activeProjects: 0,
     loading: true
   });
 
   useEffect(() => {
     async function loadStats() {
       try {
-        const inventory = await getInventory();
+        const [inventory, projects] = await Promise.all([getInventory(), getProjects()]);
         
         let totalComponents = 0;
         let totalUnits = 0;
@@ -33,10 +34,13 @@ export default function Dashboard() {
           }
         }
 
+        const activeProjects = projects.filter(p => p.status === 'active').length;
+
         setStats({
           totalComponents,
           totalUnits,
           lowStockCount,
+          activeProjects,
           loading: false
         });
       } catch (err) {
@@ -59,14 +63,14 @@ export default function Dashboard() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {/* Total Components Card */}
-          <div className="bg-[#1f1f1f] border border-[#2a2a2a] p-6 rounded relative">
+          <Link href="/inventory" className="block bg-[#1f1f1f] border border-[#2a2a2a] p-6 rounded relative hover:border-brand-accent transition-colors group">
             <div className="flex justify-between items-start mb-6">
-              <h3 className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium leading-loose max-w-[60%]">
+              <h3 className="text-[10px] tracking-widest text-brand-text-muted group-hover:text-white transition-colors uppercase font-medium leading-loose max-w-[60%]">
                 Total<br/>Components
               </h3>
-              <div className="text-brand-text-muted">
+              <div className="text-brand-text-muted group-hover:text-brand-accent transition-colors">
                 <Cuboid className="h-5 w-5" />
               </div>
             </div>
@@ -80,22 +84,37 @@ export default function Dashboard() {
               </svg>
               +0 this week
             </div>
-          </div>
+          </Link>
 
           {/* Total Units Card */}
-          <div className="bg-[#1f1f1f] border border-[#2a2a2a] p-6 rounded relative">
+          <Link href="/inventory" className="block bg-[#1f1f1f] border border-[#2a2a2a] p-6 rounded relative hover:border-brand-accent transition-colors group">
             <div className="flex justify-between items-start mb-6">
-              <h3 className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium leading-loose max-w-[60%]">
+              <h3 className="text-[10px] tracking-widest text-brand-text-muted group-hover:text-white transition-colors uppercase font-medium leading-loose max-w-[60%]">
                 Total<br/>Units
               </h3>
-              <div className="text-brand-text-muted">
+              <div className="text-brand-text-muted group-hover:text-brand-accent transition-colors">
                 <Layers className="h-5 w-5" />
               </div>
             </div>
             <div className="text-4xl font-serif font-bold text-brand-gold">
               {stats.loading ? "-" : stats.totalUnits.toLocaleString()}
             </div>
-          </div>
+          </Link>
+
+          {/* Active Projects Card */}
+          <Link href="/projects" className="block bg-[#1f1f1f] border border-[#2a2a2a] p-6 rounded relative hover:border-brand-accent transition-colors group">
+            <div className="flex justify-between items-start mb-6">
+              <h3 className="text-[10px] tracking-widest text-brand-text-muted group-hover:text-white transition-colors uppercase font-medium leading-loose max-w-[60%]">
+                Active<br/>Projects
+              </h3>
+              <div className="text-brand-text-muted group-hover:text-brand-accent transition-colors">
+                <Compass className="h-5 w-5" />
+              </div>
+            </div>
+            <div className="text-4xl font-serif font-bold text-brand-gold">
+              {stats.loading ? "-" : stats.activeProjects}
+            </div>
+          </Link>
 
           {/* Low Stock Alerts Card */}
           <div className="bg-[#2a1616] border border-[#3a2020] p-6 rounded relative flex flex-col justify-between">
