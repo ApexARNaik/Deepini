@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getRooms, createRoom, Room } from "@/lib/api";
-import { Plus } from "lucide-react";
+import { getRooms, createRoom, Room, deleteRoom } from "@/lib/api";
+import { Plus, Trash2 } from "lucide-react";
+import { useNetworkState } from "@/hooks/useNetworkState";
 
 export function RoomList() {
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -11,6 +12,7 @@ export function RoomList() {
   const [isCreating, setIsCreating] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const router = useRouter();
+  const { isOnline } = useNetworkState();
 
   useEffect(() => {
     loadRooms();
@@ -46,20 +48,45 @@ export function RoomList() {
     }
   };
 
+  const handleDeleteRoom = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to delete the room "${name}"? This will recursively delete all views, hotspots, and remove components stored within it.`)) return;
+    
+    try {
+      await deleteRoom(id);
+      setRooms(rooms.filter(r => r.id !== id));
+    } catch (err) {
+      console.error("Failed to delete room", err);
+      alert("Failed to delete room");
+    }
+  };
+
   if (isLoading) return <div className="text-brand-text-muted">Loading rooms...</div>;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {rooms.map((room) => (
-        <button
-          key={room.id}
-          onClick={() => router.push(`/rooms/${room.id}`)}
-          className="bg-[#1f1f1f] border border-[#2a2a2a] p-6 rounded text-left hover:border-brand-accent transition-colors flex items-center justify-between group"
-        >
-          <span className="font-serif text-xl font-bold text-white group-hover:text-brand-accent transition-colors">
-            {room.name}
-          </span>
-        </button>
+        <div key={room.id} className="relative group">
+          <button
+            onClick={() => router.push(`/rooms/${room.id}`)}
+            className="w-full bg-[#1f1f1f] border border-[#2a2a2a] p-6 rounded text-left hover:border-brand-accent transition-colors flex items-center justify-between"
+          >
+            <span className="font-serif text-xl font-bold text-white group-hover:text-brand-accent transition-colors">
+              {room.name}
+            </span>
+          </button>
+          {isOnline && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteRoom(room.id, room.name);
+              }}
+              className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-brand-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all bg-[#1f1f1f]"
+              title="Delete Room"
+            >
+              <Trash2 className="h-5 w-5" />
+            </button>
+          )}
+        </div>
       ))}
 
       {/* Create Room Form */}

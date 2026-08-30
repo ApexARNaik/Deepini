@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
-import { ChevronRight, Plus, Edit2, X, Search, Archive } from "lucide-react";
+import { ChevronRight, Plus, Edit2, X, Search, Archive, Trash2 } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 
@@ -238,6 +238,21 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
   };
 
+  const handleDeletePhoto = async () => {
+    if (!activePhotoId) return;
+    if (!confirm("Are you sure you want to delete this view? This will recursively delete all child views, hotspots, and remove components stored within them.")) return;
+    try {
+      await deleteSpatialPhoto(activePhotoId);
+      // Reset active photo to root or clear it, loadRoomData does this well.
+      setActivePhotoId(null);
+      setBreadcrumbChain([]);
+      loadRoomData();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to delete view");
+    }
+  };
+
   if (loading) return <div className="text-brand-text-muted">Loading room map...</div>;
 
   return (
@@ -293,6 +308,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         
         {activePhoto && !pendingChildUpload && (
           <div className="flex gap-3">
+            {isEditing && isOnline && (
+              <button
+                onClick={handleDeletePhoto}
+                className="flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors"
+                title="Delete View"
+              >
+                <Trash2 className="h-3 w-3 mr-2" /> Delete View
+              </button>
+            )}
             <button 
               onClick={() => setIsEditing(!isEditing)}
               className={`flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-colors ${
