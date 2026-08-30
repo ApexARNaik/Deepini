@@ -94,6 +94,17 @@ export async function getRoom(id: string): Promise<Room> {
   return data as Room;
 }
 
+export async function updateRoom(id: string, name: string): Promise<Room> {
+  const { data, error } = await supabase
+    .from("rooms")
+    .update({ name, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Room;
+}
+
 export async function getPhotosForRoom(roomId: string): Promise<SpatialPhoto[]> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
     return (await db.spatial_photos.where('room_id').equals(roomId).toArray());
