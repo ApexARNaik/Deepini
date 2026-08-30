@@ -153,6 +153,8 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         photo_url: photoUrl || undefined,
         custom_fields: customFields
       };
+  //testing
+    
       if (initialData?.id) {
         payload.id = initialData.id;
       }

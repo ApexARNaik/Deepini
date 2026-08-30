@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, updateRoom, deleteRoom } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
-import { ChevronRight, Plus, Edit2, X, Search, Archive } from "lucide-react";
+import { ChevronRight, Plus, Edit2, X, Search, Archive, Trash2 } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 interface Props {
   roomId: string;
@@ -20,6 +21,11 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const router = useRouter();
+  
+  // Room Edit State
+  const [isEditingRoomName, setIsEditingRoomName] = useState(false);
+  const [editingRoomName, setEditingRoomName] = useState("");
   
   // Breadcrumb/drill-down state
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
@@ -238,6 +244,49 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
   };
 
+  const handleSaveRoomName = async () => {
+    if (!editingRoomName.trim()) {
+      setIsEditingRoomName(false);
+      return;
+    }
+    const newName = editingRoomName.trim();
+    try {
+      await updateRoom(roomId, newName);
+      setRoomName(newName);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update room name");
+    } finally {
+      setIsEditingRoomName(false);
+    }
+  };
+
+  const handleDeleteRoomAction = async () => {
+    if (!confirm(`Are you sure you want to delete the room "${roomName}"? This will recursively delete all views, hotspots, and remove components stored within it.`)) return;
+    try {
+      await deleteRoom(roomId);
+      router.push('/rooms');
+    } catch (err) {
+      console.error("Failed to delete room", err);
+      alert("Failed to delete room");
+    }
+  };
+
+  const handleDeletePhoto = async () => {
+    if (!activePhotoId) return;
+    if (!confirm("Are you sure you want to delete this view? This will recursively delete all child views, hotspots, and remove components stored within them.")) return;
+    try {
+      await deleteSpatialPhoto(activePhotoId);
+      // Reset active photo to root or clear it, loadRoomData does this well.
+      setActivePhotoId(null);
+      setBreadcrumbChain([]);
+      loadRoomData();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to delete view");
+    }
+  };
+
   if (loading) return <div className="text-brand-text-muted">Loading room map...</div>;
 
   return (
@@ -245,13 +294,38 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       {/* Top Header */}
       <div className="mb-6 flex justify-between items-start">
         <div>
-          <div className="flex items-center text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
-            <Link href="/rooms" className="hover:text-brand-accent transition-colors" title="Back to Spatial Map">
-              {roomName.length > 10 ? roomName.slice(0, 10) + '...' : roomName}
-            </Link>
+          <div className="flex items-center text-[10px] tracking-widest text-brand-text-muted uppercase mb-2 group/room">
+            {isEditingRoomName ? (
+              <input
+                 type="text"
+                 value={editingRoomName}
+                 onChange={e => setEditingRoomName(e.target.value)}
+                 onBlur={handleSaveRoomName}
+                 onKeyDown={e => e.key === 'Enter' && handleSaveRoomName()}
+                 className="bg-transparent border-b border-brand-accent focus:outline-none min-w-[150px] text-white"
+                 autoFocus
+              />
+            ) : (
+              <>
+                <Link href="/rooms" className="hover:text-brand-accent transition-colors" title="Back to Spatial Map">
+                  {roomName.length > 20 ? roomName.slice(0, 20) + '...' : roomName}
+                </Link>
+                {isOnline && (
+                  <div className="opacity-0 group-hover/room:opacity-100 flex items-center transition-opacity ml-2 gap-1">
+                    <button onClick={() => { setEditingRoomName(roomName); setIsEditingRoomName(true); }} className="hover:text-white" title="Rename Room">
+                      <Edit2 className="h-3 w-3" />
+                    </button>
+                    <button onClick={handleDeleteRoomAction} className="text-red-500/50 hover:text-red-500" title="Delete Room">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+            
             {breadcrumbChain.map((bc, idx) => (
-              <span key={bc.id} className="flex items-center">
-                <ChevronRight className="h-3 w-3 mx-1" />
+              <span key={bc.id} className="flex items-center ml-2">
+                <ChevronRight className="h-3 w-3 mr-2" />
                 <button 
                   onClick={() => handleBreadcrumbClick(idx)}
                   className={`hover:text-brand-accent transition-colors ${idx === breadcrumbChain.length - 1 ? 'text-brand-accent font-bold' : ''}`}
@@ -293,6 +367,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         
         {activePhoto && !pendingChildUpload && (
           <div className="flex gap-3">
+            {isEditing && isOnline && (
+              <button
+                onClick={handleDeletePhoto}
+                className="flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors"
+                title="Delete View"
+              >
+                <Trash2 className="h-3 w-3 mr-2" /> Delete View
+              </button>
+            )}
             <button 
               onClick={() => setIsEditing(!isEditing)}
               className={`flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-colors ${

@@ -94,6 +94,17 @@ export async function getRoom(id: string): Promise<Room> {
   return data as Room;
 }
 
+export async function updateRoom(id: string, name: string): Promise<Room> {
+  const { data, error } = await supabase
+    .from("rooms")
+    .update({ name, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Room;
+}
+
 export async function getPhotosForRoom(roomId: string): Promise<SpatialPhoto[]> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
     return (await db.spatial_photos.where('room_id').equals(roomId).toArray());
@@ -125,11 +136,6 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
 
     let results = allComps.filter(c => !c.pending_delete);
     
-    if (search) {
-      const s = search.toLowerCase();
-      results = results.filter(c => c.name.toLowerCase().includes(s) || (c.notes && c.notes.toLowerCase().includes(s)));
-    }
-
     return results.map(c => {
       const cTags = allCompTags.filter(ct => ct.component_id === c.id).map(ct => tagMap.get(ct.tag_id)).filter(Boolean) as Tag[];
       return {
@@ -137,6 +143,12 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
         tags: cTags,
         totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 }
       }
+    }).filter(c => {
+      if (!search) return true;
+      const s = search.toLowerCase();
+      return c.name.toLowerCase().includes(s) || 
+             (c.notes && c.notes.toLowerCase().includes(s)) ||
+             c.tags.some(t => t.name.toLowerCase().includes(s));
     }).sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -144,10 +156,6 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
     *,
     component_tags(tags(*))
   `).eq("pending_delete", false).order("name");
-
-  if (search) {
-    query = query.or(`name.ilike.%${search}%,notes.ilike.%${search}%`);
-  }
 
   const { data: compData, error: compErr } = await query;
   if (compErr) throw compErr;
@@ -157,11 +165,22 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
 
   const totalsMap = new Map(totalsData.map(t => [t.component_id, t]));
 
-  return compData.map(c => ({
+  let results = compData.map(c => ({
     ...c,
     tags: c.component_tags.map((ct: any) => ct.tags).filter(Boolean),
     totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 }
   }));
+
+  if (search) {
+    const s = search.toLowerCase();
+    results = results.filter(c => 
+      c.name.toLowerCase().includes(s) || 
+      (c.notes && c.notes.toLowerCase().includes(s)) ||
+      c.tags.some((t: any) => t.name.toLowerCase().includes(s))
+    );
+  }
+
+  return results;
 }
 
 export async function getLowStock(): Promise<ComponentWithTotals[]> {
@@ -253,47 +272,29 @@ export async function upsertComponent(
   tagIds: string[],
   locations: { hotspot_id: string, quantity: number }[] = []
 ): Promise<Component> {
-  let compId = componentData.id;
-  if (!compId) {
-    const { data, error } = await supabase.from("components").insert([componentData]).select().single();
-    if (error) {
-      console.error("Insert Error in upsertComponent:", error);
-      throw new Error(error.message || "Failed to insert component");
-    }
-    compId = data.id;
-  } else {
-    const { data, error } = await supabase.from("components").update(componentData).eq("id", compId).select().single();
-    if (error) {
-      console.error("Update Error in upsertComponent:", error);
-      throw new Error(error.message || "Failed to update component");
-    }
+  const { data, error } = await supabase.rpc('upsert_component_full', {
+    p_id: componentData.id || null,
+    p_name: componentData.name,
+    p_photo_url: componentData.photo_url || null,
+    p_price: componentData.price || null,
+    p_purchase_source: componentData.purchase_source || null,
+    p_datasheet_link: componentData.datasheet_link || null,
+    p_low_stock_threshold: componentData.low_stock_threshold || null,
+    p_notes: componentData.notes || null,
+    p_custom_fields: componentData.custom_fields || {},
+    p_tag_ids: tagIds,
+    p_locations: locations
+  });
+
+  if (error) {
+    console.error("RPC Error in upsertComponent:", error);
+    throw new Error(error.message || "Failed to upsert component");
   }
 
-  // update tags
-  await supabase.from("component_tags").delete().eq("component_id", compId);
-  if (tagIds.length > 0) {
-    const tagInserts = tagIds.map(tId => ({ component_id: compId, tag_id: tId }));
-    const { error: tagErr } = await supabase.from("component_tags").insert(tagInserts);
-    if (tagErr) {
-      console.error("Tag Insert Error in upsertComponent:", tagErr);
-      throw new Error(tagErr.message || "Failed to insert tags");
-    }
-  }
-
-  // update locations
-  await supabase.from("component_locations").delete().eq("component_id", compId);
-  if (locations.length > 0) {
-    const locInserts = locations.map(l => ({ component_id: compId, hotspot_id: l.hotspot_id, quantity: l.quantity }));
-    const { error: locErr } = await supabase.from("component_locations").insert(locInserts);
-    if (locErr) {
-      console.error("Location Insert Error in upsertComponent:", locErr);
-      throw new Error(locErr.message || "Failed to insert component locations");
-    }
-  }
-
-  const { data, error: selErr } = await supabase.from("components").select("*").eq("id", compId).single();
+  const compId = data;
+  const { data: fetchedData, error: selErr } = await supabase.from("components").select("*").eq("id", compId).single();
   if (selErr) throw new Error(selErr.message || "Failed to fetch inserted component");
-  return data;
+  return fetchedData;
 }
 
 export async function getHotspotBreadcrumbPath(hotspotId: string): Promise<{ id: string, label: string }[]> {
@@ -418,7 +419,7 @@ export async function createHotspot(
 export interface Project {
   id: string;
   name: string;
-  status: 'planning' | 'active' | 'completed';
+  status: 'planning' | 'active' | 'completed' | 'archived';
   description: string | null;
   created_at: string;
 }
@@ -461,7 +462,7 @@ export async function createProject(name: string, description: string = ''): Pro
   return data;
 }
 
-export async function updateProjectStatus(id: string, status: 'planning' | 'active' | 'completed'): Promise<Project> {
+export async function updateProjectStatus(id: string, status: 'planning' | 'active' | 'completed' | 'archived'): Promise<Project> {
   const { data, error } = await supabase.from('projects').update({ status }).eq('id', id).select().single();
   if (error) throw error;
   return data;
@@ -509,21 +510,18 @@ export async function checkinComponent(projectComponentId: string, returnLocatio
 }
 
 export async function deleteComponent(id: string): Promise<void> {
-  const { count, error: countErr } = await supabase.from('project_components').select('*', { count: 'exact', head: true }).eq('component_id', id).is('returned_at', null);
-  if (countErr) throw countErr;
-  
-  if (count === 0) {
-    // Hard delete
-    const { error } = await supabase.from('components').delete().eq('id', id);
-    if (error) throw error;
-  } else {
-    // Soft delete
-    const { error: locErr } = await supabase.from('component_locations').delete().eq('component_id', id);
-    if (locErr) throw locErr;
-    
-    const { error: compErr } = await supabase.from('components').update({ pending_delete: true }).eq('id', id);
-    if (compErr) throw compErr;
-  }
+  const { error } = await supabase.rpc('delete_component_safe', { p_component_id: id });
+  if (error) throw error;
+}
+
+export async function deleteSpatialPhoto(photoId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_spatial_photo_recursive', { p_photo_id: photoId });
+  if (error) throw error;
+}
+
+export async function deleteRoom(roomId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_room_recursive', { p_room_id: roomId });
+  if (error) throw error;
 }
 
 export async function searchLeafHotspots(query: string = ""): Promise<{ id: string, pathLabel: string }[]> {

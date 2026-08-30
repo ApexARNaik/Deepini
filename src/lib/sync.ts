@@ -34,16 +34,16 @@ export async function syncToLocalDB() {
       db.components, db.tags, db.component_tags, db.component_locations,
       db.projects, db.project_components, db.component_totals],
       async () => {
-        if (rooms.data) await db.rooms.bulkPut(rooms.data);
-        if (photos.data) await db.spatial_photos.bulkPut(photos.data);
-        if (hotspots.data) await db.spatial_hotspots.bulkPut(hotspots.data);
-        if (components.data) await db.components.bulkPut(components.data);
-        if (tags.data) await db.tags.bulkPut(tags.data);
-        if (compTags.data) await db.component_tags.bulkPut(compTags.data);
-        if (compLocs.data) await db.component_locations.bulkPut(compLocs.data);
-        if (projects.data) await db.projects.bulkPut(projects.data);
-        if (projComps.data) await db.project_components.bulkPut(projComps.data);
-        if (compTotals.data) await db.component_totals.bulkPut(compTotals.data);
+        if (rooms.data) { await db.rooms.clear(); await db.rooms.bulkPut(rooms.data); }
+        if (photos.data) { await db.spatial_photos.clear(); await db.spatial_photos.bulkPut(photos.data); }
+        if (hotspots.data) { await db.spatial_hotspots.clear(); await db.spatial_hotspots.bulkPut(hotspots.data); }
+        if (components.data) { await db.components.clear(); await db.components.bulkPut(components.data); }
+        if (tags.data) { await db.tags.clear(); await db.tags.bulkPut(tags.data); }
+        if (compTags.data) { await db.component_tags.clear(); await db.component_tags.bulkPut(compTags.data); }
+        if (compLocs.data) { await db.component_locations.clear(); await db.component_locations.bulkPut(compLocs.data); }
+        if (projects.data) { await db.projects.clear(); await db.projects.bulkPut(projects.data); }
+        if (projComps.data) { await db.project_components.clear(); await db.project_components.bulkPut(projComps.data); }
+        if (compTotals.data) { await db.component_totals.clear(); await db.component_totals.bulkPut(compTotals.data); }
       }
     );
     
