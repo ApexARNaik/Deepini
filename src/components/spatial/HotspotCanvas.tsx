@@ -4,7 +4,7 @@ import { useRef, useState, useEffect } from "react";
 import { SpatialHotspot } from "@/lib/api";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { useNetworkState } from "@/hooks/useNetworkState";
-import { Trash2 } from "lucide-react";
+import { Trash2, MapPin } from "lucide-react";
 
 interface Props {
   imageUrl: string;
@@ -282,6 +282,30 @@ export function HotspotCanvas({
             />
           )}
         </svg>
+
+        {/* Floating Pin & Label for Highlighted Hotspot */}
+        {hotspots.map((hs) => {
+          if (hs.id !== highlightedHotspotId || !hs.shape_points || hs.shape_points.length === 0) return null;
+          const avgX = hs.shape_points.reduce((acc, p) => acc + p.x, 0) / hs.shape_points.length;
+          const avgY = hs.shape_points.reduce((acc, p) => acc + p.y, 0) / hs.shape_points.length;
+          
+          return (
+            <div
+              key={`highlight-badge-${hs.id}`}
+              style={{
+                left: `${avgX * 100}%`,
+                top: `${avgY * 100}%`
+              }}
+              className="absolute -translate-x-1/2 -translate-y-full -mt-2 z-30 pointer-events-none flex flex-col items-center animate-bounce duration-1000"
+            >
+              <div className="bg-red-600 text-white text-[11px] font-bold px-2.5 py-1 rounded shadow-xl border border-white/30 whitespace-nowrap flex items-center gap-1.5 backdrop-blur-xs">
+                <MapPin className="h-3.5 w-3.5 fill-white text-white" />
+                <span>{hs.label}</span>
+              </div>
+              <div className="w-2 h-2 bg-red-600 rotate-45 -mt-1 shadow" />
+            </div>
+          );
+        })}
       </div>
 
       {showConfig && (

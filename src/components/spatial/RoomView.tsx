@@ -560,7 +560,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       <div className="flex items-center justify-between p-3.5 border-b border-[#332f2a] bg-black/40">
                         <div>
                           <div className="text-xs font-bold text-white uppercase tracking-wider">Hotspots on this View</div>
-                          <div className="text-[10px] text-brand-text-muted mt-0.5">Click Delete to remove any hotspot region</div>
+                          <div className="text-[10px] text-brand-text-muted mt-0.5">Click name to highlight & show • Click Delete to remove</div>
                         </div>
                         <span className="text-[10px] px-2 py-0.5 bg-[#252320] border border-[#332f2a] text-brand-text-muted rounded-full font-mono">
                           {hotspots.length}
@@ -573,30 +573,58 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                             No hotspots marked on this view yet. Use the Freehand or Polygon tools on the canvas to trace one.
                           </div>
                         ) : (
-                          hotspots.map((hs) => (
-                            <div 
-                              key={hs.id} 
-                              className="flex items-center justify-between p-2.5 bg-black/40 border border-[#332f2a] rounded hover:border-[#4a443c] transition-colors group"
-                            >
-                              <div className="min-w-0 pr-2">
-                                <div className="text-sm font-bold text-white truncate">{hs.label}</div>
-                                <div className="text-[10px] text-brand-text-muted tracking-wider uppercase">
-                                  {hs.is_leaf ? "Storage Location" : "Opens into Storage"}
-                                </div>
-                              </div>
-                              <button
-                                type="button"
+                          hotspots.map((hs) => {
+                            const isHsHighlighted = highlightedHotspotId === hs.id;
+                            return (
+                              <div 
+                                key={hs.id} 
                                 onClick={() => {
-                                  handleDeleteHotspot(hs);
+                                  setHighlightedHotspotId(prev => prev === hs.id ? null : hs.id);
                                 }}
-                                className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors shrink-0"
-                                title={`Delete hotspot "${hs.label}"`}
+                                className={`flex items-center justify-between p-2.5 border rounded transition-all cursor-pointer group ${
+                                  isHsHighlighted
+                                    ? 'bg-brand-accent/25 border-brand-accent shadow-[0_0_14px_rgba(188,115,83,0.35)] ring-1 ring-brand-accent'
+                                    : 'bg-black/40 border-[#332f2a] hover:border-[#4a443c] hover:bg-black/60'
+                                }`}
+                                title="Click to highlight and locate on the map"
                               >
-                                <Trash2 className="h-3 w-3" />
-                                <span>Delete</span>
-                              </button>
-                            </div>
-                          ))
+                                <div className="min-w-0 pr-2 flex items-center gap-2.5 flex-1">
+                                  <div className={`p-1.5 rounded shrink-0 transition-colors ${
+                                    isHsHighlighted ? 'bg-brand-accent text-white' : 'bg-[#252320] text-brand-text-muted group-hover:text-white'
+                                  }`}>
+                                    <MapPin className="h-3.5 w-3.5" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className={`text-sm font-bold truncate transition-colors ${
+                                      isHsHighlighted ? 'text-white' : 'text-white/90 group-hover:text-brand-accent'
+                                    }`}>
+                                      {hs.label}
+                                    </div>
+                                    <div className="text-[10px] text-brand-text-muted tracking-wider uppercase flex items-center gap-1.5">
+                                      <span>{hs.is_leaf ? "Storage Location" : "Opens into Storage"}</span>
+                                      {isHsHighlighted && (
+                                        <span className="text-[9px] font-bold text-brand-accent font-mono tracking-normal bg-brand-accent/20 px-1.5 py-0.5 rounded">
+                                          HIGHLIGHTED
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteHotspot(hs);
+                                  }}
+                                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors shrink-0"
+                                  title={`Delete hotspot "${hs.label}"`}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  <span>Delete</span>
+                                </button>
+                              </div>
+                            );
+                          })
                         )}
                       </div>
                     </div>
