@@ -411,7 +411,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   if (loading) return <div className="text-brand-text-muted">Loading room map...</div>;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col min-h-full pb-8">
       {/* Top Header */}
       <div className="mb-6 flex justify-between items-start">
         <div>
@@ -526,9 +526,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row flex-1 gap-4 lg:gap-8 min-h-0 relative">
+      <div className="flex flex-col lg:flex-row flex-1 gap-4 lg:gap-8 relative items-start">
         {/* Views Thumbnails */}
-        <div className="w-full lg:w-64 shrink-0 flex flex-row lg:flex-col gap-4 overflow-x-auto lg:overflow-y-auto pb-2 lg:pr-2 lg:pb-4 hide-scrollbar">
+        <div className="w-full lg:w-64 shrink-0 flex flex-row lg:flex-col gap-4 overflow-x-auto lg:overflow-y-auto pb-2 lg:pr-2 lg:pb-4 hide-scrollbar lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)]">
           <div className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">
             Views
           </div>
@@ -647,7 +647,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         </div>
 
         {/* Main Canvas Area */}
-        <div className="flex-1 bg-black/40 rounded-lg overflow-hidden border border-[#332f2a]">
+        <div className="flex-1 w-full bg-black/40 rounded-lg border border-[#332f2a] overflow-auto">
           {activePhoto ? (
             <HotspotCanvas 
               imageUrl={activePhoto.image_url} 
@@ -672,7 +672,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
 
         {/* Side Drawer for Leaf Hotspot */}
         {selectedLeafHotspot && (
-          <div className="fixed inset-x-0 bottom-16 top-16 lg:static lg:w-80 shrink-0 bg-[#1a1816] border-t lg:border border-[#332f2a] lg:rounded-lg flex flex-col overflow-hidden z-40 lg:z-auto">
+          <div className="fixed inset-x-0 bottom-16 top-16 lg:static lg:sticky lg:top-4 lg:w-80 lg:self-start lg:max-h-[calc(100vh-6rem)] shrink-0 bg-[#1a1816] border-t lg:border border-[#332f2a] lg:rounded-lg flex flex-col overflow-hidden z-40 lg:z-auto">
             <div className="flex items-center justify-between p-4 border-b border-[#332f2a] shrink-0">
               <h2 className="font-serif text-lg font-bold text-white tracking-widest uppercase">{selectedLeafHotspot.label}</h2>
               <button onClick={() => setSelectedLeafHotspot(null)} className="text-brand-text-muted hover:text-white transition-colors">
