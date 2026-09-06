@@ -174,10 +174,27 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     e.preventDefault();
     if (!name.trim()) return;
     
+    if (uploadingFieldKey) {
+      alert("Please wait for the file to finish uploading before saving.");
+      return;
+    }
+
     setLoading(true);
     let success = false;
     try {
       let finalTagIds = tags.map(t => t.id);
+
+      // Auto-commit any pending tag input if user didn't click Add / press Enter
+      if (tagInput.trim()) {
+        try {
+          const autoTag = await upsertTag(tagInput.trim());
+          if (!finalTagIds.includes(autoTag.id)) {
+            finalTagIds.push(autoTag.id);
+          }
+        } catch (tErr) {
+          console.warn("Could not auto-add tagInput:", tErr);
+        }
+      }
 
       // If personal item, automatically ensure it has a "Personal" tag
       if (itemType === 'personal') {
@@ -194,6 +211,18 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         }
       }
 
+      // Auto-commit any pending location if user selected a hotspot but didn't click Add
+      let finalLocations = [...locations];
+      if (selectedHotspot) {
+        const qty = parseInt(locationQuantity, 10);
+        if (!isNaN(qty) && qty > 0) {
+          const existing = finalLocations.find(l => l.hotspot_id === selectedHotspot);
+          if (!existing) {
+            finalLocations.push({ hotspot_id: selectedHotspot, quantity: qty });
+          }
+        }
+      }
+
       const payload: Partial<Component> = {
         name: name.trim(),
         item_type: itemType,
@@ -206,10 +235,10 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
       };
 
       if (itemType === 'component') {
-        payload.price = price ? parseFloat(price) : undefined;
-        payload.purchase_source = purchaseSource || undefined;
-        payload.datasheet_link = datasheetLink || undefined;
-        payload.low_stock_threshold = lowStock ? parseInt(lowStock, 10) : undefined;
+        payload.price = (price && price.trim() !== "") ? parseFloat(price.trim()) : undefined;
+        payload.purchase_source = purchaseSource ? purchaseSource.trim() : undefined;
+        payload.datasheet_link = datasheetLink ? datasheetLink.trim() : undefined;
+        payload.low_stock_threshold = (lowStock && lowStock.trim() !== "") ? parseInt(lowStock.trim(), 10) : undefined;
       } else {
         payload.price = undefined;
         payload.purchase_source = undefined;
@@ -221,7 +250,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         payload.id = initialData.id;
       }
 
-      await upsertComponent(payload, finalTagIds, locations);
+      await upsertComponent(payload, finalTagIds, finalLocations);
       success = true;
     } catch (err: any) {
       console.error("Full error:", err);
@@ -662,12 +691,18 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               <button type="button" onClick={() => router.back()} className="px-6 py-2 text-brand-text-muted hover:text-white text-sm">
                 Cancel
               </button>
-              <button type="submit" disabled={loading} className="px-8 py-2 bg-brand-accent text-white font-bold tracking-widest text-sm rounded-sm hover:bg-brand-accent-hover disabled:opacity-50">
+              <button 
+                type="submit" 
+                disabled={loading || !!uploadingFieldKey} 
+                className="px-8 py-2 bg-brand-accent text-white font-bold tracking-widest text-sm rounded-sm hover:bg-brand-accent-hover disabled:opacity-50 transition-opacity"
+              >
                 {loading 
                   ? "SAVING..." 
-                  : (initialData 
-                      ? (itemType === 'personal' ? "UPDATE PERSONAL ITEM" : "UPDATE COMPONENT") 
-                      : (itemType === 'personal' ? "SAVE PERSONAL ITEM" : "SAVE COMPONENT"))}
+                  : uploadingFieldKey 
+                    ? "UPLOADING FILE..." 
+                    : (initialData 
+                        ? (itemType === 'personal' ? "UPDATE PERSONAL ITEM" : "UPDATE COMPONENT") 
+                        : (itemType === 'personal' ? "SAVE PERSONAL ITEM" : "SAVE COMPONENT"))}
               </button>
             </div>
           </>

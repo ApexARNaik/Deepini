@@ -12,6 +12,10 @@ export const metadata: Metadata = {
   title: "Deepini - Personal Component Archive",
   description: "A visual map of your components, storage, and projects",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

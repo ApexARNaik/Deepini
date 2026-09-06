@@ -175,7 +175,7 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
 
   let query = supabase.from("components").select(`
     *,
-    component_tags(tags(*))
+    component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))
   `).eq("pending_delete", false).order("name");
 
   const { data: compData, error: compErr } = await query;
@@ -251,7 +251,7 @@ export async function getComponentDetails(id: string): Promise<{ component: Comp
   }
 
   // get component
-  const { data: comp, error: compErr } = await supabase.from("components").select(`*, component_tags(tags(*))`).eq("id", id).single();
+  const { data: comp, error: compErr } = await supabase.from("components").select(`*, component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))`).eq("id", id).single();
   if (compErr) throw new Error(compErr.message || "Failed to fetch component");
   
   const { data: totalsData } = await supabase.from("component_totals").select("*").eq("component_id", id).single();
@@ -265,11 +265,11 @@ export async function getComponentDetails(id: string): Promise<{ component: Comp
   // get locations
   const { data: locs, error: locErr } = await supabase.from("component_locations").select(`
     *,
-    spatial_hotspots(
+    spatial_hotspots!component_locations_hotspot_id_fkey(
       *,
       spatial_photos!spatial_hotspots_photo_id_fkey(
         *,
-        rooms(*)
+        rooms!spatial_photos_room_id_fkey(*)
       )
     )
   `).eq("component_id", id);
@@ -302,10 +302,10 @@ export async function upsertComponent(
     p_id: componentData.id || null,
     p_name: componentData.name,
     p_photo_url: componentData.photo_url || null,
-    p_price: componentData.price || null,
+    p_price: componentData.price !== undefined && componentData.price !== null ? componentData.price : null,
     p_purchase_source: componentData.purchase_source || null,
     p_datasheet_link: componentData.datasheet_link || null,
-    p_low_stock_threshold: componentData.low_stock_threshold || null,
+    p_low_stock_threshold: componentData.low_stock_threshold !== undefined && componentData.low_stock_threshold !== null ? componentData.low_stock_threshold : null,
     p_notes: componentData.notes || null,
     p_custom_fields: customFields,
     p_tag_ids: tagIds,
@@ -361,7 +361,7 @@ export async function getAllLeafHotspots() {
 }
 
 export async function getHotspotComponents(hotspotId: string) {
-  const { data, error } = await supabase.from('component_locations').select('*, components(*)').eq('hotspot_id', hotspotId);
+  const { data, error } = await supabase.from('component_locations').select('*, components!component_locations_component_id_fkey(*)').eq('hotspot_id', hotspotId);
   if (error) throw new Error(error.message || "Failed to fetch components for hotspot");
   return data;
 }
@@ -537,7 +537,7 @@ export async function getProjects(): Promise<(Project & { active_count: number }
     });
   }
 
-  const { data, error } = await supabase.from('projects').select('*, project_components(quantity, returned_at)').order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('projects').select('*, project_components!project_components_project_id_fkey(quantity, returned_at)').order('created_at', { ascending: false });
   if (error) throw error;
   
   return data.map(p => {
@@ -575,7 +575,7 @@ export async function getProjectDetails(id: string): Promise<{ project: Project,
   const { data: project, error } = await supabase.from('projects').select('*').eq('id', id).single();
   if (error) throw error;
   
-  const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components(*), source_hotspot:spatial_hotspots!project_components_source_location_id_fkey(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
+  const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components!project_components_component_id_fkey(*), source_hotspot:spatial_hotspots!fk_project_components_source_loc(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
   if (itemsErr) throw itemsErr;
   
   return { project, items };
