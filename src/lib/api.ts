@@ -599,9 +599,60 @@ export async function checkinComponent(projectComponentId: string, returnLocatio
   if (error) throw error;
 }
 
+export async function getComponentLocationAssignments(componentId: string): Promise<{ id: string; quantity: number; hotspot_id: string; label?: string }[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const locs = await db.component_locations.where('component_id').equals(componentId).toArray();
+    return locs.map(l => ({ id: l.id, quantity: l.quantity, hotspot_id: l.hotspot_id }));
+  }
+
+  const { data, error } = await supabase
+    .from('component_locations')
+    .select(`
+      id,
+      quantity,
+      hotspot_id,
+      spatial_hotspots!component_locations_hotspot_id_fkey(
+        label
+      )
+    `)
+    .eq('component_id', componentId);
+
+  if (error) {
+    const { data: simpleData } = await supabase
+      .from('component_locations')
+      .select('id, quantity, hotspot_id')
+      .eq('component_id', componentId);
+    return (simpleData || []).map(l => ({ ...l, label: undefined }));
+  }
+
+  return (data || []).map((l: any) => ({
+    id: l.id,
+    quantity: l.quantity,
+    hotspot_id: l.hotspot_id,
+    label: l.spatial_hotspots?.label
+  }));
+}
+
 export async function deleteComponent(id: string): Promise<void> {
   const { error } = await supabase.rpc('delete_component_safe', { p_component_id: id });
-  if (error) throw error;
+  if (error) {
+    console.warn("RPC delete_component_safe error, falling back to direct delete:", error);
+    await supabase.from('component_tags').delete().eq('component_id', id);
+    await supabase.from('component_locations').delete().eq('component_id', id);
+    const { error: delErr } = await supabase.from('components').delete().eq('id', id);
+    if (delErr) throw delErr;
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.components.delete(id);
+      await db.component_locations.where('component_id').equals(id).delete();
+      await db.component_tags.where('component_id').equals(id).delete();
+      await db.component_totals.delete(id);
+    } catch (dbErr) {
+      console.warn("Offline db cleanup error on component delete:", dbErr);
+    }
+  }
 }
 
 export async function deleteSpatialPhoto(photoId: string): Promise<void> {

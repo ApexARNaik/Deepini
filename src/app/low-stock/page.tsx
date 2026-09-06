@@ -36,7 +36,12 @@ export default function LowStockPage() {
         {loading ? (
           <div className="text-brand-text-muted">Loading low stock alerts...</div>
         ) : (
-          <InventoryTable components={components} />
+          <InventoryTable 
+            components={components} 
+            onComponentDeleted={(deletedId) => {
+              setComponents(prev => prev.filter(c => c.id !== deletedId));
+            }}
+          />
         )}
       </div>
     </div>

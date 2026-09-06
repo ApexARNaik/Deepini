@@ -235,7 +235,8 @@ project_components
 - **Hotspot Visual Effects & Highlighting**:
   - **Normal / Default**: Translucent white wash (`rgba(255, 255, 255, 0.3)` fill, `rgba(255, 255, 255, 0.5)` stroke, `0.3` strokeWidth).
   - **Hovered**: Translucent red wash (`rgba(239, 68, 68, 0.4)` fill, solid `#ef4444` stroke).
-  - **Highlighted / Located**: Active located hotspot receives a pulsing red highlight (`rgba(239, 68, 68, 0.2)` fill, solid `#ef4444` stroke, `0.6` strokeWidth, and continuous `animate-pulse` CSS keyframe oscillation).
+  - **Hover Reveal Tooltip**: Scrolling or hovering the mouse across any hotspot reveals a floating glassmorphism pill showing the hotspot's name and type (*Storage Location* with brand-accent dot vs *Opens into Storage* with amber dot). In Delete mode, the tooltip reveals `Delete "[label]"`. The badge dynamically tracks the cursor with smart edge-clamping ($8\% \le x \le 92\%$) and vertical boundary inversion at the top edge.
+  - **Highlighted / Located**: Active located hotspot receives a pulsing red highlight (`rgba(239, 68, 68, 0.2)` fill, solid `#ef4444` stroke, `0.6` strokeWidth, and continuous `animate-pulse` CSS keyframe oscillation) plus an animated location pin badge (`MapPin` + Hotspot Name).
   - **Delete Mode**: Dashed red stroke (`2,2`) with `rgba(239, 68, 68, 0.22)` fill wash (`0.55` on hover).
 
 ### 5.2 Inventory Page & View Toggle
@@ -245,8 +246,9 @@ project_components
   - Dynamic route parameter sync (`/inventory?view=personal`).
   - Contextual header subtitle and dynamic action button (`+ Add Component` vs `+ Add Personal Item`).
 - **Contextual Inventory Table**:
-  - **Components View**: Img, Component Name, Tags, Quantity, Price (INR), Status (Low Stock Indicator), View Action.
-  - **Personal Items View**: Img, Item Name, Description, Tags, Quantity, View Action.
+  - **Components View**: Img, Component Name, Tags, Quantity, Price (INR), Status (Low Stock Indicator), Actions (Delete & View).
+  - **Personal Items View**: Img, Item Name, Description, Tags, Quantity, Actions (Delete & View).
+  - **Direct Deletion & Location Safety**: Each item row features a direct delete button. Deletion requires explicit user confirmation. If an item is currently assigned to one or more physical storage locations, direct deletion is blocked and a prompt directs the user to open the edit page (`/inventory/[id]/edit`) to individually remove all location assignments first.
   - Contextual empty states (*"No personal items found."* vs *"No components found."*).
 
 ### 5.3 Component & Personal Item Form

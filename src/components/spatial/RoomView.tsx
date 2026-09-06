@@ -177,9 +177,25 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
   };
 
+  const resetViewInteractionState = () => {
+    setIsEditing(false);
+    setSelectedLeafHotspot(null);
+    setHighlightedHotspotId(null);
+    setPendingChildUpload(null);
+    setShowHotspotsList(false);
+
+    if (typeof document !== 'undefined') {
+      const mainEl = document.querySelector('main');
+      if (mainEl) {
+        mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  };
+
   const navigateToDrilldown = (hotspot: SpatialHotspot, childPhotoId: string) => {
     setBreadcrumbChain(prev => [...prev, { id: childPhotoId, label: hotspot.label }]);
     setActivePhotoId(childPhotoId);
+    resetViewInteractionState();
   };
 
   const handleHotspotClick = async (hotspot: SpatialHotspot) => {
@@ -211,8 +227,10 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
 
   const handleBreadcrumbClick = (index: number) => {
     const target = breadcrumbChain[index];
+    if (!target) return;
     setActivePhotoId(target.id);
     setBreadcrumbChain(prev => prev.slice(0, index + 1));
+    resetViewInteractionState();
   };
 
   const handleUpdateLeafComponents = async (newComps: any[]) => {
@@ -490,10 +508,12 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             
             {breadcrumbChain.map((bc, idx) => (
               <span key={bc.id} className="flex items-center ml-2">
-                <ChevronRight className="h-3 w-3 mr-2" />
+                <ChevronRight className="h-3 w-3 mr-2 text-brand-text-muted" />
                 <button 
+                  type="button"
                   onClick={() => handleBreadcrumbClick(idx)}
-                  className={`hover:text-brand-accent transition-colors ${idx === breadcrumbChain.length - 1 ? 'text-brand-accent font-bold' : ''}`}
+                  className={`hover:text-brand-accent transition-colors ${idx === breadcrumbChain.length - 1 ? 'text-brand-accent font-bold' : 'text-brand-text'}`}
+                  title={`Jump to ${bc.label}`}
                 >
                   {bc.label}
                 </button>
@@ -720,8 +740,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     if (isDraggingRef.current) return;
                     setActivePhotoId(p.id);
                     setBreadcrumbChain([{ id: p.id, label: p.label || 'View' }]);
-                    setPendingChildUpload(null);
-                    setIsEditing(false);
+                    resetViewInteractionState();
                   }}
                   className="w-full h-full text-left relative focus:outline-none"
                   title={`View: ${p.label || 'View'} (Drag to reorder)`}
@@ -802,6 +821,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         <div className="flex-1 w-full bg-black/40 rounded-lg border border-[#332f2a] overflow-auto">
           {activePhoto ? (
             <HotspotCanvas 
+              key={activePhoto.id}
               imageUrl={activePhoto.image_url} 
               hotspots={hotspots}
               isEditing={isEditing}

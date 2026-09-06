@@ -33,14 +33,15 @@ export function HotspotCanvas({
   const [isDrawing, setIsDrawing] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [hoveredHotspotId, setHoveredHotspotId] = useState<string | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
 
-  const [drawMode, setDrawMode] = useState<'freehand' | 'polygon' | 'delete'>('freehand');
+  const [drawMode, setDrawMode] = useState<'freehand' | 'polygon' | 'delete'>('polygon');
   const [polygonMousePos, setPolygonMousePos] = useState<{ x: number; y: number } | null>(null);
 
   // Reset mode when exiting edit
   useEffect(() => {
     if (!isEditing) {
-      setDrawMode('freehand');
+      setDrawMode('polygon');
       setCurrentPoints([]);
       setIsDrawing(false);
       setPolygonMousePos(null);
@@ -130,6 +131,7 @@ export function HotspotCanvas({
     return points.map(p => `${p.x * 100},${p.y * 100}`).join(" ");
   };
 
+  const isDeleteMode = isEditing && drawMode === 'delete';
   const hoveredHotspot = hotspots.find(h => h.id === hoveredHotspotId);
 
   return (
@@ -142,17 +144,6 @@ export function HotspotCanvas({
           </span>
           <button 
             type="button"
-            onClick={() => { setDrawMode('freehand'); setCurrentPoints([]); setIsDrawing(false); }}
-            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-              drawMode === 'freehand' 
-                ? 'bg-brand-accent text-white shadow-sm' 
-                : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
-            }`}
-          >
-            Freehand
-          </button>
-          <button 
-            type="button"
             onClick={() => { setDrawMode('polygon'); setCurrentPoints([]); setIsDrawing(false); }}
             className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
               drawMode === 'polygon' 
@@ -161,6 +152,17 @@ export function HotspotCanvas({
             }`}
           >
             Polygon
+          </button>
+          <button 
+            type="button"
+            onClick={() => { setDrawMode('freehand'); setCurrentPoints([]); setIsDrawing(false); }}
+            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+              drawMode === 'freehand' 
+                ? 'bg-brand-accent text-white shadow-sm' 
+                : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
+            }`}
+          >
+            Freehand
           </button>
           
           <div className="h-4 w-px bg-[#332f2a] mx-1" />
@@ -225,7 +227,6 @@ export function HotspotCanvas({
           {hotspots.map((hs) => {
             const isHovered = hoveredHotspotId === hs.id;
             const isHighlighted = highlightedHotspotId === hs.id;
-            const isDeleteMode = isEditing && drawMode === 'delete';
             const isClickable = isDeleteMode || !isEditing;
             
             return (
@@ -253,8 +254,29 @@ export function HotspotCanvas({
                 className={`transition-all duration-200 ${isHighlighted ? 'animate-pulse' : ''} ${
                   isClickable ? "cursor-pointer pointer-events-auto" : "pointer-events-none"
                 }`}
-                onMouseEnter={() => isClickable && setHoveredHotspotId(hs.id)}
-                onMouseLeave={() => setHoveredHotspotId(null)}
+                onMouseEnter={(e) => {
+                  if (isClickable) {
+                    setHoveredHotspotId(hs.id);
+                    if (containerRef.current) {
+                      const rect = containerRef.current.getBoundingClientRect();
+                      const x = ((e.clientX - rect.left) / rect.width) * 100;
+                      const y = ((e.clientY - rect.top) / rect.height) * 100;
+                      setHoverPos({ x, y });
+                    }
+                  }
+                }}
+                onMouseMove={(e) => {
+                  if (isClickable && containerRef.current) {
+                    const rect = containerRef.current.getBoundingClientRect();
+                    const x = ((e.clientX - rect.left) / rect.width) * 100;
+                    const y = ((e.clientY - rect.top) / rect.height) * 100;
+                    setHoverPos({ x, y });
+                  }
+                }}
+                onMouseLeave={() => {
+                  setHoveredHotspotId(null);
+                  setHoverPos(null);
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isDeleteMode) {
@@ -263,7 +285,9 @@ export function HotspotCanvas({
                     onHotspotClick(hs);
                   }
                 }}
-              />
+              >
+                <title>{hs.label} ({hs.is_leaf ? "Storage Location" : "Opens into Storage"})</title>
+              </polygon>
             );
           })}
 
@@ -306,6 +330,55 @@ export function HotspotCanvas({
             </div>
           );
         })}
+
+        {/* Floating Reveal Tooltip for Hovered Hotspot */}
+        {hoveredHotspot && hoveredHotspot.id !== highlightedHotspotId && hoveredHotspot.shape_points && hoveredHotspot.shape_points.length > 0 && (() => {
+          const centroidX = (hoveredHotspot.shape_points.reduce((acc, p) => acc + p.x, 0) / hoveredHotspot.shape_points.length) * 100;
+          const centroidY = (hoveredHotspot.shape_points.reduce((acc, p) => acc + p.y, 0) / hoveredHotspot.shape_points.length) * 100;
+          const posX = hoverPos ? hoverPos.x : centroidX;
+          const posY = hoverPos ? hoverPos.y : centroidY;
+          const clampedX = Math.max(8, Math.min(92, posX));
+          const clampedY = Math.max(6, Math.min(94, posY));
+          const isNearTop = clampedY < 12;
+
+          return (
+            <div
+              key={`hover-badge-${hoveredHotspot.id}`}
+              style={{
+                left: `${clampedX}%`,
+                top: `${clampedY}%`
+              }}
+              className={`absolute -translate-x-1/2 z-30 pointer-events-none flex flex-col items-center animate-fadeIn transition-opacity duration-75 ${
+                isNearTop ? "mt-3" : "-translate-y-full -mt-2.5"
+              }`}
+            >
+              {isNearTop && (
+                <div className={`w-2 h-2 rotate-45 -mb-1 z-10 shadow ${isDeleteMode ? 'bg-red-950 border-l border-t border-red-500/80' : 'bg-[#141211] border-l border-t border-[#4a443c]'}`} />
+              )}
+              {isDeleteMode ? (
+                <div className="bg-red-950/95 text-red-200 text-xs font-bold px-3 py-1.5 rounded-md shadow-2xl border border-red-500/80 whitespace-nowrap flex items-center gap-1.5 backdrop-blur-md">
+                  <Trash2 className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                  <span>Delete &quot;{hoveredHotspot.label}&quot;</span>
+                </div>
+              ) : (
+                <div className="bg-[#141211]/95 text-white text-xs font-semibold px-3 py-1.5 rounded-md shadow-2xl border border-[#4a443c] whitespace-nowrap flex items-center gap-2 backdrop-blur-md">
+                  {hoveredHotspot.is_leaf ? (
+                    <span className="w-2 h-2 rounded-full bg-brand-accent inline-block shrink-0 shadow-[0_0_6px_rgba(188,115,83,0.8)]" />
+                  ) : (
+                    <span className="w-2 h-2 rounded-full bg-amber-400 inline-block shrink-0 shadow-[0_0_6px_rgba(251,191,36,0.8)]" />
+                  )}
+                  <span className="font-bold tracking-wide">{hoveredHotspot.label}</span>
+                  <span className="text-[9px] text-brand-text-muted uppercase font-mono tracking-wider bg-[#252320] px-1.5 py-0.5 rounded border border-[#332f2a]">
+                    {hoveredHotspot.is_leaf ? "Storage Location" : "Opens into Storage"}
+                  </span>
+                </div>
+              )}
+              {!isNearTop && (
+                <div className={`w-2 h-2 rotate-45 -mt-1 shadow ${isDeleteMode ? 'bg-red-950 border-r border-b border-red-500/80' : 'bg-[#141211] border-r border-b border-[#4a443c]'}`} />
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {showConfig && (

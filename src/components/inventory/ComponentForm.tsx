@@ -37,11 +37,16 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   
   // Locations
   const [locations, setLocations] = useState<{ hotspot_id: string, quantity: number, label?: string }[]>(
-    initialLocations?.map(l => ({ 
-      hotspot_id: l.hotspot_id, 
-      quantity: l.quantity, 
-      label: l.spatial_hotspots?.label || "Unknown Location" 
-    })) || []
+    initialLocations?.map(l => {
+      const fullPath = l.room?.name && l.hotspot?.label
+        ? `${l.room.name}${l.photo?.label ? ` → ${l.photo.label}` : ''} → ${l.hotspot.label}`
+        : null;
+      return {
+        hotspot_id: l.hotspot_id,
+        quantity: l.quantity,
+        label: l.label || fullPath || l.hotspot?.label || l.spatial_hotspots?.label || "Unknown Location"
+      };
+    }) || []
   );
   const [availableHotspots, setAvailableHotspots] = useState<any[]>([]);
   const [selectedHotspot, setSelectedHotspot] = useState("");
@@ -61,7 +66,18 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
 
   useEffect(() => {
     getTags().then(setAvailableTags).catch(console.error);
-    getAllLeafHotspots().then(setAvailableHotspots).catch(console.error);
+    getAllLeafHotspots().then((hotspots) => {
+      setAvailableHotspots(hotspots);
+      setLocations((prevLocations) =>
+        prevLocations.map((loc) => {
+          const matched = hotspots.find((h) => h.id === loc.hotspot_id);
+          if (matched && (!loc.label || loc.label === "Unknown Location" || !loc.label.includes('→'))) {
+            return { ...loc, label: matched.fullLabel || matched.label || loc.label };
+          }
+          return loc;
+        })
+      );
+    }).catch(console.error);
   }, []);
 
   const handleAddTag = async (e?: React.FormEvent) => {

@@ -113,7 +113,13 @@ function InventoryContent() {
         {loading ? (
           <div className="p-6 text-brand-text-muted">Loading {viewMode === 'personal' ? 'personal items' : 'components'}...</div>
         ) : (
-          <InventoryTable components={displayedItems} viewMode={viewMode} />
+          <InventoryTable 
+            components={displayedItems} 
+            viewMode={viewMode} 
+            onComponentDeleted={(deletedId) => {
+              setComponents(prev => prev.filter(c => c.id !== deletedId));
+            }}
+          />
         )}
       </div>
     </div>
