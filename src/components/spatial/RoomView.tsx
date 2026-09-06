@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical } from "lucide-react";
@@ -424,6 +424,33 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
   };
 
+  const handleDeleteHotspot = async (hotspot: SpatialHotspot) => {
+    if (!isOnline) {
+      alert("You must be online to delete hotspots.");
+      return;
+    }
+
+    const warningMsg = hotspot.is_leaf
+      ? `Are you sure you want to delete the hotspot "${hotspot.label}"?\nAny components or personal items stored in this location will be unassigned from it.`
+      : `Are you sure you want to delete the hotspot "${hotspot.label}"?\nThis hotspot opens into deeper storage views. Deleting it will permanently delete all child photos, nested hotspots, and remove stored items.`;
+
+    if (!confirm(warningMsg)) return;
+
+    try {
+      await deleteHotspot(hotspot.id);
+      
+      if (selectedLeafHotspot?.id === hotspot.id) {
+        setSelectedLeafHotspot(null);
+      }
+      
+      setHotspots(prev => prev.filter(h => h.id !== hotspot.id));
+      loadRoomData();
+    } catch (err) {
+      console.error("Failed to delete hotspot:", err);
+      alert("Failed to delete hotspot. Please try again.");
+    }
+  };
+
   if (loading) return <div className="text-brand-text-muted">Loading room map...</div>;
 
   return (
@@ -514,14 +541,19 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               </button>
             )}
             <button 
-              onClick={() => setIsEditing(!isEditing)}
+              onClick={() => {
+                if (!isEditing) {
+                  setSelectedLeafHotspot(null);
+                }
+                setIsEditing(!isEditing);
+              }}
               className={`flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-colors ${
                 isEditing 
                   ? 'bg-brand-accent border-brand-accent text-white' 
                   : 'bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c]'
               }`}
             >
-              {isEditing ? 'Cancel Edit' : (
+              {isEditing ? 'Done Editing' : (
                 <><Edit2 className="h-3 w-3 mr-2" /> Edit Map</>
               )}
             </button>
@@ -673,6 +705,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               onCancelEdit={() => setIsEditing(false)}
               onHotspotCreated={handleHotspotCreated}
               onHotspotClick={handleHotspotClick}
+              onHotspotDelete={handleDeleteHotspot}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-brand-text-muted flex-col">
@@ -688,12 +721,23 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
 
         {/* Side Drawer for Leaf Hotspot */}
         {selectedLeafHotspot && (
-          <div className="fixed inset-x-0 bottom-16 top-16 lg:static lg:sticky lg:top-4 lg:w-80 lg:self-start lg:max-h-[calc(100vh-6rem)] shrink-0 bg-[#1a1816] border-t lg:border border-[#332f2a] lg:rounded-lg flex flex-col overflow-hidden z-40 lg:z-auto">
+          <div className="fixed inset-x-0 bottom-16 top-16 lg:static lg:sticky lg:top-4 lg:w-80 lg:self-start lg:max-h-[calc(100vh-6rem)] shrink-0 bg-[#1a1816] border-t lg:border border-[#332f2a] lg:rounded-lg flex flex-col overflow-hidden z-40 lg:z-auto shadow-2xl">
             <div className="flex items-center justify-between p-4 border-b border-[#332f2a] shrink-0">
-              <h2 className="font-serif text-lg font-bold text-white tracking-widest uppercase">{selectedLeafHotspot.label}</h2>
-              <button onClick={() => setSelectedLeafHotspot(null)} className="text-brand-text-muted hover:text-white transition-colors">
-                <X className="h-5 w-5" />
-              </button>
+              <h2 className="font-serif text-lg font-bold text-white tracking-widest uppercase truncate mr-2">{selectedLeafHotspot.label}</h2>
+              <div className="flex items-center gap-1 shrink-0">
+                {isOnline && (
+                  <button 
+                    onClick={() => handleDeleteHotspot(selectedLeafHotspot)}
+                    className="p-1.5 text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                    title={`Delete hotspot "${selectedLeafHotspot.label}"`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+                <button onClick={() => setSelectedLeafHotspot(null)} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
             
             <div className="p-4 flex-1 overflow-y-auto">
@@ -869,6 +913,54 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     )}
                   </div>
                 </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Side Panel in Edit Mode: Hotspots Management */}
+        {isEditing && (
+          <div className="fixed inset-x-0 bottom-16 top-16 lg:static lg:sticky lg:top-4 lg:w-80 lg:self-start lg:max-h-[calc(100vh-6rem)] shrink-0 bg-[#1a1816] border-t lg:border border-[#332f2a] lg:rounded-lg flex flex-col overflow-hidden z-40 lg:z-auto shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b border-[#332f2a] shrink-0">
+              <div>
+                <h2 className="font-serif text-sm font-bold text-white tracking-wider uppercase">Hotspots on this View</h2>
+                <p className="text-[10px] text-brand-text-muted mt-0.5">Select a hotspot to delete or manage</p>
+              </div>
+              <span className="text-xs px-2 py-0.5 bg-[#222] border border-[#332f2a] text-brand-text-muted rounded-full font-mono">
+                {hotspots.length}
+              </span>
+            </div>
+            
+            <div className="p-4 flex-1 overflow-y-auto space-y-2">
+              {hotspots.length === 0 ? (
+                <div className="text-xs text-brand-text-muted text-center py-8 border border-dashed border-[#332f2a] rounded p-4">
+                  No hotspots marked on this view yet. Use the Freehand or Polygon tools on the canvas to draw one.
+                </div>
+              ) : (
+                hotspots.map((hs) => (
+                  <div 
+                    key={hs.id} 
+                    className="flex items-center justify-between p-3 bg-black/40 border border-[#332f2a] rounded hover:border-[#4a443c] transition-colors group"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <div className="text-sm font-bold text-white truncate">{hs.label}</div>
+                      <div className="text-[10px] text-brand-text-muted tracking-wider uppercase">
+                        {hs.is_leaf ? "Storage Location" : "Opens into Storage"}
+                      </div>
+                    </div>
+                    {isOnline && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteHotspot(hs)}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors shrink-0"
+                        title={`Delete hotspot "${hs.label}"`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Delete</span>
+                      </button>
+                    )}
+                  </div>
+                ))
               )}
             </div>
           </div>

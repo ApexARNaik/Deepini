@@ -1,36 +1,95 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Deepini — Personal Hardware Component Inventory & Spatial Tracking System
+
+Deepini is a personal inventory and spatial tracking web application built for makers, hardware engineers, and workshop owners. It provides two tightly coupled perspectives on your gear:
+
+1. **A Spatial Photographic Hierarchy**: An interactive, multi-level photo map of your physical rooms, walls, cupboards, shelves, drawers, and bins. Draw polygon or freehand hotspots directly over photos to navigate deeper or assign physical storage.
+2. **A Unified Logical Inventory**: A searchable, filterable list of all items across your workshop with an instant toggle between **Components** and **Personal Items**.
+
+---
+
+## Key Features
+
+### 1. Photographic Spatial Map ("Room View")
+- **Hierarchical Drill-Down**: Create unbounded nested levels (`Room → View/Wall → Furniture → Shelf → Drawer → Container`).
+- **Draggable View Reordering**: Drag and drop perspectives or use one-click arrow buttons to reorder views with permanent database persistence.
+- **Interactive Hotspot Canvas**: Annotate storage containers using continuous freehand tracing or click-each-vertex polygonal lasso tools.
+- **Direct Hotspot Contents Drawer**: Click any storage location to view stored items, adjust quantities with an inline stepper, or directly search and add components/belongings with a single click.
+
+### 2. Dual Item Model (Components vs. Personal Items)
+- **Components**: Designed for technical electronics items with purchase sources, datasheet URLs, price in INR (`₹`), low-stock thresholds, and custom specs.
+- **Personal Items**: Streamlined model for tools, equipment, stationery, and belongings. Requires only Name, Description, Photo, Storage Locations, and Tags.
+- **Inventory Page Toggle**: Fast switcher between `Components (X)` and `Personal (Y)` with tailored table columns and context-aware action buttons.
+- **Physical Tracking Parity**: Personal items are tracked across the exact same spatial hierarchy as components, featuring the "Locate" button to spotlight their physical storage location.
+
+### 3. Projects Check-Out & Check-In Ledger
+- Pull components into active projects while tracking their source locations.
+- Check items back in to their original or newly chosen locations.
+- Deferred component deletion (`pending_delete`) prevents data loss when items are checked out.
+
+### 4. Offline-Ready PWA
+- Service Worker precaching app shell assets.
+- Complete IndexedDB mirror (Dexie.js) of rooms, photos, hotspots, and inventory items.
+- Offline read-only browsing of rooms, images, and inventory lists.
+
+### 5. Shared Password Gate
+- Client-side session password gate protecting the entire application without requiring user accounts or multi-tenant complexity.
+
+---
+
+## Tech Stack
+
+- **Framework**: [Next.js 16 (App Router)](https://nextjs.org/) with Turbopack & TypeScript
+- **Styling**: Tailwind CSS & Lucide Icons
+- **Database & Storage**: [Supabase](https://supabase.com/) (PostgreSQL & Object Storage)
+- **Offline / PWA**: `@serwist/next`, Dexie.js (IndexedDB), and Cache Storage API
+- **Image Compression**: `browser-image-compression`
+
+---
 
 ## Getting Started
 
-First, run the development server:
+### 1. Prerequisites
+- Node.js 18.17+ or 20+
+- npm, pnpm, or yarn
+- A free [Supabase](https://supabase.com) project
+
+### 2. Environment Variables
+Create a `.env.local` file in the root directory:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+NEXT_PUBLIC_APP_PASSWORD=Pass123
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. Database Setup (Supabase)
+Run the migration scripts in the Supabase SQL Editor:
+1. `supabase/migrations/001_safe_schema_and_rpcs.sql`: Master consolidated schema, views, and atomic RPCs.
+2. `supabase/migrations/002_reorder_spatial_photos.sql`: Atomic view reordering RPC function.
+3. `supabase/migrations/003_add_item_type_to_components.sql`: Adds `item_type` column to `components`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+*(Note: The application also includes client-side fallbacks, ensuring continuous operation even before remote database migrations are executed.)*
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 4. Installation & Development
 
-## Learn More
+```bash
+# Install dependencies
+npm install
 
-To learn more about Next.js, take a look at the following resources:
+# Run development server
+npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Open [http://localhost:3000](http://localhost:3000) in your browser. Enter your password (default: `Pass123`) to enter the app.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 5. Production Build
 
-## Deploy on Vercel
+```bash
+npm run build
+npm run start
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## License
+MIT License. Created for personal workshop and inventory tracking.

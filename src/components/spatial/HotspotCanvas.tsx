@@ -4,6 +4,7 @@ import { useRef, useState, useEffect } from "react";
 import { SpatialHotspot } from "@/lib/api";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { useNetworkState } from "@/hooks/useNetworkState";
+import { Trash2 } from "lucide-react";
 
 interface Props {
   imageUrl: string;
@@ -12,10 +13,20 @@ interface Props {
   highlightedHotspotId?: string | null;
   onHotspotCreated: (shapePoints: { x: number; y: number }[], label: string, isLeaf: boolean) => void;
   onHotspotClick: (hotspot: SpatialHotspot) => void;
+  onHotspotDelete?: (hotspot: SpatialHotspot) => void;
   onCancelEdit: () => void;
 }
 
-export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspotId, onHotspotCreated, onHotspotClick, onCancelEdit }: Props) {
+export function HotspotCanvas({ 
+  imageUrl, 
+  hotspots, 
+  isEditing, 
+  highlightedHotspotId, 
+  onHotspotCreated, 
+  onHotspotClick, 
+  onHotspotDelete,
+  onCancelEdit 
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentPoints, setCurrentPoints] = useState<{ x: number; y: number }[]>([]);
   const { isOnline } = useNetworkState();
@@ -23,8 +34,18 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
   const [showConfig, setShowConfig] = useState(false);
   const [hoveredHotspotId, setHoveredHotspotId] = useState<string | null>(null);
 
-  const [drawMode, setDrawMode] = useState<'freehand' | 'polygon'>('freehand');
+  const [drawMode, setDrawMode] = useState<'freehand' | 'polygon' | 'delete'>('freehand');
   const [polygonMousePos, setPolygonMousePos] = useState<{ x: number; y: number } | null>(null);
+
+  // Reset mode when exiting edit
+  useEffect(() => {
+    if (!isEditing) {
+      setDrawMode('freehand');
+      setCurrentPoints([]);
+      setIsDrawing(false);
+      setPolygonMousePos(null);
+    }
+  }, [isEditing]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -52,7 +73,7 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (!isEditing || !isOnline) return;
+    if (!isEditing || !isOnline || drawMode === 'delete') return;
     e.preventDefault();
     
     if (drawMode === 'freehand') {
@@ -80,7 +101,7 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isEditing || !isOnline) return;
+    if (!isEditing || !isOnline || drawMode === 'delete') return;
     e.preventDefault();
     if (drawMode === 'freehand') {
       if (!isDrawing) return;
@@ -109,27 +130,78 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
     return points.map(p => `${p.x * 100},${p.y * 100}`).join(" ");
   };
 
+  const hoveredHotspot = hotspots.find(h => h.id === hoveredHotspotId);
+
   return (
     <div className="relative w-full min-h-[500px] flex items-center justify-center bg-[#0f0e0c] border border-[#332f2a] overflow-auto rounded-lg p-2 sm:p-4">
+      {/* Edit Mode Toolbar */}
       {isEditing && (
-        <div className="sticky top-4 left-4 z-10 flex gap-2 bg-[#1a1816]/90 backdrop-blur-sm p-2 rounded border border-[#332f2a] self-start">
+        <div className="sticky top-4 left-4 z-20 flex flex-wrap items-center gap-1.5 bg-[#1a1816]/95 backdrop-blur-md p-1.5 rounded-lg border border-[#332f2a] self-start shadow-xl">
+          <span className="text-[10px] text-brand-text-muted uppercase tracking-widest font-bold px-2 hidden sm:inline">
+            Tool:
+          </span>
           <button 
+            type="button"
             onClick={() => { setDrawMode('freehand'); setCurrentPoints([]); setIsDrawing(false); }}
-            className={`px-3 py-1 text-xs font-medium rounded ${drawMode === 'freehand' ? 'bg-brand-accent text-white' : 'text-brand-text-muted hover:text-white'}`}
+            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+              drawMode === 'freehand' 
+                ? 'bg-brand-accent text-white shadow-sm' 
+                : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
+            }`}
           >
             Freehand
           </button>
           <button 
+            type="button"
             onClick={() => { setDrawMode('polygon'); setCurrentPoints([]); setIsDrawing(false); }}
-            className={`px-3 py-1 text-xs font-medium rounded ${drawMode === 'polygon' ? 'bg-brand-accent text-white' : 'text-brand-text-muted hover:text-white'}`}
+            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+              drawMode === 'polygon' 
+                ? 'bg-brand-accent text-white shadow-sm' 
+                : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
+            }`}
           >
             Polygon
           </button>
+          
+          <div className="h-4 w-px bg-[#332f2a] mx-1" />
+
+          <button 
+            type="button"
+            onClick={() => { setDrawMode('delete'); setCurrentPoints([]); setIsDrawing(false); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
+              drawMode === 'delete' 
+                ? 'bg-red-600 text-white shadow-md' 
+                : 'text-red-400/90 hover:text-red-300 hover:bg-red-500/10'
+            }`}
+            title="Click to select and delete hotspots"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span>Delete Hotspot</span>
+          </button>
         </div>
       )}
+
+      {/* Delete mode guidance banner */}
+      {isEditing && drawMode === 'delete' && (
+        <div className="absolute top-4 inset-x-0 flex justify-center pointer-events-none z-20">
+          <div className="bg-red-950/90 text-red-200 border border-red-700/60 px-4 py-1.5 rounded-full text-xs font-semibold shadow-lg backdrop-blur-sm flex items-center gap-2 pointer-events-auto">
+            <Trash2 className="h-3.5 w-3.5 text-red-400" />
+            <span>
+              {hoveredHotspot 
+                ? `Click to delete "${hoveredHotspot.label}"` 
+                : "Click on any highlighted hotspot to delete it"}
+            </span>
+          </div>
+        </div>
+      )}
+
       <div 
         ref={containerRef}
-        className={`relative inline-block touch-none select-none max-w-full ${isEditing ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`relative inline-block touch-none select-none max-w-full ${
+          isEditing 
+            ? (drawMode === 'delete' ? 'cursor-pointer' : 'cursor-crosshair') 
+            : 'cursor-default'
+        }`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -153,18 +225,44 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
           {hotspots.map((hs) => {
             const isHovered = hoveredHotspotId === hs.id;
             const isHighlighted = highlightedHotspotId === hs.id;
+            const isDeleteMode = isEditing && drawMode === 'delete';
+            const isClickable = isDeleteMode || !isEditing;
             
             return (
               <polygon
                 key={hs.id}
                 points={hs.shape_points.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
-                fill={isHovered ? "rgba(239, 68, 68, 0.4)" : isHighlighted ? "rgba(239, 68, 68, 0.2)" : "rgba(255, 255, 255, 0.1)"}
-                stroke={isHovered || isHighlighted ? "#ef4444" : "rgba(255,255,255,0.5)"}
-                strokeWidth={isHighlighted ? "0.6" : "0.3"}
-                className={`transition-all duration-300 ${isHighlighted ? 'animate-pulse' : ''} ${!isEditing ? "cursor-pointer pointer-events-auto" : "pointer-events-none"}`}
-                onMouseEnter={() => !isEditing && setHoveredHotspotId(hs.id)}
+                fill={
+                  isDeleteMode
+                    ? (isHovered ? "rgba(239, 68, 68, 0.55)" : "rgba(239, 68, 68, 0.22)")
+                    : isHovered 
+                      ? "rgba(239, 68, 68, 0.4)" 
+                      : isHighlighted 
+                        ? "rgba(239, 68, 68, 0.2)" 
+                        : "rgba(255, 255, 255, 0.1)"
+                }
+                stroke={
+                  isDeleteMode
+                    ? (isHovered ? "#ff2222" : "rgba(239, 68, 68, 0.85)")
+                    : isHovered || isHighlighted 
+                      ? "#ef4444" 
+                      : "rgba(255,255,255,0.5)"
+                }
+                strokeWidth={isDeleteMode ? (isHovered ? "0.8" : "0.5") : (isHighlighted ? "0.6" : "0.3")}
+                strokeDasharray={isDeleteMode ? (isHovered ? "none" : "2,2") : "none"}
+                className={`transition-all duration-200 ${isHighlighted ? 'animate-pulse' : ''} ${
+                  isClickable ? "cursor-pointer pointer-events-auto" : "pointer-events-none"
+                }`}
+                onMouseEnter={() => isClickable && setHoveredHotspotId(hs.id)}
                 onMouseLeave={() => setHoveredHotspotId(null)}
-                onClick={() => !isEditing && onHotspotClick(hs)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isDeleteMode) {
+                    onHotspotDelete?.(hs);
+                  } else if (!isEditing) {
+                    onHotspotClick(hs);
+                  }
+                }}
               />
             );
           })}

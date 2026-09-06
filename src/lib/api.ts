@@ -589,6 +589,35 @@ export async function deleteSpatialPhoto(photoId: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function deleteHotspot(hotspotId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_hotspot_recursive', { p_hotspot_id: hotspotId });
+  if (error) {
+    console.warn("RPC delete_hotspot_recursive error, running client cascade fallback:", error);
+    const { data: hs } = await supabase.from('spatial_hotspots').select('*').eq('id', hotspotId).single();
+    if (hs?.child_photo_id) {
+      await deleteSpatialPhoto(hs.child_photo_id).catch(() => {});
+    }
+    const { data: childPhotos } = await supabase.from('spatial_photos').select('id').eq('parent_hotspot_id', hotspotId);
+    if (childPhotos && childPhotos.length > 0) {
+      for (const cp of childPhotos) {
+        await deleteSpatialPhoto(cp.id).catch(() => {});
+      }
+    }
+    await supabase.from('component_locations').delete().eq('hotspot_id', hotspotId);
+    const { error: delErr } = await supabase.from('spatial_hotspots').delete().eq('id', hotspotId);
+    if (delErr) throw delErr;
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_hotspots.delete(hotspotId);
+      await db.component_locations.where('hotspot_id').equals(hotspotId).delete();
+    } catch (dbErr) {
+      console.warn("Offline db cleanup error on hotspot delete:", dbErr);
+    }
+  }
+}
+
 export async function deleteRoom(roomId: string): Promise<void> {
   const { error } = await supabase.rpc('delete_room_recursive', { p_room_id: roomId });
   if (error) throw error;

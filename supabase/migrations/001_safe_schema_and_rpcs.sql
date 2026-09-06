@@ -609,3 +609,24 @@ BEGIN
 END;
 $$;
 
+-- RPC: Recursive hotspot deletion
+CREATE OR REPLACE FUNCTION delete_hotspot_recursive(p_hotspot_id UUID) RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE
+  v_child_photo_id UUID;
+BEGIN
+  SELECT child_photo_id INTO v_child_photo_id FROM spatial_hotspots WHERE id = p_hotspot_id;
+  IF v_child_photo_id IS NOT NULL THEN
+    PERFORM delete_spatial_photo_recursive(v_child_photo_id);
+  END IF;
+
+  FOR v_child_photo_id IN SELECT id FROM spatial_photos WHERE parent_hotspot_id = p_hotspot_id
+  LOOP
+    PERFORM delete_spatial_photo_recursive(v_child_photo_id);
+  END LOOP;
+
+  DELETE FROM component_locations WHERE hotspot_id = p_hotspot_id;
+  DELETE FROM spatial_hotspots WHERE id = p_hotspot_id;
+END;
+$$;
+
+
