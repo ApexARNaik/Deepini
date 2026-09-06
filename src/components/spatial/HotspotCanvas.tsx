@@ -110,9 +110,9 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
   };
 
   return (
-    <div className="relative w-full h-full min-h-[600px] flex items-center justify-center bg-[#0f0e0c] border border-[#332f2a] overflow-hidden rounded-lg">
+    <div className="relative w-full min-h-[500px] flex items-center justify-center bg-[#0f0e0c] border border-[#332f2a] overflow-auto rounded-lg p-2 sm:p-4">
       {isEditing && (
-        <div className="absolute top-4 left-4 z-10 flex gap-2 bg-[#1a1816] p-2 rounded border border-[#332f2a]">
+        <div className="sticky top-4 left-4 z-10 flex gap-2 bg-[#1a1816]/90 backdrop-blur-sm p-2 rounded border border-[#332f2a] self-start">
           <button 
             onClick={() => { setDrawMode('freehand'); setCurrentPoints([]); setIsDrawing(false); }}
             className={`px-3 py-1 text-xs font-medium rounded ${drawMode === 'freehand' ? 'bg-brand-accent text-white' : 'text-brand-text-muted hover:text-white'}`}
@@ -129,7 +129,7 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
       )}
       <div 
         ref={containerRef}
-        className={`relative max-w-full max-h-full inline-block touch-none select-none ${isEditing ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`relative inline-block touch-none select-none max-w-full ${isEditing ? 'cursor-crosshair' : 'cursor-default'}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -139,7 +139,7 @@ export function HotspotCanvas({ imageUrl, hotspots, isEditing, highlightedHotspo
         <img 
           src={imageUrl} 
           alt="Room Map" 
-          className="max-w-full max-h-[80vh] object-contain pointer-events-none"
+          className="max-w-full h-auto block pointer-events-none select-none"
           draggable={false}
         />
 

@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS components (
   datasheet_link TEXT,
   low_stock_threshold INT,
   notes TEXT,
+  item_type TEXT DEFAULT 'component',
   pending_delete BOOLEAN DEFAULT false,
   custom_fields JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -78,6 +79,7 @@ ALTER TABLE components
   ADD COLUMN IF NOT EXISTS datasheet_link TEXT,
   ADD COLUMN IF NOT EXISTS low_stock_threshold INT,
   ADD COLUMN IF NOT EXISTS notes TEXT,
+  ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'component',
   ADD COLUMN IF NOT EXISTS pending_delete BOOLEAN DEFAULT false,
   ADD COLUMN IF NOT EXISTS custom_fields JSONB DEFAULT '{}'::jsonb,
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now(),
@@ -593,3 +595,17 @@ BEGIN
   DELETE FROM rooms WHERE id = p_room_id;
 END;
 $$;
+
+-- RPC: Atomic spatial photos reordering
+CREATE OR REPLACE FUNCTION reorder_spatial_photos(
+  p_photo_ids UUID[]
+) RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE spatial_photos AS sp
+  SET order_index = ord.idx - 1,
+      updated_at = now()
+  FROM unnest(p_photo_ids) WITH ORDINALITY AS ord(id, idx)
+  WHERE sp.id = ord.id;
+END;
+$$;
+

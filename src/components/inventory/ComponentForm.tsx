@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, getAllLeafHotspots } from "@/lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, getAllLeafHotspots, isPersonalItem } from "@/lib/api";
 import { X, Plus, UploadCloud } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 
@@ -14,8 +14,13 @@ interface Props {
 
 export function ComponentForm({ initialData, initialTags, initialLocations }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isOnline } = useNetworkState();
   
+  const typeParam = searchParams.get('type');
+  const isInitialPersonal = initialData ? isPersonalItem(initialData) : (typeParam === 'personal');
+  const [itemType, setItemType] = useState<'component' | 'personal'>(isInitialPersonal ? 'personal' : 'component');
+
   // Standard Fields
   const [name, setName] = useState(initialData?.name || "");
   const [price, setPrice] = useState(initialData?.price?.toString() || "");
@@ -43,7 +48,11 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [locationQuantity, setLocationQuantity] = useState("1");
   
   // Custom Fields
-  const [customFields, setCustomFields] = useState(initialData?.custom_fields || {});
+  const [customFields, setCustomFields] = useState<Record<string, { type: 'text' | 'number' | 'link' | 'image'; value: any }>>(() => {
+    const fields = { ...(initialData?.custom_fields || {}) };
+    delete fields.item_type;
+    return fields;
+  });
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState<'text' | 'number' | 'link' | 'image'>('text');
   
@@ -143,32 +152,60 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     setLoading(true);
     let success = false;
     try {
+      let finalTagIds = tags.map(t => t.id);
+
+      // If personal item, automatically ensure it has a "Personal" tag
+      if (itemType === 'personal') {
+        const hasPersonalTag = tags.some(t => t.name.toLowerCase() === 'personal');
+        if (!hasPersonalTag) {
+          try {
+            const personalTag = availableTags.find(t => t.name.toLowerCase() === 'personal') || await upsertTag('Personal');
+            if (personalTag && !finalTagIds.includes(personalTag.id)) {
+              finalTagIds = [...finalTagIds, personalTag.id];
+            }
+          } catch (tErr) {
+            console.warn("Could not tag as personal:", tErr);
+          }
+        }
+      }
+
       const payload: Partial<Component> = {
         name: name.trim(),
-        price: price ? parseFloat(price) : undefined,
-        purchase_source: purchaseSource || undefined,
-        datasheet_link: datasheetLink || undefined,
-        low_stock_threshold: lowStock ? parseInt(lowStock, 10) : undefined,
-        notes: notes || undefined,
+        item_type: itemType,
         photo_url: photoUrl || undefined,
-        custom_fields: customFields
+        notes: notes ? notes.trim() : undefined,
+        custom_fields: {
+          ...customFields,
+          item_type: itemType
+        }
       };
-  //testing
+
+      if (itemType === 'component') {
+        payload.price = price ? parseFloat(price) : undefined;
+        payload.purchase_source = purchaseSource || undefined;
+        payload.datasheet_link = datasheetLink || undefined;
+        payload.low_stock_threshold = lowStock ? parseInt(lowStock, 10) : undefined;
+      } else {
+        payload.price = undefined;
+        payload.purchase_source = undefined;
+        payload.datasheet_link = undefined;
+        payload.low_stock_threshold = undefined;
+      }
     
       if (initialData?.id) {
         payload.id = initialData.id;
       }
 
-      await upsertComponent(payload, tags.map(t => t.id), locations);
+      await upsertComponent(payload, finalTagIds, locations);
       success = true;
     } catch (err: any) {
       console.error("Full error:", err);
-      alert(`Failed to save component: ${err?.message || String(err)}`);
+      alert(`Failed to save ${itemType === 'personal' ? 'personal item' : 'component'}: ${err?.message || String(err)}`);
       setLoading(false);
     }
     
     if (success) {
-      router.push("/inventory");
+      router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
     }
   };
 
@@ -176,11 +213,53 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     <form onSubmit={onSubmit} className="max-w-4xl mx-auto space-y-8 pb-20">
       <fieldset disabled={!isOnline} className="space-y-8">
       
-      {/* Top section: Photo + Main details */}
+      {/* Header & Item Type Selector */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#332f2a]">
+        <div>
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white mb-1">
+            {initialData 
+              ? `Edit ${itemType === 'personal' ? 'Personal Item' : 'Component'}` 
+              : (itemType === 'personal' ? 'Add Personal Item' : 'Add New Component')}
+          </h1>
+          <p className="text-xs sm:text-sm text-brand-text-muted">
+            {itemType === 'personal'
+              ? 'Name, description, and physical storage location.'
+              : 'Technical specs, pricing, datasheets, and storage locations.'}
+          </p>
+        </div>
+        
+        {/* Toggle between Component and Personal Item */}
+        <div className="inline-flex p-1 bg-[#141312] border border-[#332f2a] rounded shrink-0">
+          <button
+            type="button"
+            onClick={() => setItemType('component')}
+            className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider rounded transition-all ${
+              itemType === 'component'
+                ? 'bg-brand-accent text-white shadow'
+                : 'text-brand-text-muted hover:text-white'
+            }`}
+          >
+            Component
+          </button>
+          <button
+            type="button"
+            onClick={() => setItemType('personal')}
+            className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider rounded transition-all ${
+              itemType === 'personal'
+                ? 'bg-brand-accent text-white shadow'
+                : 'text-brand-text-muted hover:text-white'
+            }`}
+          >
+            Personal Item
+          </button>
+        </div>
+      </div>
+
+      {/* Photo + Main details */}
       <div className="flex flex-col md:flex-row gap-8">
         <div className="w-48 shrink-0 flex flex-col gap-2">
           <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase">
-            Component Image
+            {itemType === 'personal' ? "Item Photo" : "Component Image"}
           </label>
           <div className="relative h-48 border border-[#332f2a] rounded overflow-hidden bg-[#1a1816] group">
             {photoUrl ? (
@@ -206,79 +285,57 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         <div className="flex-1 space-y-6">
           <div>
             <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
-              Component Name *
+              {itemType === 'personal' ? "Item Name *" : "Component Name *"}
             </label>
             <input
               required
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="e.g. ESP32 WROOM-32D"
+              placeholder={itemType === 'personal' ? "e.g. Screwdriver Kit, Soldering Iron, Notebook, Keys..." : "e.g. ESP32 WROOM-32D"}
               className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none font-bold text-lg"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          {itemType === 'personal' ? (
             <div>
               <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
-                Price (INR)
+                Description
               </label>
-              <input
-                type="number"
-                step="0.01"
-                value={price}
-                onChange={e => setPrice(e.target.value)}
-                className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Description, notes, or details about this personal item..."
+                className="w-full h-28 bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none resize-none"
               />
             </div>
-            <div>
-              <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
-                Low Stock Alert At
-              </label>
-              <input
-                type="number"
-                value={lowStock}
-                onChange={e => setLowStock(e.target.value)}
-                className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
-              />
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
+                  Price (INR)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={price}
+                  onChange={e => setPrice(e.target.value)}
+                  className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
+                  Low Stock Alert At
+                </label>
+                <input
+                  type="number"
+                  value={lowStock}
+                  onChange={e => setLowStock(e.target.value)}
+                  className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
+                />
+              </div>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <hr className="border-[#332f2a]" />
-
-      {/* Tags */}
-      <div>
-        <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
-          Tags
-        </label>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {tags.map(t => (
-            <span key={t.id} className="inline-flex items-center gap-1 px-3 py-1 bg-[#1a1816] border border-[#332f2a] rounded text-xs text-brand-text">
-              {t.name}
-              <button type="button" onClick={() => handleRemoveTag(t.id)} className="text-brand-text-muted hover:text-white">
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-        <div className="flex gap-2 max-w-sm">
-          <input
-            type="text"
-            value={tagInput}
-            onChange={e => setTagInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAddTag(e)}
-            placeholder="Add new or existing tag..."
-            className="flex-1 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
-            list="available-tags"
-          />
-          <datalist id="available-tags">
-            {availableTags.map(t => <option key={t.id} value={t.name} />)}
-          </datalist>
-          <button type="button" onClick={handleAddTag} className="px-3 bg-[#1a1816] border border-[#332f2a] text-brand-text hover:bg-[#222]">
-            Add
-          </button>
+          )}
         </div>
       </div>
 
@@ -289,6 +346,9 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
           Storage Locations
         </label>
+        <p className="text-xs text-brand-text-muted mb-3">
+          Assign this {itemType === 'personal' ? 'item' : 'component'} to a physical location or container on the room map.
+        </p>
         {locations.length > 0 && (
           <div className="flex flex-col gap-2 mb-3">
             {locations.map(l => (
@@ -334,123 +394,166 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
 
       <hr className="border-[#332f2a]" />
 
-      {/* Links & Notes */}
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className="space-y-6">
-          <div>
-            <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
-              Purchase Source URL
-            </label>
-            <input
-              type="url"
-              value={purchaseSource}
-              onChange={e => setPurchaseSource(e.target.value)}
-              className="w-full bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
-              Datasheet URL
-            </label>
-            <input
-              type="url"
-              value={datasheetLink}
-              onChange={e => setDatasheetLink(e.target.value)}
-              className="w-full bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
-            Notes
-          </label>
-          <textarea
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            className="w-full h-32 bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none resize-none"
-          />
-        </div>
-      </div>
-
-      <hr className="border-[#332f2a]" />
-
-      {/* Custom Fields Builder */}
+      {/* Tags */}
       <div>
-        <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-4">
-          Custom Fields
+        <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
+          Tags
         </label>
-        
-        <div className="space-y-4 mb-6">
-          {Object.entries(customFields).map(([key, field]) => (
-            <div key={key} className="flex gap-4 items-start">
-              <div className="w-1/3">
-                <div className="text-xs font-bold text-brand-text-muted uppercase">{key}</div>
-                <div className="text-[10px] text-[#555] uppercase">{field.type}</div>
-              </div>
-              <div className="flex-1">
-                {field.type === 'text' && (
-                  <input type="text" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
-                )}
-                {field.type === 'number' && (
-                  <input type="number" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
-                )}
-                {field.type === 'link' && (
-                  <input type="url" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
-                )}
-                {field.type === 'image' && (
-                  <div className="flex items-center gap-4">
-                    {field.value && <img src={field.value} alt={key} className="h-10 w-10 object-cover border border-[#332f2a] rounded" />}
-                    <input type="file" accept="image/*" onChange={e => e.target.files?.[0] && handleCustomFieldImageUpload(key, e.target.files[0])} className="text-xs text-brand-text-muted" />
-                  </div>
-                )}
-              </div>
-              <button type="button" onClick={() => handleRemoveCustomField(key)} className="mt-2 text-brand-text-muted hover:text-red-400">
-                <X className="h-4 w-4" />
+        <div className="flex flex-wrap gap-2 mb-3">
+          {tags.map(t => (
+            <span key={t.id} className="inline-flex items-center gap-1 px-3 py-1 bg-[#1a1816] border border-[#332f2a] rounded text-xs text-brand-text">
+              {t.name}
+              <button type="button" onClick={() => handleRemoveTag(t.id)} className="text-brand-text-muted hover:text-white">
+                <X className="h-3 w-3" />
               </button>
-            </div>
+            </span>
           ))}
         </div>
-
-        <div className="flex gap-2 p-4 border border-dashed border-[#332f2a] bg-[#1a1816] rounded items-center">
+        <div className="flex gap-2 max-w-sm">
           <input
             type="text"
-            placeholder="New Field Name"
-            value={newFieldName}
-            onChange={e => setNewFieldName(e.target.value)}
+            value={tagInput}
+            onChange={e => setTagInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAddTag(e)}
+            placeholder="Add new or existing tag..."
             className="flex-1 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+            list="available-tags"
           />
-          <select 
-            value={newFieldType}
-            onChange={e => setNewFieldType(e.target.value as any)}
-            className="w-32 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:outline-none"
-          >
-            <option value="text">Text</option>
-            <option value="number">Number</option>
-            <option value="link">Link</option>
-            <option value="image">Image</option>
-          </select>
-          <button type="button" onClick={handleAddCustomField} className="px-3 py-2 bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30 rounded text-sm flex items-center">
-            <Plus className="h-4 w-4 mr-1" /> Add
+          <datalist id="available-tags">
+            {availableTags.map(t => <option key={t.id} value={t.name} />)}
+          </datalist>
+          <button type="button" onClick={handleAddTag} className="px-3 bg-[#1a1816] border border-[#332f2a] text-brand-text hover:bg-[#222]">
+            Add
           </button>
         </div>
       </div>
 
+      {/* Component-only technical fields */}
+      {itemType === 'component' && (
+        <>
+          <hr className="border-[#332f2a]" />
+
+          {/* Links & Notes */}
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="space-y-6">
+              <div>
+                <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
+                  Purchase Source URL
+                </label>
+                <input
+                  type="url"
+                  value={purchaseSource}
+                  onChange={e => setPurchaseSource(e.target.value)}
+                  className="w-full bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
+                  Datasheet URL
+                </label>
+                <input
+                  type="url"
+                  value={datasheetLink}
+                  onChange={e => setDatasheetLink(e.target.value)}
+                  className="w-full bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
+                Notes
+              </label>
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                className="w-full h-32 bg-brand-bg border border-[#332f2a] p-3 text-sm text-white focus:border-brand-accent focus:outline-none resize-none"
+              />
+            </div>
+          </div>
+
+          <hr className="border-[#332f2a]" />
+
+          {/* Custom Fields Builder */}
+          <div>
+            <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-4">
+              Custom Fields
+            </label>
+            
+            <div className="space-y-4 mb-6">
+              {Object.entries(customFields)
+                .filter(([key]) => key !== 'item_type')
+                .map(([key, field]) => (
+                <div key={key} className="flex gap-4 items-start">
+                  <div className="w-1/3">
+                    <div className="text-xs font-bold text-brand-text-muted uppercase">{key}</div>
+                    <div className="text-[10px] text-[#555] uppercase">{field.type}</div>
+                  </div>
+                  <div className="flex-1">
+                    {field.type === 'text' && (
+                      <input type="text" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
+                    )}
+                    {field.type === 'number' && (
+                      <input type="number" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
+                    )}
+                    {field.type === 'link' && (
+                      <input type="url" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
+                    )}
+                    {field.type === 'image' && (
+                      <div className="flex items-center gap-4">
+                        {field.value && <img src={field.value} alt={key} className="h-10 w-10 object-cover border border-[#332f2a] rounded" />}
+                        <input type="file" accept="image/*" onChange={e => e.target.files?.[0] && handleCustomFieldImageUpload(key, e.target.files[0])} className="text-xs text-brand-text-muted" />
+                      </div>
+                    )}
+                  </div>
+                  <button type="button" onClick={() => handleRemoveCustomField(key)} className="mt-2 text-brand-text-muted hover:text-red-400">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-2 p-4 border border-dashed border-[#332f2a] bg-[#1a1816] rounded items-center">
+              <input
+                type="text"
+                placeholder="New Field Name"
+                value={newFieldName}
+                onChange={e => setNewFieldName(e.target.value)}
+                className="flex-1 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+              />
+              <select 
+                value={newFieldType}
+                onChange={e => setNewFieldType(e.target.value as any)}
+                className="w-32 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:outline-none"
+              >
+                <option value="text">Text</option>
+                <option value="number">Number</option>
+                <option value="link">Link</option>
+                <option value="image">Image</option>
+              </select>
+              <button type="button" onClick={handleAddCustomField} className="px-3 py-2 bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30 rounded text-sm flex items-center">
+                <Plus className="h-4 w-4 mr-1" /> Add
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
       </fieldset>
-      <div className="fixed bottom-0 inset-x-0 ml-64 bg-[#1a1816] border-t border-[#332f2a] p-4 flex justify-between items-center">
+      <div className="fixed bottom-0 inset-x-0 ml-64 bg-[#1a1816] border-t border-[#332f2a] p-4 flex justify-between items-center z-20">
         {isOnline ? (
           <>
             {initialData ? (
               <button 
                 type="button" 
                 onClick={() => {
-                  if (confirm("Are you sure you want to delete this component? If it has active checkouts, it will be marked as pending delete until returned.")) {
+                  if (confirm(`Are you sure you want to delete this ${itemType === 'personal' ? 'personal item' : 'component'}?`)) {
                     import('@/lib/api').then(({ deleteComponent }) => {
                       setLoading(true);
                       deleteComponent(initialData.id).then(() => {
-                        router.push('/inventory');
+                        router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
                       }).catch(err => {
                         console.error(err);
-                        alert("Failed to delete component");
+                        alert(`Failed to delete ${itemType === 'personal' ? 'personal item' : 'component'}`);
                         setLoading(false);
                       });
                     });
@@ -458,7 +561,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                 }} 
                 className="px-4 py-2 text-brand-accent hover:text-red-400 text-xs font-bold uppercase tracking-widest transition-colors"
               >
-                Delete Component
+                Delete {itemType === 'personal' ? 'Item' : 'Component'}
               </button>
             ) : <div/>}
 
@@ -467,7 +570,11 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                 Cancel
               </button>
               <button type="submit" disabled={loading} className="px-8 py-2 bg-brand-accent text-white font-bold tracking-widest text-sm rounded-sm hover:bg-brand-accent-hover disabled:opacity-50">
-                {loading ? "SAVING..." : "SAVE COMPONENT"}
+                {loading 
+                  ? "SAVING..." 
+                  : (initialData 
+                      ? (itemType === 'personal' ? "UPDATE PERSONAL ITEM" : "UPDATE COMPONENT") 
+                      : (itemType === 'personal' ? "SAVE PERSONAL ITEM" : "SAVE COMPONENT"))}
               </button>
             </div>
           </>
