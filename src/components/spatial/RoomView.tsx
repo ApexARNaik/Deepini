@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -21,6 +21,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [showHotspotsList, setShowHotspotsList] = useState(false);
   const router = useRouter();
   
   // Room Edit State
@@ -530,7 +531,80 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         </div>
         
         {activePhoto && !pendingChildUpload && (
-          <div className="flex gap-3">
+          <div className="flex items-center gap-3">
+            {/* Extendable Hotspots on this View Menu */}
+            {isEditing && isOnline && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowHotspotsList(!showHotspotsList)}
+                  className={`flex items-center px-3 py-2 text-xs font-bold uppercase tracking-widest border transition-all ${
+                    showHotspotsList
+                      ? 'bg-brand-accent/20 border-brand-accent text-brand-accent'
+                      : 'bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c] hover:text-white'
+                  }`}
+                  title="View and manage hotspots on this view"
+                >
+                  <MapPin className="h-3.5 w-3.5 mr-1.5 text-brand-accent" />
+                  <span>Hotspots ({hotspots.length})</span>
+                  <ChevronDown className={`h-3.5 w-3.5 ml-1.5 transition-transform duration-200 ${showHotspotsList ? 'rotate-180 text-brand-accent' : 'text-brand-text-muted'}`} />
+                </button>
+
+                {showHotspotsList && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setShowHotspotsList(false)} 
+                    />
+                    <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl z-50 overflow-hidden flex flex-col max-h-[28rem] animate-fadeIn">
+                      <div className="flex items-center justify-between p-3.5 border-b border-[#332f2a] bg-black/40">
+                        <div>
+                          <div className="text-xs font-bold text-white uppercase tracking-wider">Hotspots on this View</div>
+                          <div className="text-[10px] text-brand-text-muted mt-0.5">Click Delete to remove any hotspot region</div>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 bg-[#252320] border border-[#332f2a] text-brand-text-muted rounded-full font-mono">
+                          {hotspots.length}
+                        </span>
+                      </div>
+
+                      <div className="p-3 overflow-y-auto space-y-2">
+                        {hotspots.length === 0 ? (
+                          <div className="text-xs text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded p-4">
+                            No hotspots marked on this view yet. Use the Freehand or Polygon tools on the canvas to trace one.
+                          </div>
+                        ) : (
+                          hotspots.map((hs) => (
+                            <div 
+                              key={hs.id} 
+                              className="flex items-center justify-between p-2.5 bg-black/40 border border-[#332f2a] rounded hover:border-[#4a443c] transition-colors group"
+                            >
+                              <div className="min-w-0 pr-2">
+                                <div className="text-sm font-bold text-white truncate">{hs.label}</div>
+                                <div className="text-[10px] text-brand-text-muted tracking-wider uppercase">
+                                  {hs.is_leaf ? "Storage Location" : "Opens into Storage"}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleDeleteHotspot(hs);
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors shrink-0"
+                                title={`Delete hotspot "${hs.label}"`}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                <span>Delete</span>
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {isEditing && isOnline && (
               <button
                 onClick={handleDeletePhoto}
@@ -544,6 +618,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               onClick={() => {
                 if (!isEditing) {
                   setSelectedLeafHotspot(null);
+                } else {
+                  setShowHotspotsList(false);
                 }
                 setIsEditing(!isEditing);
               }}
@@ -913,54 +989,6 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     )}
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Side Panel in Edit Mode: Hotspots Management */}
-        {isEditing && (
-          <div className="fixed inset-x-0 bottom-16 top-16 lg:static lg:sticky lg:top-4 lg:w-80 lg:self-start lg:max-h-[calc(100vh-6rem)] shrink-0 bg-[#1a1816] border-t lg:border border-[#332f2a] lg:rounded-lg flex flex-col overflow-hidden z-40 lg:z-auto shadow-2xl">
-            <div className="flex items-center justify-between p-4 border-b border-[#332f2a] shrink-0">
-              <div>
-                <h2 className="font-serif text-sm font-bold text-white tracking-wider uppercase">Hotspots on this View</h2>
-                <p className="text-[10px] text-brand-text-muted mt-0.5">Select a hotspot to delete or manage</p>
-              </div>
-              <span className="text-xs px-2 py-0.5 bg-[#222] border border-[#332f2a] text-brand-text-muted rounded-full font-mono">
-                {hotspots.length}
-              </span>
-            </div>
-            
-            <div className="p-4 flex-1 overflow-y-auto space-y-2">
-              {hotspots.length === 0 ? (
-                <div className="text-xs text-brand-text-muted text-center py-8 border border-dashed border-[#332f2a] rounded p-4">
-                  No hotspots marked on this view yet. Use the Freehand or Polygon tools on the canvas to draw one.
-                </div>
-              ) : (
-                hotspots.map((hs) => (
-                  <div 
-                    key={hs.id} 
-                    className="flex items-center justify-between p-3 bg-black/40 border border-[#332f2a] rounded hover:border-[#4a443c] transition-colors group"
-                  >
-                    <div className="min-w-0 pr-2">
-                      <div className="text-sm font-bold text-white truncate">{hs.label}</div>
-                      <div className="text-[10px] text-brand-text-muted tracking-wider uppercase">
-                        {hs.is_leaf ? "Storage Location" : "Opens into Storage"}
-                      </div>
-                    </div>
-                    {isOnline && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteHotspot(hs)}
-                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors shrink-0"
-                        title={`Delete hotspot "${hs.label}"`}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>Delete</span>
-                      </button>
-                    )}
-                  </div>
-                ))
               )}
             </div>
           </div>

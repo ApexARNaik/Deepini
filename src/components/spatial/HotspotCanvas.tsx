@@ -239,7 +239,7 @@ export function HotspotCanvas({
                       ? "rgba(239, 68, 68, 0.4)" 
                       : isHighlighted 
                         ? "rgba(239, 68, 68, 0.2)" 
-                        : "rgba(255, 255, 255, 0.1)"
+                        : "rgba(255, 255, 255, 0.3)"
                 }
                 stroke={
                   isDeleteMode
