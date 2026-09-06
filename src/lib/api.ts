@@ -28,6 +28,8 @@ export interface SpatialHotspot {
   child_photo_id: string | null;
 }
 
+export type CustomField = { type: 'text' | 'number' | 'link' | 'image'; value: any };
+
 export interface Component {
   id: string;
   name: string;
@@ -38,9 +40,19 @@ export interface Component {
   low_stock_threshold?: number;
   notes?: string;
   pending_delete: boolean;
-  custom_fields: Record<string, { type: 'text' | 'number' | 'link' | 'image'; value: any }>;
+  custom_fields: Record<string, any>;
+  item_type?: 'component' | 'personal';
   created_at: string;
   updated_at: string;
+}
+
+export function isPersonalItem(item: any): boolean {
+  if (!item) return false;
+  if (item.item_type === 'personal') return true;
+  if (item.custom_fields && item.custom_fields.item_type === 'personal') return true;
+  if (item.custom_fields && item.custom_fields.item_type?.value === 'personal') return true;
+  if (item.tags && Array.isArray(item.tags) && item.tags.some((t: any) => t.name?.toLowerCase() === 'personal')) return true;
+  return false;
 }
 
 export interface Tag {
@@ -281,6 +293,11 @@ export async function upsertComponent(
   tagIds: string[],
   locations: { hotspot_id: string, quantity: number }[] = []
 ): Promise<Component> {
+  const customFields = { ...(componentData.custom_fields || {}) };
+  if (componentData.item_type) {
+    (customFields as any).item_type = componentData.item_type;
+  }
+
   const { data, error } = await supabase.rpc('upsert_component_full', {
     p_id: componentData.id || null,
     p_name: componentData.name,
@@ -290,7 +307,7 @@ export async function upsertComponent(
     p_datasheet_link: componentData.datasheet_link || null,
     p_low_stock_threshold: componentData.low_stock_threshold || null,
     p_notes: componentData.notes || null,
-    p_custom_fields: componentData.custom_fields || {},
+    p_custom_fields: customFields,
     p_tag_ids: tagIds,
     p_locations: locations
   });

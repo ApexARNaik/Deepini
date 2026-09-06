@@ -8,18 +8,21 @@ import { useRouter } from "next/navigation";
 
 interface Props {
   components: ComponentWithTotals[];
+  viewMode?: 'components' | 'personal';
 }
 
-export function InventoryTable({ components }: Props) {
+export function InventoryTable({ components, viewMode = 'components' }: Props) {
   const router = useRouter();
 
   if (components.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center p-12 text-brand-text-muted border border-[#332f2a] rounded-lg">
-        <p>No components found.</p>
+        <p>{viewMode === 'personal' ? 'No personal items found.' : 'No components found.'}</p>
       </div>
     );
   }
+
+  const isPersonal = viewMode === 'personal';
 
   return (
     <div className="overflow-x-auto rounded-lg border border-[#332f2a]">
@@ -27,17 +30,24 @@ export function InventoryTable({ components }: Props) {
         <thead className="bg-[#1a1816] text-brand-text-muted text-[10px] uppercase tracking-widest border-b border-[#332f2a]">
           <tr>
             <th className="px-6 py-4 font-medium">Img</th>
-            <th className="px-6 py-4 font-medium">Component Name</th>
+            <th className="px-6 py-4 font-medium">{isPersonal ? "Item Name" : "Component Name"}</th>
+            {isPersonal ? (
+              <th className="px-6 py-4 font-medium max-w-xs">Description</th>
+            ) : null}
             <th className="px-6 py-4 font-medium">Tags</th>
             <th className="px-6 py-4 font-medium text-right">Quantity</th>
-            <th className="px-6 py-4 font-medium text-right">Price</th>
-            <th className="px-6 py-4 font-medium text-center">Status</th>
+            {!isPersonal && (
+              <>
+                <th className="px-6 py-4 font-medium text-right">Price</th>
+                <th className="px-6 py-4 font-medium text-center">Status</th>
+              </>
+            )}
             <th className="px-6 py-4"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[#222] bg-black/20">
           {components.map((c) => {
-            const isLowStock = c.low_stock_threshold !== null && c.low_stock_threshold !== undefined && c.totals.total_owned_qty <= c.low_stock_threshold;
+            const isLowStock = !isPersonal && c.low_stock_threshold !== null && c.low_stock_threshold !== undefined && c.totals.total_owned_qty <= c.low_stock_threshold;
             
             return (
               <tr 
@@ -61,6 +71,11 @@ export function InventoryTable({ components }: Props) {
                     ID: {c.id.split('-')[0].toUpperCase()}
                   </div>
                 </td>
+                {isPersonal && (
+                  <td className="px-6 py-4 max-w-xs truncate text-brand-text-muted">
+                    {c.notes || "-"}
+                  </td>
+                )}
                 <td className="px-6 py-4">
                   <div className="flex gap-2 flex-wrap max-w-[200px]">
                     {c.tags.map(t => (
@@ -78,12 +93,16 @@ export function InventoryTable({ components }: Props) {
                     Units
                   </div>
                 </td>
-                <td className="px-6 py-4 text-right font-mono text-brand-text-muted">
-                  {c.price != null ? formatCurrency(c.price) : '-'}
-                </td>
-                <td className="px-6 py-4 text-center">
-                  <div className={`inline-block h-2 w-2 rounded-full ${isLowStock ? 'bg-brand-accent shadow-[0_0_8px_rgba(239,68,68,0.8)]' : 'bg-green-500/80 shadow-[0_0_8px_rgba(34,197,94,0.4)]'}`} />
-                </td>
+                {!isPersonal && (
+                  <>
+                    <td className="px-6 py-4 text-right font-mono text-brand-text-muted">
+                      {c.price != null ? formatCurrency(c.price) : '-'}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <div className={`inline-block h-2 w-2 rounded-full ${isLowStock ? 'bg-brand-accent shadow-[0_0_8px_rgba(239,68,68,0.8)]' : 'bg-green-500/80 shadow-[0_0_8px_rgba(34,197,94,0.4)]'}`} />
+                    </td>
+                  </>
+                )}
                 <td className="px-6 py-4 text-right">
                   <div className="inline-flex items-center text-brand-text-muted group-hover:text-white transition-colors opacity-0 group-hover:opacity-100">
                     <span className="text-[10px] uppercase tracking-widest mr-1">View</span>

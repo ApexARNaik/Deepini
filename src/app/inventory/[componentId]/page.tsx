@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getComponentDetails, ComponentWithTotals, ComponentLocation } from "@/lib/api";
+import { getComponentDetails, ComponentWithTotals, ComponentLocation, isPersonalItem } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -21,16 +21,24 @@ export default function ComponentDetailPage() {
     }).catch(console.error);
   }, [componentId]);
 
-  if (loading) return <div className="p-6 text-brand-text-muted">Loading component...</div>;
-  if (!data) return <div className="p-6 text-brand-text-muted">Component not found.</div>;
+  if (loading) return <div className="p-6 text-brand-text-muted">Loading...</div>;
+  if (!data) return <div className="p-6 text-brand-text-muted">Item not found.</div>;
 
   const { component, locations } = data;
+  const isPersonal = isPersonalItem(component);
+
+  const customFieldEntries = Object.entries(component.custom_fields || {}).filter(
+    ([key]) => key !== 'item_type'
+  );
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-brand-bg">
       <div className="p-6 border-b border-[#332f2a] bg-[#1a1816] shrink-0">
-        <button onClick={() => router.push('/inventory')} className="flex items-center text-xs text-brand-text-muted hover:text-white uppercase tracking-widest mb-6 transition-colors">
-          <ArrowLeft className="h-3 w-3 mr-2" /> Back to Inventory
+        <button 
+          onClick={() => router.push(isPersonal ? '/inventory?view=personal' : '/inventory?view=components')} 
+          className="flex items-center text-xs text-brand-text-muted hover:text-white uppercase tracking-widest mb-6 transition-colors"
+        >
+          <ArrowLeft className="h-3 w-3 mr-2" /> Back to {isPersonal ? 'Personal Items' : 'Inventory'}
         </button>
         <div className="flex justify-between items-start">
           <div className="flex gap-6">
@@ -43,7 +51,14 @@ export default function ComponentDetailPage() {
               )}
             </div>
             <div>
-              <h1 className="font-serif text-3xl font-bold text-white mb-2">{component.name}</h1>
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="font-serif text-3xl font-bold text-white">{component.name}</h1>
+                {isPersonal && (
+                  <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest border border-brand-gold/40 text-brand-gold bg-brand-gold/10 rounded">
+                    Personal Item
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2 mb-3">
                 {component.tags.map(t => (
                   <span key={t.id} className="px-2 py-0.5 text-[10px] uppercase tracking-widest border border-[#332f2a] rounded text-brand-text-muted bg-[#1a1816]">
@@ -60,7 +75,7 @@ export default function ComponentDetailPage() {
             href={`/inventory/${component.id}/edit`}
             className="flex items-center px-4 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text text-xs font-bold uppercase tracking-widest hover:border-[#4a443c] transition-colors"
           >
-            <Edit2 className="h-3 w-3 mr-2" /> Edit Component
+            <Edit2 className="h-3 w-3 mr-2" /> {isPersonal ? "Edit Item" : "Edit Component"}
           </Link>
         </div>
       </div>
@@ -68,77 +83,114 @@ export default function ComponentDetailPage() {
       <div className="flex-1 overflow-y-auto p-6 flex flex-col lg:flex-row gap-8">
         <div className="flex-1 space-y-8">
           
-          <section>
-            <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Details</h2>
-            <div className="grid grid-cols-2 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
-              <div>
-                <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Total Owned</div>
-                <div className="text-xl font-serif text-white">{component.totals.total_owned_qty}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Storage</div>
-                <div className="text-xl font-serif text-white">{component.totals.in_storage_qty}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Price</div>
-                <div className="text-sm font-mono text-white">{component.price != null ? formatCurrency(component.price) : '-'}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Low Stock Alert</div>
-                <div className="text-sm font-mono text-white">{component.low_stock_threshold ?? '-'}</div>
-              </div>
-            </div>
-          </section>
-
-          {(component.purchase_source || component.datasheet_link || component.notes) && (
-            <section>
-              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Resources</h2>
-              <div className="space-y-4 text-sm text-brand-text">
-                {component.purchase_source && (
-                  <div className="flex gap-2">
-                    <span className="text-brand-text-muted w-32">Source:</span>
-                    <a href={component.purchase_source} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline inline-flex items-center">
-                      Vendor Link <ExternalLink className="h-3 w-3 ml-1" />
-                    </a>
-                  </div>
-                )}
-                {component.datasheet_link && (
-                  <div className="flex gap-2">
-                    <span className="text-brand-text-muted w-32">Datasheet:</span>
-                    <a href={component.datasheet_link} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline inline-flex items-center">
-                      PDF Link <ExternalLink className="h-3 w-3 ml-1" />
-                    </a>
-                  </div>
-                )}
-                {component.notes && (
+          {isPersonal ? (
+            <>
+              {/* Personal Item Details */}
+              <section>
+                <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Item Details</h2>
+                <div className="grid grid-cols-2 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
                   <div>
-                    <div className="text-brand-text-muted mb-1">Notes:</div>
-                    <p className="bg-[#1a1816] border border-[#332f2a] p-4 rounded whitespace-pre-wrap">{component.notes}</p>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Total Owned</div>
+                    <div className="text-xl font-serif text-white">{component.totals.total_owned_qty}</div>
                   </div>
-                )}
-              </div>
-            </section>
-          )}
+                  <div>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Storage</div>
+                    <div className="text-xl font-serif text-white">{component.totals.in_storage_qty}</div>
+                  </div>
+                </div>
+              </section>
 
-          {Object.keys(component.custom_fields).length > 0 && (
-            <section>
-              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Custom Specs</h2>
-              <div className="grid grid-cols-2 gap-4">
-                {Object.entries(component.custom_fields).map(([key, field]) => (
-                  <div key={key} className="bg-[#1a1816] p-3 border border-[#332f2a] rounded">
-                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">{key}</div>
-                    {field.type === 'link' ? (
-                      <a href={field.value} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline text-sm truncate block">{field.value}</a>
-                    ) : field.type === 'image' ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#332f2a] rounded mt-1" />
-                    ) : (
-                      <div className="text-white text-sm">{field.value}</div>
+              {/* Personal Item Description */}
+              {component.notes && (
+                <section>
+                  <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Description</h2>
+                  <div className="bg-[#1a1816] border border-[#332f2a] p-4 rounded text-sm text-brand-text whitespace-pre-wrap">
+                    {component.notes}
+                  </div>
+                </section>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Component Details */}
+              <section>
+                <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Details</h2>
+                <div className="grid grid-cols-2 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
+                  <div>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Total Owned</div>
+                    <div className="text-xl font-serif text-white">{component.totals.total_owned_qty}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Storage</div>
+                    <div className="text-xl font-serif text-white">{component.totals.in_storage_qty}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Price</div>
+                    <div className="text-sm font-mono text-white">{component.price != null ? formatCurrency(component.price) : '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Low Stock Alert</div>
+                    <div className="text-sm font-mono text-white">{component.low_stock_threshold ?? '-'}</div>
+                  </div>
+                </div>
+              </section>
+
+              {(component.purchase_source || component.datasheet_link || component.notes) && (
+                <section>
+                  <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Resources</h2>
+                  <div className="space-y-4 text-sm text-brand-text">
+                    {component.purchase_source && (
+                      <div className="flex gap-2">
+                        <span className="text-brand-text-muted w-32">Source:</span>
+                        <a href={component.purchase_source} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline inline-flex items-center">
+                          Vendor Link <ExternalLink className="h-3 w-3 ml-1" />
+                        </a>
+                      </div>
+                    )}
+                    {component.datasheet_link && (
+                      <div className="flex gap-2">
+                        <span className="text-brand-text-muted w-32">Datasheet:</span>
+                        <a href={component.datasheet_link} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline inline-flex items-center">
+                          PDF Link <ExternalLink className="h-3 w-3 ml-1" />
+                        </a>
+                      </div>
+                    )}
+                    {component.notes && (
+                      <div>
+                        <div className="text-brand-text-muted mb-1">Notes:</div>
+                        <p className="bg-[#1a1816] border border-[#332f2a] p-4 rounded whitespace-pre-wrap">{component.notes}</p>
+                      </div>
                     )}
                   </div>
-                ))}
-              </div>
-            </section>
+                </section>
+              )}
+
+              {customFieldEntries.length > 0 && (
+                <section>
+                  <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Custom Specs</h2>
+                  <div className="grid grid-cols-2 gap-4">
+                    {customFieldEntries.map(([key, rawField]) => {
+                      const field = typeof rawField === 'object' && rawField !== null
+                        ? rawField
+                        : { type: 'text', value: String(rawField) };
+                      return (
+                        <div key={key} className="bg-[#1a1816] p-3 border border-[#332f2a] rounded">
+                          <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">{key}</div>
+                          {field.type === 'link' ? (
+                            <a href={field.value} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline text-sm truncate block">{field.value}</a>
+                          ) : field.type === 'image' ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#332f2a] rounded mt-1" />
+                          ) : (
+                            <div className="text-white text-sm">{field.value}</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+            </>
           )}
 
         </div>

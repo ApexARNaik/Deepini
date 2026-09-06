@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, updateRoom, deleteRoom, reorderSpatialPhotos } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical } from "lucide-react";
@@ -39,6 +39,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [leafComponents, setLeafComponents] = useState<any[]>([]);
   const [allInventory, setAllInventory] = useState<ComponentWithTotals[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isAddingComponent, setIsAddingComponent] = useState(false);
 
   useEffect(() => {
     getInventory().then(setAllInventory).catch(console.error);
@@ -139,6 +140,12 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         alert(`Hotspot created. Please upload the inside photo for '${label}'.`);
         // We set up a temporary state to expect the next upload to link to this hotspot.
         setPendingChildUpload(newHotspot);
+      } else {
+        // Immediately select the new leaf storage location and open the add component UI
+        setSelectedLeafHotspot(newHotspot);
+        setLeafComponents([]);
+        setIsAddingComponent(true);
+        getInventory().then(setAllInventory).catch(console.error);
       }
     } catch (err) {
       console.error(err);
@@ -177,9 +184,18 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const handleHotspotClick = async (hotspot: SpatialHotspot) => {
     if (hotspot.is_leaf) {
       setSelectedLeafHotspot(hotspot);
+      setIsAddingComponent(false);
+      setSearchQuery("");
       try {
-        const comps = await getHotspotComponents(hotspot.id);
+        const [comps, inv] = await Promise.all([
+          getHotspotComponents(hotspot.id),
+          getInventory()
+        ]);
         setLeafComponents(comps);
+        setAllInventory(inv);
+        if (comps.length === 0) {
+          setIsAddingComponent(true);
+        }
       } catch (err) {
         console.error(err);
       }
@@ -681,20 +697,72 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             </div>
             
             <div className="p-4 flex-1 overflow-y-auto">
-              <div className="text-[10px] tracking-widest text-brand-text-muted uppercase mb-3">Contents</div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">Contents</div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddingComponent(prev => !prev)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider transition-all border ${
+                    isAddingComponent
+                      ? 'bg-brand-accent border-brand-accent text-white'
+                      : 'bg-brand-accent/15 border-brand-accent/40 text-brand-accent hover:bg-brand-accent hover:text-white'
+                  }`}
+                  title="Add component to this location"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Add</span>
+                </button>
+              </div>
+
               {leafComponents.length === 0 ? (
-                <div className="text-sm text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded">
-                  This location is empty.
+                <div className="text-sm text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded flex flex-col items-center gap-2">
+                  <span>This location is empty.</span>
+                  {!isAddingComponent && (
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingComponent(true)}
+                      className="mt-1 flex items-center gap-1 px-3 py-1.5 bg-[#2a2a2a] hover:bg-brand-accent text-white rounded text-xs font-medium transition-colors"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Add Components</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
                   {leafComponents.map(lc => (
-                    <div key={lc.component_id} className="flex items-center justify-between bg-black/40 border border-[#332f2a] p-3 rounded">
-                      <div className="flex flex-col flex-1 min-w-0 mr-3">
-                        <span className="text-sm text-white font-medium truncate">{lc.components?.name || "Unknown Component"}</span>
+                    <div key={lc.component_id} className="flex items-center justify-between bg-black/40 border border-[#332f2a] p-2.5 rounded group hover:border-[#4a443c] transition-colors">
+                      <div className="flex flex-col flex-1 min-w-0 mr-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm text-white font-medium truncate">{lc.components?.name || "Unknown Item"}</span>
+                          {isPersonalItem(lc.components) && (
+                            <span className="text-[9px] px-1.5 py-0.5 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
+                              Personal
+                            </span>
+                          )}
+                        </div>
+                        {lc.components?.notes && (
+                          <span className="text-[10px] text-brand-text-muted truncate">{lc.components.notes}</span>
+                        )}
                       </div>
-                      <div className="flex items-center gap-3">
-                        {isEditing ? (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* Quantity Stepper */}
+                        <div className="flex items-center border border-[#332f2a] rounded overflow-hidden bg-[#141311]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newQty = lc.quantity - 1;
+                              if (newQty <= 0) {
+                                handleUpdateLeafComponents(leafComponents.filter(c => c.component_id !== lc.component_id));
+                              } else {
+                                handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: newQty } : c));
+                              }
+                            }}
+                            className="px-1.5 py-0.5 text-brand-text-muted hover:text-white hover:bg-[#2a2a2a] transition-colors text-xs font-bold"
+                            title="Decrease quantity"
+                          >
+                            -
+                          </button>
                           <input 
                             type="number" 
                             min="1" 
@@ -705,29 +773,48 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                 handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: qty } : c));
                               }
                             }}
-                            className="w-16 bg-[#1a1816] border border-[#332f2a] text-white p-1 text-xs text-center focus:border-brand-accent focus:outline-none"
+                            className="w-10 bg-transparent text-white text-xs text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none font-mono font-bold"
                           />
-                        ) : (
-                          <span className="text-xs font-bold text-brand-accent px-2 py-1 bg-brand-accent/10 rounded">x{lc.quantity}</span>
-                        )}
-                        
-                        {isEditing && (
-                          <button 
-                            onClick={() => handleUpdateLeafComponents(leafComponents.filter(c => c.component_id !== lc.component_id))}
-                            className="text-brand-text-muted hover:text-red-400"
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: lc.quantity + 1 } : c));
+                            }}
+                            className="px-1.5 py-0.5 text-brand-text-muted hover:text-white hover:bg-[#2a2a2a] transition-colors text-xs font-bold"
+                            title="Increase quantity"
                           >
-                            <X className="h-4 w-4" />
+                            +
                           </button>
-                        )}
+                        </div>
+                        
+                        <button 
+                          type="button"
+                          onClick={() => handleUpdateLeafComponents(leafComponents.filter(c => c.component_id !== lc.component_id))}
+                          className="p-1 text-brand-text-muted hover:text-red-400 transition-colors opacity-70 group-hover:opacity-100"
+                          title="Remove from location"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {isEditing && (
-                <div className="mt-6 border-t border-[#332f2a] pt-4">
-                  <div className="text-[10px] tracking-widest text-brand-text-muted uppercase mb-3">Add Components</div>
+              {/* Add Components Panel */}
+              {(isAddingComponent || isEditing) && (
+                <div className="mt-4 border-t border-[#332f2a] pt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">Add Items to Location</div>
+                    <Link 
+                      href="/inventory/new" 
+                      className="text-[10px] text-brand-accent hover:underline flex items-center gap-1 font-semibold"
+                      title="Create new item in inventory"
+                    >
+                      <Plus className="h-3 w-3" /> New Item
+                    </Link>
+                  </div>
+                  
                   <div className="relative mb-3">
                     <Search className="absolute left-3 top-2.5 h-4 w-4 text-brand-text-muted" />
                     <input 
@@ -735,28 +822,51 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       placeholder="Search inventory..."
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
-                      className="w-full bg-black/40 border border-[#332f2a] text-white text-sm pl-9 pr-3 py-2 focus:border-brand-accent focus:outline-none"
+                      className="w-full bg-black/40 border border-[#332f2a] text-white text-sm pl-9 pr-3 py-2 rounded focus:border-brand-accent focus:outline-none"
+                      autoFocus
                     />
                   </div>
                   
-                  <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+                  <div className="flex flex-col gap-1.5 max-h-60 overflow-y-auto pr-1">
                     {allInventory
                       .filter(c => !leafComponents.some(lc => lc.component_id === c.id))
-                      .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                      .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.tags?.some(t => t.name.toLowerCase().includes(searchQuery.toLowerCase())))
                       .slice(0, 50)
                       .map(c => (
                       <button 
                         key={c.id}
+                        type="button"
                         onClick={() => {
                           handleUpdateLeafComponents([...leafComponents, { component_id: c.id, quantity: 1, components: c }]);
                           setSearchQuery("");
                         }}
-                        className="flex items-center justify-between p-2 text-left hover:bg-[#332f2a] rounded transition-colors group"
+                        className="flex items-center justify-between p-2.5 text-left bg-black/20 hover:bg-[#2a2825] border border-transparent hover:border-[#332f2a] rounded transition-colors group"
                       >
-                        <span className="text-sm text-brand-text group-hover:text-white truncate pr-2">{c.name}</span>
-                        <Plus className="h-4 w-4 text-brand-text-muted group-hover:text-brand-accent shrink-0" />
+                        <div className="flex flex-col min-w-0 pr-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm text-brand-text group-hover:text-white font-medium truncate">{c.name}</span>
+                            {isPersonalItem(c) && (
+                              <span className="text-[8px] px-1 py-0.2 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
+                                Personal
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-brand-text-muted">
+                            Total: {c.totals?.total_owned_qty ?? 0} | In storage: {c.totals?.in_storage_qty ?? 0}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs text-brand-accent font-bold px-2 py-1 bg-brand-accent/10 rounded group-hover:bg-brand-accent group-hover:text-white transition-colors shrink-0">
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>Add</span>
+                        </div>
                       </button>
                     ))}
+
+                    {allInventory.filter(c => !leafComponents.some(lc => lc.component_id === c.id)).filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                      <div className="text-center py-4 text-xs text-brand-text-muted border border-dashed border-[#332f2a] rounded">
+                        {searchQuery ? `No items match "${searchQuery}"` : "All inventory items are already in this location"}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
