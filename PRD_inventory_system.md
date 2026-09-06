@@ -35,7 +35,7 @@ This system solves both with two linked views of the same data:
 - **Aggregated Inventory**: Maintain a flat inventory list aggregating quantities of every item across all physical locations and active project checkouts.
 - **Full-Text & Live Search**: Search across items (name, tags, notes/descriptions).
 - **Flexible Tagging**: Multi-tag system with usage-count autocomplete ranking.
-- **Ad-Hoc Custom Fields**: Per-component custom fields (text, number, link, custom image), added ad hoc without fixed global schemas.
+- **Ad-Hoc Custom Fields & File Attachments**: Per-component custom fields (text, number, link, image, and file uploads such as PDF, PPT, Word, Excel, ZIP), added ad hoc without fixed global schemas with direct Supabase storage uploads.
 - **Project Check-Out / Check-In Ledger**: Track partial quantities checked out to projects, recording source locations and return locations atomically.
 - **Low-Stock Alert Dashboard**: Visual in-app dashboard highlighting components falling at or below their low-stock thresholds.
 - **Offline Read/Browse (PWA)**: Service Worker + IndexedDB (Dexie.js) + Cache Storage API caching for offline browsing of rooms, photos, hotspots, and inventory lists.
@@ -227,11 +227,16 @@ project_components
   - **Item Deletion**: `X` button removes the item from the location.
   - **Badges**: Personal items display a distinct `Personal` tag badge.
   - **Direct New Item Link**: Quick link to `/inventory/new` for unregistered items.
-- **Hotspot Selection & Deletion**:
-  - **Canvas Delete Tool**: In "Edit Map" mode, selecting the "Delete Hotspot" tool highlights all hotspots in red and allows clicking directly on any hotspot region on the map to delete it.
-  - **Hotspots Management Drawer**: When in "Edit Map" mode, a side panel lists all hotspots on the active view with their type (Storage Location vs Opens into Storage) and dedicated Delete buttons.
-  - **In-Drawer Hotspot Deletion**: Leaf hotspot drawers feature a trash icon in the header for quick deletion.
-  - **Recursive Safety**: Deletion unassigns all stored items and recursively purges child drill-down photos via `delete_hotspot_recursive`.
+- **Hotspot Selection, Deletion & Management**:
+  - **Extendable Hotspots Menu**: To preserve 100% canvas width during edits without cluttering the screen with persistent sidebars, an extendable `Hotspots (X) ▾` dropdown button is positioned directly before the "Delete View" button in the top action bar. Clicking it opens a floating popover listing all hotspots on the active perspective with their type (*Storage Location* vs *Opens into Storage*) and quick `[Delete]` buttons.
+  - **Canvas Delete Tool**: In "Edit Map" mode, selecting the "Delete Hotspot" tool highlights all hotspots with dashed red outlines and allows clicking directly on any hotspot polygon on the map to delete it with confirmation.
+  - **In-Drawer Hotspot Deletion**: In standard view mode, opening any storage location hotspot drawer reveals a trash icon in the header next to the close button for instant deletion.
+  - **Recursive Safety**: Deletion unassigns all stored items and recursively purges child drill-down photos via `delete_hotspot_recursive(p_hotspot_id UUID)`.
+- **Hotspot Visual Effects & Highlighting**:
+  - **Normal / Default**: Translucent white wash (`rgba(255, 255, 255, 0.3)` fill, `rgba(255, 255, 255, 0.5)` stroke, `0.3` strokeWidth).
+  - **Hovered**: Translucent red wash (`rgba(239, 68, 68, 0.4)` fill, solid `#ef4444` stroke).
+  - **Highlighted / Located**: Active located hotspot receives a pulsing red highlight (`rgba(239, 68, 68, 0.2)` fill, solid `#ef4444` stroke, `0.6` strokeWidth, and continuous `animate-pulse` CSS keyframe oscillation).
+  - **Delete Mode**: Dashed red stroke (`2,2`) with `rgba(239, 68, 68, 0.22)` fill wash (`0.55` on hover).
 
 ### 5.2 Inventory Page & View Toggle
 
@@ -253,6 +258,10 @@ project_components
   - Completely hides technical fields: Price, Low-Stock Alert, Datasheet URL, Purchase URL, and Custom Specs Builder.
 - **Full Form for Components**:
   - Displays all technical specs, pricing, datasheets, custom specs builder, tags, and locations.
+- **Custom Fields Builder**:
+  - Supports `text`, `number`, `link`, `image`, and `file`.
+  - **Direct File Attachments (`file` option)**: Directly uploads non-image documents (PDF, PowerPoint `.ppt`/`.pptx`, Word `.doc`/`.docx`, Excel `.xls`/`.xlsx`, `.zip`, `.txt`) to Supabase storage with live upload indicators, formatted file sizes, original filenames, and "Replace" options.
+  - **Image Attachments (`image` option)**: Direct upload of graphics and photos with thumbnail previews.
 - **Physical Location Picker**:
   - Works identically for both item types: select physical leaf hotspot and specify initial quantity.
 
@@ -265,6 +274,7 @@ project_components
   - Storage location card features a **"Locate"** button that jumps directly to the Room Map with the hotspot highlighted.
 - **Component Presentation**:
   - Full technical resource links, price in INR (`₹`), low stock alert status, custom specs list, and location cards with "Locate" button.
+  - **Custom Specs Display**: Renders text, numbers, clickable links, image thumbnails, and attached documents (`file` type) with a document icon (`FileText`), filename, and direct `Open ↗` link.
 
 ### 5.5 Projects Check-Out / Check-In
 

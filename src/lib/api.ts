@@ -394,6 +394,26 @@ export async function uploadImage(file: File, pathPrefix: string): Promise<strin
   return data.publicUrl;
 }
 
+export async function uploadFile(file: File, pathPrefix: string = 'file'): Promise<{ url: string; name: string; size: number }> {
+  const ext = file.name.split('.').pop() || 'bin';
+  const cleanBaseName = file.name.substring(0, file.name.lastIndexOf('.')) || 'file';
+  const safeBaseName = cleanBaseName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+  const fileName = `${pathPrefix}_${Date.now()}_${safeBaseName}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage.from('images').upload(fileName, file, {
+    contentType: file.type || 'application/octet-stream',
+    upsert: false
+  });
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage.from('images').getPublicUrl(fileName);
+  return {
+    url: data.publicUrl,
+    name: file.name,
+    size: file.size,
+  };
+}
+
 export async function uploadPhotoAndCreate(
   file: File, 
   roomId: string, 

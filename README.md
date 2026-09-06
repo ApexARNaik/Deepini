@@ -14,10 +14,12 @@ Deepini is a personal inventory and spatial tracking web application built for m
 - **Draggable View Reordering**: Drag and drop perspectives or use one-click arrow buttons to reorder views with permanent database persistence.
 - **Interactive Hotspot Canvas**: Annotate storage containers using continuous freehand tracing or click-each-vertex polygonal lasso tools.
 - **Direct Hotspot Contents Drawer**: Click any storage location to view stored items, adjust quantities with an inline stepper, or directly search and add components/belongings with a single click.
+- **Hotspot Deletion & Extendable Menu**: Delete individual hotspots either via the canvas Delete tool or via an extendable `Hotspots (X)` menu placed before "Delete View", keeping 100% canvas width available during edits.
 
-### 2. Dual Item Model (Components vs. Personal Items)
+### 2. Dual Item Model & Custom Fields
 - **Components**: Designed for technical electronics items with purchase sources, datasheet URLs, price in INR (`₹`), low-stock thresholds, and custom specs.
 - **Personal Items**: Streamlined model for tools, equipment, stationery, and belongings. Requires only Name, Description, Photo, Storage Locations, and Tags.
+- **Custom Fields & File Attachments**: Attach custom text, numbers, links, images, and document files (PDFs, PPT, Word, Excel, ZIP) directly to components with cloud storage.
 - **Inventory Page Toggle**: Fast switcher between `Components (X)` and `Personal (Y)` with tailored table columns and context-aware action buttons.
 - **Physical Tracking Parity**: Personal items are tracked across the exact same spatial hierarchy as components, featuring the "Locate" button to spotlight their physical storage location.
 
@@ -67,6 +69,7 @@ Run the migration scripts in the Supabase SQL Editor:
 1. `supabase/migrations/001_safe_schema_and_rpcs.sql`: Master consolidated schema, views, and atomic RPCs.
 2. `supabase/migrations/002_reorder_spatial_photos.sql`: Atomic view reordering RPC function.
 3. `supabase/migrations/003_add_item_type_to_components.sql`: Adds `item_type` column to `components`.
+4. `supabase/migrations/004_add_delete_hotspot_rpc.sql`: Recursive hotspot deletion RPC.
 
 *(Note: The application also includes client-side fallbacks, ensuring continuous operation even before remote database migrations are executed.)*
 

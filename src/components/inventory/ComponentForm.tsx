@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, getAllLeafHotspots, isPersonalItem } from "@/lib/api";
-import { X, Plus, UploadCloud } from "lucide-react";
+import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, isPersonalItem } from "@/lib/api";
+import { X, Plus, UploadCloud, FileText } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 
 interface Props {
@@ -48,13 +48,14 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [locationQuantity, setLocationQuantity] = useState("1");
   
   // Custom Fields
-  const [customFields, setCustomFields] = useState<Record<string, { type: 'text' | 'number' | 'link' | 'image'; value: any }>>(() => {
+  const [customFields, setCustomFields] = useState<Record<string, { type: 'text' | 'number' | 'link' | 'image' | 'file'; value: any; fileName?: string; fileSize?: number }>>(() => {
     const fields = { ...(initialData?.custom_fields || {}) };
     delete fields.item_type;
     return fields;
   });
   const [newFieldName, setNewFieldName] = useState("");
-  const [newFieldType, setNewFieldType] = useState<'text' | 'number' | 'link' | 'image'>('text');
+  const [newFieldType, setNewFieldType] = useState<'text' | 'number' | 'link' | 'image' | 'file'>('text');
+  const [uploadingFieldKey, setUploadingFieldKey] = useState<string | null>(null);
   
   const [loading, setLoading] = useState(false);
 
@@ -126,12 +127,36 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   };
 
   const handleCustomFieldImageUpload = async (key: string, file: File) => {
+    setUploadingFieldKey(key);
     try {
       const url = await uploadImage(file, 'custom');
       handleCustomFieldValueChange(key, url);
     } catch (err) {
       console.error(err);
       alert("Failed to upload image");
+    } finally {
+      setUploadingFieldKey(null);
+    }
+  };
+
+  const handleCustomFieldFileUpload = async (key: string, file: File) => {
+    setUploadingFieldKey(key);
+    try {
+      const result = await uploadFile(file, 'docs');
+      setCustomFields(prev => ({
+        ...prev,
+        [key]: {
+          ...prev[key],
+          value: result.url,
+          fileName: result.name,
+          fileSize: result.size,
+        }
+      }));
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to upload file: " + (err?.message || String(err)));
+    } finally {
+      setUploadingFieldKey(null);
     }
   };
 
@@ -500,8 +525,75 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                     )}
                     {field.type === 'image' && (
                       <div className="flex items-center gap-4">
-                        {field.value && <img src={field.value} alt={key} className="h-10 w-10 object-cover border border-[#332f2a] rounded" />}
-                        <input type="file" accept="image/*" onChange={e => e.target.files?.[0] && handleCustomFieldImageUpload(key, e.target.files[0])} className="text-xs text-brand-text-muted" />
+                        {field.value && (
+                          <a href={field.value} target="_blank" rel="noreferrer" title="Open full image">
+                            <img src={field.value} alt={key} className="h-12 w-12 object-cover border border-[#332f2a] rounded hover:opacity-80 transition-opacity" />
+                          </a>
+                        )}
+                        <label className="cursor-pointer text-xs text-brand-text-muted hover:text-white flex items-center gap-1.5 px-3 py-1.5 bg-black/30 border border-[#332f2a] hover:border-brand-accent rounded transition-colors">
+                          <UploadCloud className="h-3.5 w-3.5 text-brand-accent" />
+                          <span>{uploadingFieldKey === key ? "Uploading image..." : (field.value ? "Change Image" : "Upload Image")}</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={e => e.target.files?.[0] && handleCustomFieldImageUpload(key, e.target.files[0])} 
+                            className="hidden"
+                            disabled={uploadingFieldKey === key}
+                          />
+                        </label>
+                      </div>
+                    )}
+                    {field.type === 'file' && (
+                      <div className="space-y-2">
+                        {field.value ? (
+                          <div className="flex items-center justify-between p-2.5 bg-black/40 border border-[#332f2a] rounded">
+                            <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                              <FileText className="h-5 w-5 text-brand-accent shrink-0" />
+                              <div className="min-w-0">
+                                <a 
+                                  href={field.value} 
+                                  target="_blank" 
+                                  rel="noreferrer" 
+                                  className="text-xs font-semibold text-white hover:text-brand-accent underline truncate block"
+                                  title={field.fileName || field.value}
+                                >
+                                  {field.fileName || field.value.split('/').pop()?.split('_').slice(2).join('_') || field.value.split('/').pop() || "Document"}
+                                </a>
+                                {field.fileSize && (
+                                  <span className="text-[10px] text-brand-text-muted font-mono">
+                                    {(field.fileSize / (1024 * 1024)).toFixed(2)} MB
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <label className="cursor-pointer text-[11px] font-bold text-brand-accent hover:underline px-2.5 py-1 bg-brand-accent/10 border border-brand-accent/30 rounded shrink-0 transition-colors hover:bg-brand-accent/20">
+                              {uploadingFieldKey === key ? "Uploading..." : "Replace"}
+                              <input 
+                                type="file" 
+                                accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.txt,application/*,image/*" 
+                                onChange={e => e.target.files?.[0] && handleCustomFieldFileUpload(key, e.target.files[0])} 
+                                className="hidden" 
+                                disabled={uploadingFieldKey === key}
+                              />
+                            </label>
+                          </div>
+                        ) : (
+                          <label className={`flex items-center gap-2 px-3 py-2 border border-dashed rounded text-xs font-medium cursor-pointer transition-colors ${
+                            uploadingFieldKey === key 
+                              ? 'border-brand-accent text-brand-accent bg-brand-accent/10' 
+                              : 'border-[#332f2a] text-brand-text-muted hover:border-brand-accent hover:text-white bg-black/30'
+                          }`}>
+                            <FileText className="h-4 w-4 text-brand-accent" />
+                            <span>{uploadingFieldKey === key ? "Uploading file..." : "Upload File (PDF, PPT, Word, etc.)"}</span>
+                            <input 
+                              type="file" 
+                              accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.txt,application/*,image/*" 
+                              onChange={e => e.target.files?.[0] && handleCustomFieldFileUpload(key, e.target.files[0])} 
+                              className="hidden" 
+                              disabled={uploadingFieldKey === key}
+                            />
+                          </label>
+                        )}
                       </div>
                     )}
                   </div>
@@ -523,12 +615,13 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               <select 
                 value={newFieldType}
                 onChange={e => setNewFieldType(e.target.value as any)}
-                className="w-32 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:outline-none"
+                className="w-36 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:outline-none"
               >
                 <option value="text">Text</option>
                 <option value="number">Number</option>
                 <option value="link">Link</option>
                 <option value="image">Image</option>
+                <option value="file">File (PDF, PPT...)</option>
               </select>
               <button type="button" onClick={handleAddCustomField} className="px-3 py-2 bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30 rounded text-sm flex items-center">
                 <Plus className="h-4 w-4 mr-1" /> Add
