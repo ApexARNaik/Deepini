@@ -17,7 +17,7 @@ export class DeepiniDB extends Dexie {
     super('DeepiniDB');
     this.version(1).stores({
       rooms: 'id, name, order_index',
-      spatial_photos: 'id, room_id, parent_hotspot_id',
+      spatial_photos: 'id, room_id, parent_hotspot_id, order_index',
       spatial_hotspots: 'id, photo_id, is_leaf',
       components: 'id, name, pending_delete',
       tags: 'id, name',

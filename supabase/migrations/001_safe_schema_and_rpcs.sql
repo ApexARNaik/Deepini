@@ -593,3 +593,17 @@ BEGIN
   DELETE FROM rooms WHERE id = p_room_id;
 END;
 $$;
+
+-- RPC: Atomic spatial photos reordering
+CREATE OR REPLACE FUNCTION reorder_spatial_photos(
+  p_photo_ids UUID[]
+) RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE spatial_photos AS sp
+  SET order_index = ord.idx - 1,
+      updated_at = now()
+  FROM unnest(p_photo_ids) WITH ORDINALITY AS ord(id, idx)
+  WHERE sp.id = ord.id;
+END;
+$$;
+

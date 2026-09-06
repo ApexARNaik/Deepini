@@ -14,6 +14,9 @@ export type SpatialPhoto = {
   parent_hotspot_id: string | null
   image_url: string
   label: string | null
+  order_index: number
+  created_at?: string
+  updated_at?: string
 }
 
 export interface SpatialHotspot {
@@ -107,9 +110,15 @@ export async function updateRoom(id: string, name: string): Promise<Room> {
 
 export async function getPhotosForRoom(roomId: string): Promise<SpatialPhoto[]> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
-    return (await db.spatial_photos.where('room_id').equals(roomId).toArray());
+    const photos = await db.spatial_photos.where('room_id').equals(roomId).toArray();
+    return photos.sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0) || new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime());
   }
-  const { data, error } = await supabase.from("spatial_photos").select("*").eq("room_id", roomId).order("order_index");
+  const { data, error } = await supabase
+    .from("spatial_photos")
+    .select("*")
+    .eq("room_id", roomId)
+    .order("order_index", { ascending: true })
+    .order("created_at", { ascending: true });
   if (error) throw error;
   return data as SpatialPhoto[];
 }
@@ -368,7 +377,13 @@ export async function uploadImage(file: File, pathPrefix: string): Promise<strin
   return data.publicUrl;
 }
 
-export async function uploadPhotoAndCreate(file: File, roomId: string, parentHotspotId: string | null = null, label: string = 'View') {
+export async function uploadPhotoAndCreate(
+  file: File, 
+  roomId: string, 
+  parentHotspotId: string | null = null, 
+  label: string = 'View',
+  orderIndex: number = 0
+) {
   const publicUrl = await uploadImage(file, 'media');
   
   // Create DB record
@@ -377,7 +392,8 @@ export async function uploadPhotoAndCreate(file: File, roomId: string, parentHot
       room_id: roomId,
       image_url: publicUrl,
       parent_hotspot_id: parentHotspotId,
-      label
+      label,
+      order_index: orderIndex
     }
   ]).select().single();
   
@@ -397,6 +413,43 @@ export async function uploadPhotoAndCreate(file: File, roomId: string, parentHot
 export async function updatePhotoLabel(photoId: string, label: string) {
   const { error } = await supabase.from('spatial_photos').update({ label }).eq('id', photoId);
   if (error) throw error;
+}
+
+export async function reorderSpatialPhotos(photoOrders: { id: string; order_index: number }[]): Promise<void> {
+  if (photoOrders.length === 0) return;
+
+  // 1. Update local Dexie DB for offline persistence
+  if (typeof window !== 'undefined') {
+    await Promise.all(
+      photoOrders.map(p => db.spatial_photos.update(p.id, { order_index: p.order_index }))
+    );
+  }
+
+  // 2. Atomic update in Supabase
+  if (typeof window === 'undefined' || navigator.onLine) {
+    // Sort photo IDs by target order_index so the array sequence matches 0..n-1
+    const sortedPhotoIds = photoOrders
+      .slice()
+      .sort((a, b) => a.order_index - b.order_index)
+      .map(p => p.id);
+
+    // Call atomic Supabase RPC
+    const { error: rpcError } = await supabase.rpc('reorder_spatial_photos', {
+      p_photo_ids: sortedPhotoIds
+    });
+
+    if (rpcError) {
+      console.warn('reorder_spatial_photos RPC unavailable or failed, applying fallback batch update:', rpcError);
+      // Fallback: batch update in Supabase
+      const results = await Promise.all(
+        photoOrders.map(p =>
+          supabase.from('spatial_photos').update({ order_index: p.order_index }).eq('id', p.id)
+        )
+      );
+      const firstError = results.find(r => r.error)?.error;
+      if (firstError) throw firstError;
+    }
+  }
 }
 
 export async function createHotspot(

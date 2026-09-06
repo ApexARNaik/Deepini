@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, updateRoom, deleteRoom } from "@/lib/api";
+import { useState, useEffect, useRef } from "react";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, updateRoom, deleteRoom, reorderSpatialPhotos } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
-import { ChevronRight, Plus, Edit2, X, Search, Archive, Trash2 } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -110,7 +110,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const handleUploadRootPhoto = async (file: File) => {
     setUploading(true);
     try {
-      const newPhoto = await uploadPhotoAndCreate(file, roomId, null, `View ${photos.filter(p => !p.parent_hotspot_id).length + 1}`);
+      const orderIndex = rootPhotos.length;
+      const newPhoto = await uploadPhotoAndCreate(file, roomId, null, `View ${orderIndex + 1}`, orderIndex);
       setPhotos(prev => [...prev, newPhoto]);
       if (!activePhotoId) {
         setActivePhotoId(newPhoto.id);
@@ -212,7 +213,127 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   };
 
   const activePhoto = photos.find(p => p.id === activePhotoId);
-  const rootPhotos = photos.filter(p => p.parent_hotspot_id === null);
+  const rootPhotos = photos
+    .filter(p => p.parent_hotspot_id === null)
+    .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0) || new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime());
+
+  // Views drag and drop reordering state
+  const isDraggingRef = useRef(false);
+  const [draggedPhotoId, setDraggedPhotoId] = useState<string | null>(null);
+  const [dragOverState, setDragOverState] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
+
+  const handleReorderViews = async (newOrderedRootPhotos: SpatialPhoto[]) => {
+    // 1. Assign sequential order_index
+    const updatedRootPhotos = newOrderedRootPhotos.map((photo, index) => ({
+      ...photo,
+      order_index: index,
+    }));
+
+    // 2. Optimistically update state
+    setPhotos(prev => {
+      const childPhotos = prev.filter(p => p.parent_hotspot_id !== null);
+      return [...updatedRootPhotos, ...childPhotos];
+    });
+
+    // 3. Atomically persist to Supabase & Dexie
+    try {
+      const updates = updatedRootPhotos.map(p => ({
+        id: p.id,
+        order_index: p.order_index,
+      }));
+      await reorderSpatialPhotos(updates);
+    } catch (err) {
+      console.error("Failed to persist view order:", err);
+      // Re-fetch to restore state if persistence failed
+      try {
+        const refreshed = await getPhotosForRoom(roomId);
+        setPhotos(refreshed);
+      } catch {}
+    }
+  };
+
+  const handleDragStart = (e: React.DragEvent, photoId: string) => {
+    isDraggingRef.current = true;
+    setDraggedPhotoId(photoId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", photoId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, targetPhoto: SpatialPhoto) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (!draggedPhotoId || draggedPhotoId === targetPhoto.id) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const isDesktop = window.innerWidth >= 1024;
+    let position: 'before' | 'after';
+    if (isDesktop) {
+      const midY = rect.top + rect.height / 2;
+      position = e.clientY < midY ? 'before' : 'after';
+    } else {
+      const midX = rect.left + rect.width / 2;
+      position = e.clientX < midX ? 'before' : 'after';
+    }
+
+    if (!dragOverState || dragOverState.id !== targetPhoto.id || dragOverState.position !== position) {
+      setDragOverState({ id: targetPhoto.id, position });
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent, targetPhotoId: string) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      if (dragOverState?.id === targetPhotoId) {
+        setDragOverState(null);
+      }
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetPhoto: SpatialPhoto) => {
+    e.preventDefault();
+    const sourceId = draggedPhotoId || e.dataTransfer.getData("text/plain");
+    const dropState = dragOverState;
+
+    setDraggedPhotoId(null);
+    setDragOverState(null);
+    setTimeout(() => {
+      isDraggingRef.current = false;
+    }, 100);
+
+    if (!sourceId || sourceId === targetPhoto.id) return;
+
+    const currentList = [...rootPhotos];
+    const sourceIndex = currentList.findIndex(p => p.id === sourceId);
+    if (sourceIndex === -1) return;
+
+    const [movedItem] = currentList.splice(sourceIndex, 1);
+    const targetIndex = currentList.findIndex(p => p.id === targetPhoto.id);
+    if (targetIndex === -1) return;
+
+    const insertIndex = dropState?.position === 'after' ? targetIndex + 1 : targetIndex;
+    currentList.splice(insertIndex, 0, movedItem);
+
+    await handleReorderViews(currentList);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedPhotoId(null);
+    setDragOverState(null);
+    setTimeout(() => {
+      isDraggingRef.current = false;
+    }, 100);
+  };
+
+  const handleMoveView = async (photoId: string, direction: -1 | 1) => {
+    const currentList = [...rootPhotos];
+    const index = currentList.findIndex(p => p.id === photoId);
+    if (index === -1) return;
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= currentList.length) return;
+
+    const [item] = currentList.splice(index, 1);
+    currentList.splice(newIndex, 0, item);
+    await handleReorderViews(currentList);
+  };
 
   const handleSavePhotoLabel = async () => {
     if (!activePhotoId || !editingLabel.trim()) {
@@ -411,28 +532,100 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           <div className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">
             Views
           </div>
-          {rootPhotos.map(p => (
-            <button
-              key={p.id}
-              onClick={() => {
-                setActivePhotoId(p.id);
-                setBreadcrumbChain([{ id: p.id, label: p.label || 'View' }]);
-                setPendingChildUpload(null);
-                setIsEditing(false);
-              }}
-              className={`relative h-24 w-36 lg:h-32 lg:w-full shrink-0 rounded overflow-hidden border-2 transition-all ${
-                breadcrumbChain[0]?.id === p.id 
-                  ? 'border-brand-accent opacity-100' 
-                  : 'border-transparent opacity-60 hover:opacity-100'
-              }`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.image_url} alt={p.label || ''} className="w-full h-full object-cover" />
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 p-2 text-left flex justify-between items-end">
-                <span className="text-[10px] font-bold text-white tracking-wider truncate">{p.label}</span>
+          {rootPhotos.map((p, index) => {
+            const isSelected = breadcrumbChain[0]?.id === p.id;
+            const isDragging = draggedPhotoId === p.id;
+            const isOverBefore = dragOverState?.id === p.id && dragOverState.position === 'before';
+            const isOverAfter = dragOverState?.id === p.id && dragOverState.position === 'after';
+
+            return (
+              <div
+                key={p.id}
+                draggable
+                onDragStart={e => handleDragStart(e, p.id)}
+                onDragOver={e => handleDragOver(e, p)}
+                onDragLeave={e => handleDragLeave(e, p.id)}
+                onDrop={e => handleDrop(e, p)}
+                onDragEnd={handleDragEnd}
+                className={`group relative h-24 w-36 lg:h-32 lg:w-full shrink-0 rounded overflow-hidden border-2 transition-all cursor-grab active:cursor-grabbing select-none ${
+                  isSelected 
+                    ? 'border-brand-accent opacity-100 shadow-[0_0_12px_rgba(217,119,6,0.25)]' 
+                    : 'border-transparent opacity-60 hover:opacity-100'
+                } ${isDragging ? 'opacity-30 scale-95 border-dashed border-brand-accent/60' : ''}`}
+              >
+                {/* Visual Drop Indicators */}
+                {isOverBefore && (
+                  <div className="absolute inset-x-0 top-0 h-1.5 lg:h-1.5 bg-brand-accent shadow-[0_0_8px_rgba(217,119,6,1)] z-30 pointer-events-none" />
+                )}
+                {isOverAfter && (
+                  <div className="absolute inset-x-0 bottom-0 h-1.5 lg:h-1.5 bg-brand-accent shadow-[0_0_8px_rgba(217,119,6,1)] z-30 pointer-events-none" />
+                )}
+
+                {/* Card Button / Click Action */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isDraggingRef.current) return;
+                    setActivePhotoId(p.id);
+                    setBreadcrumbChain([{ id: p.id, label: p.label || 'View' }]);
+                    setPendingChildUpload(null);
+                    setIsEditing(false);
+                  }}
+                  className="w-full h-full text-left relative focus:outline-none"
+                  title={`View: ${p.label || 'View'} (Drag to reorder)`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.image_url} alt={p.label || ''} className="w-full h-full object-cover pointer-events-none" />
+                  
+                  {/* Bottom gradient & label */}
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-2 text-left flex justify-between items-end pointer-events-none">
+                    <span className="text-[10px] font-bold text-white tracking-wider truncate">{p.label}</span>
+                    <span className="text-[9px] text-brand-text-muted font-mono ml-1">#{index + 1}</span>
+                  </div>
+                </button>
+
+                {/* Drag Grip Handle */}
+                <div 
+                  className="absolute top-1.5 left-1.5 p-1 bg-black/60 backdrop-blur-xs rounded text-white/60 hover:text-white pointer-events-none transition-opacity opacity-70 group-hover:opacity-100" 
+                  title="Drag to reorder"
+                >
+                  <GripVertical className="h-3.5 w-3.5" />
+                </div>
+
+                {/* Quick accessible reorder buttons on hover / focus */}
+                <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                  {index > 0 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMoveView(p.id, -1);
+                      }}
+                      className="p-1 bg-black/75 hover:bg-brand-accent rounded text-white/80 hover:text-white transition-colors"
+                      title="Move view backward / up"
+                    >
+                      <ChevronUp className="h-3 w-3 hidden lg:block" />
+                      <ChevronLeft className="h-3 w-3 lg:hidden" />
+                    </button>
+                  )}
+                  {index < rootPhotos.length - 1 && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMoveView(p.id, 1);
+                      }}
+                      className="p-1 bg-black/75 hover:bg-brand-accent rounded text-white/80 hover:text-white transition-colors"
+                      title="Move view forward / down"
+                    >
+                      <ChevronDown className="h-3 w-3 hidden lg:block" />
+                      <ChevronRight className="h-3 w-3 lg:hidden" />
+                    </button>
+                  )}
+                </div>
               </div>
-            </button>
-          ))}
+            );
+          })}
           
           {isOnline && (
             <div className="mt-2 lg:mt-2 shrink-0 h-24 w-36 lg:h-auto lg:w-full flex items-center justify-center">
