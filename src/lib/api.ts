@@ -146,6 +146,16 @@ export async function getHotspotsForPhoto(photoId: string): Promise<SpatialHotsp
   return data as SpatialHotspot[];
 }
 
+export async function getHotspotById(hotspotId: string): Promise<SpatialHotspot | null> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const hs = await db.spatial_hotspots.get(hotspotId);
+    return hs || null;
+  }
+  const { data, error } = await supabase.from("spatial_hotspots").select("*").eq("id", hotspotId).maybeSingle();
+  if (error) throw error;
+  return data as SpatialHotspot | null;
+}
+
 // Phase 4 Functions
 export async function getInventory(search: string = ""): Promise<ComponentWithTotals[]> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
@@ -219,7 +229,7 @@ export async function getTags(): Promise<Tag[]> {
 
 export async function upsertTag(name: string): Promise<Tag> {
   // check if exists
-  const { data: existing } = await supabase.from("tags").select("*").eq("name", name).single();
+  const { data: existing } = await supabase.from("tags").select("*").eq("name", name).maybeSingle();
   if (existing) return existing;
   const { data, error } = await supabase.from("tags").insert([{ name }]).select().single();
   if (error) throw error;
@@ -256,7 +266,7 @@ export async function getComponentDetails(id: string): Promise<{ component: Comp
   const { data: comp, error: compErr } = await supabase.from("components").select(`*, component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))`).eq("id", id).single();
   if (compErr) throw new Error(compErr.message || "Failed to fetch component");
   
-  const { data: totalsData } = await supabase.from("component_totals").select("*").eq("component_id", id).single();
+  const { data: totalsData } = await supabase.from("component_totals").select("*").eq("component_id", id).maybeSingle();
   
   const component: ComponentWithTotals = {
     ...comp,
@@ -535,6 +545,364 @@ export async function createHotspot(
 
   if (error) throw error
   return data as SpatialHotspot
+}
+
+export async function updateHotspot(
+  hotspotId: string,
+  updates: { label?: string; is_leaf?: boolean; shape_points?: { x: number; y: number }[] }
+): Promise<SpatialHotspot> {
+  const { data, error } = await supabase
+    .from('spatial_hotspots')
+    .update(updates)
+    .eq('id', hotspotId)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_hotspots.update(hotspotId, updates);
+    } catch (dbErr) {
+      console.warn("Offline db update error on hotspot update:", dbErr);
+    }
+  }
+
+  return data as SpatialHotspot;
+}
+
+export async function replaceSpatialPhoto(
+  photoId: string,
+  file: File
+): Promise<string> {
+  const publicUrl = await uploadImage(file, 'media');
+  const { error } = await supabase
+    .from('spatial_photos')
+    .update({ image_url: publicUrl })
+    .eq('id', photoId);
+
+  if (error) throw error;
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_photos.update(photoId, { image_url: publicUrl });
+    } catch (dbErr) {
+      console.warn("Offline db update error on photo replace:", dbErr);
+    }
+  }
+
+  return publicUrl;
+}
+
+export async function batchUpdateHotspotPoints(
+  updates: { id: string; shape_points: { x: number; y: number }[] }[]
+): Promise<void> {
+  if (updates.length === 0) return;
+
+  if (typeof window === 'undefined' || navigator.onLine) {
+    const { error: rpcErr } = await supabase.rpc('batch_update_hotspot_points', {
+      p_updates: updates
+    });
+
+    if (rpcErr) {
+      console.warn("RPC batch_update_hotspot_points failed or unmigrated, falling back to batch update:", rpcErr);
+      const results = await Promise.all(
+        updates.map(u =>
+          supabase
+            .from('spatial_hotspots')
+            .update({ shape_points: u.shape_points })
+            .eq('id', u.id)
+        )
+      );
+
+      const firstErr = results.find(r => r.error)?.error;
+      if (firstErr) throw firstErr;
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      await Promise.all(
+        updates.map(u => db.spatial_hotspots.update(u.id, { shape_points: u.shape_points }))
+      );
+    } catch (dbErr) {
+      console.warn("Offline db batch update error:", dbErr);
+    }
+  }
+}
+
+export async function undoInsertIntermediateSpatialPhoto(params: {
+  parentHotspotId: string;
+  intermediatePhotoId: string;
+  intermediateHotspotId: string;
+  childPhotoId: string;
+}): Promise<void> {
+  if (typeof window === 'undefined' || navigator.onLine) {
+    const { error: rpcErr } = await supabase.rpc('undo_insert_intermediate_spatial_photo', {
+      p_parent_hotspot_id: params.parentHotspotId,
+      p_intermediate_photo_id: params.intermediatePhotoId,
+      p_intermediate_hotspot_id: params.intermediateHotspotId,
+      p_child_photo_id: params.childPhotoId
+    });
+
+    if (rpcErr) {
+      console.warn("RPC undo_insert_intermediate_spatial_photo failed or unmigrated, executing fallback:", rpcErr);
+      // Fallback
+      await supabase.from('spatial_photos').update({ parent_hotspot_id: params.parentHotspotId, updated_at: new Date().toISOString() }).eq('id', params.childPhotoId);
+      await supabase.from('spatial_hotspots').update({ child_photo_id: params.childPhotoId, updated_at: new Date().toISOString() }).eq('id', params.parentHotspotId);
+      await supabase.from('spatial_hotspots').delete().eq('id', params.intermediateHotspotId);
+      await supabase.from('spatial_photos').delete().eq('id', params.intermediatePhotoId);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_photos.update(params.childPhotoId, { parent_hotspot_id: params.parentHotspotId });
+      await db.spatial_hotspots.update(params.parentHotspotId, { child_photo_id: params.childPhotoId });
+      await db.spatial_hotspots.delete(params.intermediateHotspotId);
+      await db.spatial_photos.delete(params.intermediatePhotoId);
+    } catch (dbErr) {
+      console.warn("Offline db sync error on undo intermediate photo insert:", dbErr);
+    }
+  }
+}
+
+export async function undoReplaceSpatialPhoto(params: {
+  photoId: string;
+  previousImageUrl: string;
+  previousHotspotsUpdates?: { id: string; shape_points: { x: number; y: number }[] }[];
+}): Promise<void> {
+  if (typeof window === 'undefined' || navigator.onLine) {
+    const { error: rpcErr } = await supabase.rpc('undo_replace_spatial_photo', {
+      p_photo_id: params.photoId,
+      p_previous_image_url: params.previousImageUrl,
+      p_hotspots_updates: params.previousHotspotsUpdates || []
+    });
+
+    if (rpcErr) {
+      console.warn("RPC undo_replace_spatial_photo failed or unmigrated, executing fallback:", rpcErr);
+      const { error: photoErr } = await supabase
+        .from('spatial_photos')
+        .update({ image_url: params.previousImageUrl, updated_at: new Date().toISOString() })
+        .eq('id', params.photoId);
+      if (photoErr) throw photoErr;
+
+      if (params.previousHotspotsUpdates && params.previousHotspotsUpdates.length > 0) {
+        await batchUpdateHotspotPoints(params.previousHotspotsUpdates);
+      }
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_photos.update(params.photoId, { image_url: params.previousImageUrl });
+      if (params.previousHotspotsUpdates && params.previousHotspotsUpdates.length > 0) {
+        await Promise.all(
+          params.previousHotspotsUpdates.map(u => db.spatial_hotspots.update(u.id, { shape_points: u.shape_points }))
+        );
+      }
+    } catch (dbErr) {
+      console.warn("Offline db sync error on undo photo replace:", dbErr);
+    }
+  }
+}
+
+export async function restoreDeletedHotspot(
+  hotspot: SpatialHotspot,
+  componentLocations: { component_id: string; quantity: number }[] = []
+): Promise<void> {
+  if (typeof window === 'undefined' || navigator.onLine) {
+    const { error: rpcErr } = await supabase.rpc('restore_deleted_hotspot', {
+      p_hotspot: hotspot,
+      p_component_locations: componentLocations
+    });
+
+    if (rpcErr) {
+      console.warn("RPC restore_deleted_hotspot failed or unmigrated, executing fallback:", rpcErr);
+      const { error: hsErr } = await supabase.from('spatial_hotspots').insert([{
+        id: hotspot.id,
+        photo_id: hotspot.photo_id,
+        label: hotspot.label,
+        shape_points: hotspot.shape_points,
+        is_leaf: hotspot.is_leaf,
+        child_photo_id: hotspot.child_photo_id,
+        created_at: hotspot.created_at,
+        updated_at: new Date().toISOString()
+      }]);
+      if (hsErr) throw hsErr;
+
+      if (componentLocations.length > 0) {
+        const clInserts = componentLocations.map(cl => ({
+          hotspot_id: hotspot.id,
+          component_id: cl.component_id,
+          quantity: cl.quantity
+        }));
+        await supabase.from('component_locations').insert(clInserts);
+      }
+
+      if (hotspot.child_photo_id) {
+        await supabase.from('spatial_photos').update({ parent_hotspot_id: hotspot.id }).eq('id', hotspot.child_photo_id);
+      }
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_hotspots.put(hotspot);
+      if (componentLocations.length > 0) {
+        for (const cl of componentLocations) {
+          await db.component_locations.put({
+            id: crypto.randomUUID(),
+            hotspot_id: hotspot.id,
+            component_id: cl.component_id,
+            quantity: cl.quantity
+          });
+        }
+      }
+      if (hotspot.child_photo_id) {
+        await db.spatial_photos.update(hotspot.child_photo_id, { parent_hotspot_id: hotspot.id });
+      }
+    } catch (dbErr) {
+      console.warn("Offline db sync error on restore deleted hotspot:", dbErr);
+    }
+  }
+}
+
+
+export async function insertIntermediateSpatialPhoto(params: {
+  roomId: string;
+  parentHotspotId: string;
+  childPhotoId: string;
+  file: File;
+  photoLabel: string;
+  hotspotLabel: string;
+  shapePoints?: { x: number; y: number }[];
+}): Promise<{ newPhoto: SpatialPhoto; newHotspot: SpatialHotspot }> {
+  // 1. Compress and upload image
+  const publicUrl = await uploadImage(params.file, 'media');
+  const points = params.shapePoints && params.shapePoints.length >= 3
+    ? params.shapePoints
+    : [
+        { x: 0.15, y: 0.15 },
+        { x: 0.85, y: 0.15 },
+        { x: 0.85, y: 0.85 },
+        { x: 0.15, y: 0.85 }
+      ];
+
+  let newPhotoData: SpatialPhoto | null = null;
+  let newHotspotData: SpatialHotspot | null = null;
+
+  if (typeof window === 'undefined' || navigator.onLine) {
+    // 2. Attempt atomic PostgreSQL RPC with row-level locking & strict validation
+    const { data: rpcRes, error: rpcErr } = await supabase.rpc('insert_intermediate_spatial_photo', {
+      p_room_id: params.roomId,
+      p_parent_hotspot_id: params.parentHotspotId,
+      p_child_photo_id: params.childPhotoId,
+      p_image_url: publicUrl,
+      p_photo_label: params.photoLabel,
+      p_hotspot_label: params.hotspotLabel,
+      p_shape_points: points
+    });
+
+    if (rpcErr) {
+      console.warn("RPC insert_intermediate_spatial_photo failed or unmigrated, executing validated client transaction fallback:", rpcErr);
+
+      // Strict validation: verify both records and bidirectional link
+      const { data: parentHs, error: hsErr } = await supabase
+        .from('spatial_hotspots')
+        .select('*')
+        .eq('id', params.parentHotspotId)
+        .single();
+      if (hsErr || !parentHs) throw new Error("Parent hotspot not found");
+
+      const { data: childPhoto, error: cpErr } = await supabase
+        .from('spatial_photos')
+        .select('*')
+        .eq('id', params.childPhotoId)
+        .single();
+      if (cpErr || !childPhoto) throw new Error("Child photo not found");
+
+      if (childPhoto.parent_hotspot_id !== params.parentHotspotId) {
+        throw new Error(`Hierarchy validation failed: child photo parent (${childPhoto.parent_hotspot_id}) does not match expected parent hotspot ${params.parentHotspotId}`);
+      }
+      if (parentHs.child_photo_id !== params.childPhotoId) {
+        throw new Error(`Hierarchy validation failed: parent hotspot child (${parentHs.child_photo_id}) does not match expected child photo ${params.childPhotoId}`);
+      }
+
+      // Step A: Create intermediate photo (Image2)
+      const { data: p2, error: p2Err } = await supabase
+        .from('spatial_photos')
+        .insert([{
+          room_id: params.roomId,
+          parent_hotspot_id: params.parentHotspotId,
+          image_url: publicUrl,
+          label: params.photoLabel,
+          order_index: 0
+        }])
+        .select()
+        .single();
+      if (p2Err) throw p2Err;
+
+      // Step B: Create intermediate hotspot on Image2 (Hotspot2) pointing to Image3
+      const { data: h2, error: h2Err } = await supabase
+        .from('spatial_hotspots')
+        .insert([{
+          photo_id: p2.id,
+          label: params.hotspotLabel,
+          shape_points: points,
+          is_leaf: false,
+          child_photo_id: params.childPhotoId
+        }])
+        .select()
+        .single();
+      if (h2Err) throw h2Err;
+
+      // Step C: Re-point Image3 to Hotspot2
+      const { error: cpUpErr } = await supabase
+        .from('spatial_photos')
+        .update({ parent_hotspot_id: h2.id, updated_at: new Date().toISOString() })
+        .eq('id', params.childPhotoId);
+      if (cpUpErr) throw cpUpErr;
+
+      // Step D: Re-point Hotspot1 to Image2
+      const { error: hsUpErr } = await supabase
+        .from('spatial_hotspots')
+        .update({ child_photo_id: p2.id, updated_at: new Date().toISOString() })
+        .eq('id', params.parentHotspotId);
+      if (hsUpErr) throw hsUpErr;
+
+      newPhotoData = p2 as SpatialPhoto;
+      newHotspotData = h2 as SpatialHotspot;
+    } else {
+      // Fetch created photo and hotspot
+      const [pRes, hRes] = await Promise.all([
+        supabase.from('spatial_photos').select('*').eq('id', rpcRes.photo_id).single(),
+        supabase.from('spatial_hotspots').select('*').eq('id', rpcRes.hotspot_id).single()
+      ]);
+      if (pRes.error) throw pRes.error;
+      if (hRes.error) throw hRes.error;
+      newPhotoData = pRes.data as SpatialPhoto;
+      newHotspotData = hRes.data as SpatialHotspot;
+    }
+  }
+
+  // 3. Synchronize to Dexie offline DB
+  if (typeof window !== 'undefined') {
+    try {
+      if (newPhotoData) await db.spatial_photos.put(newPhotoData);
+      if (newHotspotData) await db.spatial_hotspots.put(newHotspotData);
+      await db.spatial_photos.update(params.childPhotoId, { parent_hotspot_id: newHotspotData?.id });
+      await db.spatial_hotspots.update(params.parentHotspotId, { child_photo_id: newPhotoData?.id });
+    } catch (dbErr) {
+      console.warn("Offline db sync error on intermediate photo insert:", dbErr);
+    }
+  }
+
+  if (!newPhotoData || !newHotspotData) {
+    throw new Error("Failed to create intermediate photo or hotspot");
+  }
+
+  return { newPhoto: newPhotoData, newHotspot: newHotspotData };
 }
 
 export interface Project {

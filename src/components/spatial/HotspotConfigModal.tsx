@@ -1,16 +1,31 @@
 "use client";
 
 import { useState } from "react";
-import { X } from "lucide-react";
+import { X, Crop, Layers } from "lucide-react";
 
 interface Props {
   onClose: () => void;
   onSubmit: (label: string, isLeaf: boolean) => void;
+  onRedrawShape?: () => void;
+  onInsertIntermediate?: () => void;
+  initialLabel?: string;
+  initialType?: "leaf" | "drill";
+  title?: string;
+  submitText?: string;
 }
 
-export function HotspotConfigModal({ onClose, onSubmit }: Props) {
-  const [label, setLabel] = useState("");
-  const [type, setType] = useState<"leaf" | "drill">("drill");
+export function HotspotConfigModal({ 
+  onClose, 
+  onSubmit,
+  onRedrawShape,
+  onInsertIntermediate,
+  initialLabel = "",
+  initialType = "drill",
+  title = "Configure Hotspot",
+  submitText
+}: Props) {
+  const [label, setLabel] = useState(initialLabel);
+  const [type, setType] = useState<"leaf" | "drill">(initialType);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,7 +37,7 @@ export function HotspotConfigModal({ onClose, onSubmit }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
       <div className="bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl w-full max-w-md p-6">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="font-serif text-2xl font-bold text-white">Configure Hotspot</h2>
+          <h2 className="font-serif text-2xl font-bold text-white">{title}</h2>
           <button onClick={onClose} className="text-brand-text-muted hover:text-white">
             <X className="h-5 w-5" />
           </button>
@@ -78,21 +93,47 @@ export function HotspotConfigModal({ onClose, onSubmit }: Props) {
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-[#332f2a]">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-brand-text-muted hover:text-white"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!label.trim()}
-              className="px-6 py-2 text-sm font-medium bg-brand-accent text-white rounded-sm hover:bg-brand-accent-hover disabled:opacity-50"
-            >
-              Save Hotspot
-            </button>
+          <div className="flex items-center justify-between gap-3 pt-4 border-t border-[#332f2a]">
+            <div className="flex flex-wrap items-center gap-2">
+              {onRedrawShape && (
+                <button
+                  type="button"
+                  onClick={onRedrawShape}
+                  className="px-3 py-2 text-xs font-bold text-cyan-400 hover:text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded transition-colors flex items-center gap-1.5"
+                  title="Redraw boundary points on the map"
+                >
+                  <Crop className="h-3.5 w-3.5" />
+                  <span>Redraw Shape</span>
+                </button>
+              )}
+              {onInsertIntermediate && (
+                <button
+                  type="button"
+                  onClick={onInsertIntermediate}
+                  className="px-3 py-2 text-xs font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors flex items-center gap-1.5"
+                  title="Insert an intermediate view between this hotspot and its child view"
+                >
+                  <Layers className="h-3.5 w-3.5" />
+                  <span>Insert View In-Between</span>
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-brand-text-muted hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!label.trim()}
+                className="px-6 py-2 text-sm font-medium bg-brand-accent text-white rounded-sm hover:bg-brand-accent-hover disabled:opacity-50"
+              >
+                {submitText || (initialLabel ? "Save Changes" : "Save Hotspot")}
+              </button>
+            </div>
           </div>
         </form>
       </div>
