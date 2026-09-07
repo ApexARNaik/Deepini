@@ -4,7 +4,7 @@ import { useRef, useState, useEffect } from "react";
 import { SpatialHotspot } from "@/lib/api";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { useNetworkState } from "@/hooks/useNetworkState";
-import { Trash2, MapPin, Check, RotateCcw } from "lucide-react";
+import { Trash2, MapPin, Check, RotateCcw, Edit2 } from "lucide-react";
 
 interface Props {
   imageUrl: string;
@@ -14,10 +14,11 @@ interface Props {
   onHotspotCreated: (shapePoints: { x: number; y: number }[], label: string, isLeaf: boolean) => void;
   onHotspotClick: (hotspot: SpatialHotspot) => void;
   onHotspotDelete?: (hotspot: SpatialHotspot) => void;
+  onHotspotEdit?: (hotspot: SpatialHotspot) => void;
   onCancelEdit: () => void;
 }
 
-type DrawMode = 'freehand' | 'polygon' | 'rectangle' | 'delete';
+type DrawMode = 'freehand' | 'polygon' | 'rectangle' | 'delete' | 'edit';
 type RectStage = 'idle' | 'drawing' | 'resizing';
 type ResizeHandle = 'top' | 'bottom' | 'left' | 'right' | 'tl' | 'tr' | 'bl' | 'br' | 'move';
 
@@ -29,6 +30,7 @@ export function HotspotCanvas({
   onHotspotCreated, 
   onHotspotClick, 
   onHotspotDelete,
+  onHotspotEdit,
   onCancelEdit 
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -162,7 +164,7 @@ export function HotspotCanvas({
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (!isEditing || !isOnline || drawMode === 'delete') return;
+    if (!isEditing || !isOnline || drawMode === 'delete' || drawMode === 'edit') return;
     
     if (drawMode === 'freehand') {
       e.preventDefault();
@@ -204,7 +206,7 @@ export function HotspotCanvas({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isEditing || !isOnline || drawMode === 'delete') return;
+    if (!isEditing || !isOnline || drawMode === 'delete' || drawMode === 'edit') return;
     if (drawMode === 'freehand') {
       if (!isDrawing) return;
       e.preventDefault();
@@ -373,123 +375,213 @@ export function HotspotCanvas({
   };
 
   const isDeleteMode = isEditing && drawMode === 'delete';
+  const isEditMode = isEditing && drawMode === 'edit';
   const hoveredHotspot = hotspots.find(h => h.id === hoveredHotspotId);
 
   return (
-    <div className="relative w-full min-h-[500px] flex items-center justify-center bg-[#0f0e0c] border border-[#332f2a] overflow-auto rounded-lg p-2 sm:p-4">
-      {/* Edit Mode Toolbar */}
+    <div className="relative w-full flex flex-col bg-[#0f0e0c] border border-[#332f2a] rounded-lg overflow-hidden">
+      {/* Edit Mode Top Toolbar & Guidance Bar (completely outside the image box) */}
       {isEditing && (
-        <div className="sticky top-4 left-4 z-20 flex flex-wrap items-center gap-1.5 bg-[#1a1816]/95 backdrop-blur-md p-1.5 rounded-lg border border-[#332f2a] self-start shadow-xl">
-          <span className="text-[10px] text-brand-text-muted uppercase tracking-widest font-bold px-2 hidden sm:inline">
-            Tool:
-          </span>
-          <button 
-            type="button"
-            onClick={handlePolygonButtonClick}
-            onDoubleClick={handlePolygonButtonDoubleClick}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-all ${
-              drawMode === 'rectangle'
-                ? 'bg-gradient-to-r from-brand-accent to-amber-600 text-white shadow-md ring-1 ring-amber-400/50'
-                : drawMode === 'polygon' 
+        <div className="w-full bg-[#141211] border-b border-[#332f2a] px-3 py-2 sm:px-4 flex flex-wrap items-center justify-between gap-2.5 z-20 shrink-0 shadow-md">
+          {/* Left: Tool Selectors */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-brand-text-muted uppercase tracking-widest font-bold px-1 hidden sm:inline">
+              Tool:
+            </span>
+            <button 
+              type="button"
+              onClick={handlePolygonButtonClick}
+              onDoubleClick={handlePolygonButtonDoubleClick}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                drawMode === 'rectangle'
+                  ? 'bg-gradient-to-r from-brand-accent to-amber-600 text-white shadow-md ring-1 ring-amber-400/50'
+                  : drawMode === 'polygon' 
+                    ? 'bg-brand-accent text-white shadow-sm' 
+                    : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
+              }`}
+              title={
+                drawMode === 'rectangle'
+                  ? "Rectangle Mode Active (Click to switch to Polygon, or double-click to toggle)"
+                  : "Polygon Tool (Double-click to activate Rectangle mode)"
+              }
+            >
+              <span>Polygon</span>
+              {drawMode === 'rectangle' && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/40 text-amber-200 border border-amber-400/40">
+                  Rect ⬚
+                </span>
+              )}
+            </button>
+            <button 
+              type="button"
+              onClick={() => { 
+                setDrawMode('freehand'); 
+                setCurrentPoints([]); 
+                setIsDrawing(false); 
+                setPolygonMousePos(null);
+                resetRectangleState();
+              }}
+              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                drawMode === 'freehand' 
                   ? 'bg-brand-accent text-white shadow-sm' 
                   : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
-            }`}
-            title={
-              drawMode === 'rectangle'
-                ? "Rectangle Mode Active (Click to switch to Polygon, or double-click to toggle)"
-                : "Polygon Tool (Double-click to activate Rectangle mode)"
-            }
-          >
-            <span>Polygon</span>
-            {drawMode === 'rectangle' && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/40 text-amber-200 border border-amber-400/40">
-                Rect ⬚
-              </span>
+              }`}
+            >
+              Freehand
+            </button>
+            
+            <div className="h-4 w-px bg-[#332f2a] mx-1" />
+
+            <button 
+              type="button"
+              onClick={() => { 
+                setDrawMode('edit'); 
+                setCurrentPoints([]); 
+                setIsDrawing(false); 
+                setPolygonMousePos(null);
+                resetRectangleState();
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
+                drawMode === 'edit' 
+                  ? 'bg-amber-600 text-white shadow-md' 
+                  : 'text-amber-400/90 hover:text-amber-300 hover:bg-amber-500/10'
+              }`}
+              title="Click to select and edit unsaved image hotspots (name and storage type)"
+            >
+              <Edit2 className="h-3.5 w-3.5" />
+              <span>Edit Hotspot</span>
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => { 
+                setDrawMode('delete'); 
+                setCurrentPoints([]); 
+                setIsDrawing(false); 
+                setPolygonMousePos(null);
+                resetRectangleState();
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
+                drawMode === 'delete' 
+                  ? 'bg-red-600 text-white shadow-md' 
+                  : 'text-red-400/90 hover:text-red-300 hover:bg-red-500/10'
+              }`}
+              title="Click to select and delete hotspots"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Delete Hotspot</span>
+            </button>
+          </div>
+
+          {/* Right: Contextual Status, Guidance & Quick Action Buttons */}
+          <div className="flex items-center gap-2">
+            {drawMode === 'edit' && (
+              <div className="bg-amber-950/80 text-amber-200 border border-amber-700/60 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+                <Edit2 className="h-3.5 w-3.5 text-amber-400" />
+                <span>
+                  {hoveredHotspot 
+                    ? hoveredHotspot.child_photo_id 
+                      ? `"${hoveredHotspot.label}" already has a saved image (cannot edit type)` 
+                      : `Click to edit "${hoveredHotspot.label}"` 
+                    : "Click on any unsaved image hotspot to edit its name & type"}
+                </span>
+              </div>
             )}
-          </button>
-          <button 
-            type="button"
-            onClick={() => { 
-              setDrawMode('freehand'); 
-              setCurrentPoints([]); 
-              setIsDrawing(false); 
-              setPolygonMousePos(null);
-              resetRectangleState();
-            }}
-            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-              drawMode === 'freehand' 
-                ? 'bg-brand-accent text-white shadow-sm' 
-                : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
-            }`}
-          >
-            Freehand
-          </button>
-          
-          <div className="h-4 w-px bg-[#332f2a] mx-1" />
 
-          <button 
-            type="button"
-            onClick={() => { 
-              setDrawMode('delete'); 
-              setCurrentPoints([]); 
-              setIsDrawing(false); 
-              setPolygonMousePos(null);
-              resetRectangleState();
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
-              drawMode === 'delete' 
-                ? 'bg-red-600 text-white shadow-md' 
-                : 'text-red-400/90 hover:text-red-300 hover:bg-red-500/10'
-            }`}
-            title="Click to select and delete hotspots"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            <span>Delete Hotspot</span>
-          </button>
-        </div>
-      )}
+            {drawMode === 'delete' && (
+              <div className="bg-red-950/80 text-red-200 border border-red-700/60 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+                <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                <span>
+                  {hoveredHotspot 
+                    ? `Click to delete "${hoveredHotspot.label}"` 
+                    : "Click on any highlighted hotspot to delete it"}
+                </span>
+              </div>
+            )}
 
-      {/* Guidance banner for Delete mode */}
-      {isEditing && drawMode === 'delete' && (
-        <div className="absolute top-4 inset-x-0 flex justify-center pointer-events-none z-20">
-          <div className="bg-red-950/90 text-red-200 border border-red-700/60 px-4 py-1.5 rounded-full text-xs font-semibold shadow-lg backdrop-blur-sm flex items-center gap-2 pointer-events-auto">
-            <Trash2 className="h-3.5 w-3.5 text-red-400" />
-            <span>
-              {hoveredHotspot 
-                ? `Click to delete "${hoveredHotspot.label}"` 
-                : "Click on any highlighted hotspot to delete it"}
-            </span>
+            {drawMode === 'rectangle' && (
+              <div className="flex items-center gap-2">
+                <div className="bg-amber-950/80 text-amber-200 border border-amber-600/60 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span>
+                    {rectStage === 'idle'
+                      ? "Click & drag diagonally on image to draw hotspot"
+                      : rectStage === 'drawing'
+                        ? "Release pointer to complete diagonal"
+                        : "Drag edges or corners to resize. Press Enter or Confirm to save."}
+                  </span>
+                </div>
+
+                {rectStage === 'resizing' && rectBounds && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const pts = [
+                          { x: rectBounds.minX, y: rectBounds.minY },
+                          { x: rectBounds.maxX, y: rectBounds.minY },
+                          { x: rectBounds.maxX, y: rectBounds.maxY },
+                          { x: rectBounds.minX, y: rectBounds.maxY }
+                        ];
+                        setCurrentPoints(pts);
+                        setShowConfig(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
+                      title="Confirm rectangle hotspot (Enter)"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      <span>Confirm Hotspot</span>
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        resetRectangleState();
+                        setCurrentPoints([]);
+                        setIsDrawing(false);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
+                      title="Cancel and redraw (Esc)"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span>Redraw</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {drawMode === 'polygon' && (
+              <div className="text-xs text-brand-text-muted hidden sm:flex items-center gap-1.5 font-medium">
+                <span>Click to place vertices. Click start point or press <kbd className="bg-[#252320] px-1.5 py-0.5 rounded border border-[#332f2a] text-[10px] text-white font-mono">Enter</kbd> to close.</span>
+              </div>
+            )}
+
+            {drawMode === 'freehand' && (
+              <div className="text-xs text-brand-text-muted hidden sm:flex items-center gap-1.5 font-medium">
+                <span>Click & drag on image to trace boundary.</span>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Guidance banner for Rectangle mode */}
-      {isEditing && drawMode === 'rectangle' && (
-        <div className="absolute top-4 inset-x-0 flex justify-center pointer-events-none z-20">
-          <div className="bg-amber-950/90 text-amber-200 border border-amber-600/60 px-4 py-1.5 rounded-full text-xs font-semibold shadow-lg backdrop-blur-sm flex items-center gap-2 pointer-events-auto">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span>
-              {rectStage === 'idle'
-                ? "Rectangle Mode: Click & drag diagonally to draw hotspot"
-                : rectStage === 'drawing'
-                  ? "Drag diagonally and release to form rectangle"
-                  : "Drag any edge or corner to resize. Click 'Confirm Hotspot' or press Enter to save."}
-            </span>
-          </div>
-        </div>
-      )}
-
-      <div 
-        ref={containerRef}
-        className={`relative inline-block touch-none select-none max-w-full ${
-          isEditing 
-            ? (drawMode === 'delete' ? 'cursor-pointer' : 'cursor-crosshair') 
-            : 'cursor-default'
-        }`}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-      >
+      {/* Main Image Canvas Area (purely dedicated to image display & drawing) */}
+      <div className="flex-1 w-full min-h-[500px] flex items-center justify-center overflow-auto p-2 sm:p-4 bg-[#0a0908]">
+        <div 
+          ref={containerRef}
+          className={`relative inline-block touch-none select-none max-w-full ${
+            isEditing 
+              ? (drawMode === 'delete' || drawMode === 'edit' ? 'cursor-pointer' : 'cursor-crosshair') 
+              : 'cursor-default'
+          }`}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+        >
         {/* The actual image */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img 
@@ -509,7 +601,7 @@ export function HotspotCanvas({
           {hotspots.map((hs) => {
             const isHovered = hoveredHotspotId === hs.id;
             const isHighlighted = highlightedHotspotId === hs.id;
-            const isClickable = isDeleteMode || !isEditing;
+            const isClickable = isDeleteMode || isEditMode || !isEditing;
             
             return (
               <polygon
@@ -518,21 +610,29 @@ export function HotspotCanvas({
                 fill={
                   isDeleteMode
                     ? (isHovered ? "rgba(239, 68, 68, 0.55)" : "rgba(239, 68, 68, 0.22)")
-                    : isHovered 
-                      ? "rgba(239, 68, 68, 0.4)" 
-                      : isHighlighted 
-                        ? "rgba(239, 68, 68, 0.2)" 
-                        : "rgba(255, 255, 255, 0.3)"
+                    : isEditMode
+                      ? (isHovered 
+                          ? (!hs.child_photo_id ? "rgba(245, 158, 11, 0.45)" : "rgba(100, 100, 100, 0.25)")
+                          : (!hs.child_photo_id ? "rgba(245, 158, 11, 0.22)" : "rgba(255, 255, 255, 0.15)"))
+                      : isHovered 
+                        ? "rgba(239, 68, 68, 0.4)" 
+                        : isHighlighted 
+                          ? "rgba(239, 68, 68, 0.2)" 
+                          : "rgba(255, 255, 255, 0.3)"
                 }
                 stroke={
                   isDeleteMode
                     ? (isHovered ? "#ff2222" : "rgba(239, 68, 68, 0.85)")
-                    : isHovered || isHighlighted 
-                      ? "#ef4444" 
-                      : "rgba(255,255,255,0.5)"
+                    : isEditMode
+                      ? (isHovered 
+                          ? (!hs.child_photo_id ? "#f59e0b" : "rgba(156, 163, 175, 0.6)")
+                          : (!hs.child_photo_id ? "rgba(245, 158, 11, 0.75)" : "rgba(156, 163, 175, 0.4)"))
+                      : isHovered || isHighlighted 
+                        ? "#ef4444" 
+                        : "rgba(255,255,255,0.5)"
                 }
-                strokeWidth={isDeleteMode ? (isHovered ? "0.8" : "0.5") : (isHighlighted ? "0.6" : "0.3")}
-                strokeDasharray={isDeleteMode ? (isHovered ? "none" : "2,2") : "none"}
+                strokeWidth={isDeleteMode || isEditMode ? (isHovered ? "0.8" : "0.5") : (isHighlighted ? "0.6" : "0.3")}
+                strokeDasharray={isDeleteMode ? (isHovered ? "none" : "2,2") : isEditMode ? (isHovered ? "none" : "3,3") : "none"}
                 className={`transition-all duration-200 ${isHighlighted ? 'animate-pulse' : ''} ${
                   isClickable ? "cursor-pointer pointer-events-auto" : "pointer-events-none"
                 }`}
@@ -563,6 +663,10 @@ export function HotspotCanvas({
                   e.stopPropagation();
                   if (isDeleteMode) {
                     onHotspotDelete?.(hs);
+                  } else if (isEditMode) {
+                    if (!hs.child_photo_id) {
+                      onHotspotEdit?.(hs);
+                    }
                   } else if (!isEditing) {
                     onHotspotClick(hs);
                   }
@@ -854,12 +958,29 @@ export function HotspotCanvas({
               }`}
             >
               {isNearTop && (
-                <div className={`w-2 h-2 rotate-45 -mb-1 z-10 shadow ${isDeleteMode ? 'bg-red-950 border-l border-t border-red-500/80' : 'bg-[#141211] border-l border-t border-[#4a443c]'}`} />
+                <div className={`w-2 h-2 rotate-45 -mb-1 z-10 shadow ${
+                  isDeleteMode ? 'bg-red-950 border-l border-t border-red-500/80' : 
+                  isEditMode ? 'bg-amber-950 border-l border-t border-amber-500/80' : 
+                  'bg-[#141211] border-l border-t border-[#4a443c]'
+                }`} />
               )}
               {isDeleteMode ? (
                 <div className="bg-red-950/95 text-red-200 text-xs font-bold px-3 py-1.5 rounded-md shadow-2xl border border-red-500/80 whitespace-nowrap flex items-center gap-1.5 backdrop-blur-md">
                   <Trash2 className="h-3.5 w-3.5 text-red-400 shrink-0" />
                   <span>Delete &quot;{hoveredHotspot.label}&quot;</span>
+                </div>
+              ) : isEditMode ? (
+                <div className={`text-xs font-bold px-3 py-1.5 rounded-md shadow-2xl border whitespace-nowrap flex items-center gap-1.5 backdrop-blur-md ${
+                  !hoveredHotspot.child_photo_id 
+                    ? 'bg-amber-950/95 text-amber-200 border-amber-500/80' 
+                    : 'bg-[#141211]/95 text-brand-text-muted border-[#4a443c]'
+                }`}>
+                  <Edit2 className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                  <span>
+                    {!hoveredHotspot.child_photo_id 
+                      ? `Edit "${hoveredHotspot.label}"` 
+                      : `"${hoveredHotspot.label}" (Image saved)`}
+                  </span>
                 </div>
               ) : (
                 <div className="bg-[#141211]/95 text-white text-xs font-semibold px-3 py-1.5 rounded-md shadow-2xl border border-[#4a443c] whitespace-nowrap flex items-center gap-2 backdrop-blur-md">
@@ -875,11 +996,16 @@ export function HotspotCanvas({
                 </div>
               )}
               {!isNearTop && (
-                <div className={`w-2 h-2 rotate-45 -mt-1 shadow ${isDeleteMode ? 'bg-red-950 border-r border-b border-red-500/80' : 'bg-[#141211] border-r border-b border-[#4a443c]'}`} />
+                <div className={`w-2 h-2 rotate-45 -mt-1 shadow ${
+                  isDeleteMode ? 'bg-red-950 border-r border-b border-red-500/80' : 
+                  isEditMode ? 'bg-amber-950 border-r border-b border-amber-500/80' : 
+                  'bg-[#141211] border-r border-b border-[#4a443c]'
+                }`} />
               )}
             </div>
           );
         })()}
+      </div>
       </div>
 
       {showConfig && (

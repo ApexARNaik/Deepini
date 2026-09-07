@@ -537,6 +537,30 @@ export async function createHotspot(
   return data as SpatialHotspot
 }
 
+export async function updateHotspot(
+  hotspotId: string,
+  updates: { label?: string; is_leaf?: boolean }
+): Promise<SpatialHotspot> {
+  const { data, error } = await supabase
+    .from('spatial_hotspots')
+    .update(updates)
+    .eq('id', hotspotId)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_hotspots.update(hotspotId, updates);
+    } catch (dbErr) {
+      console.warn("Offline db update error on hotspot update:", dbErr);
+    }
+  }
+
+  return data as SpatialHotspot;
+}
+
 export interface Project {
   id: string;
   name: string;

@@ -6,11 +6,22 @@ import { X } from "lucide-react";
 interface Props {
   onClose: () => void;
   onSubmit: (label: string, isLeaf: boolean) => void;
+  initialLabel?: string;
+  initialType?: "leaf" | "drill";
+  title?: string;
+  submitText?: string;
 }
 
-export function HotspotConfigModal({ onClose, onSubmit }: Props) {
-  const [label, setLabel] = useState("");
-  const [type, setType] = useState<"leaf" | "drill">("drill");
+export function HotspotConfigModal({ 
+  onClose, 
+  onSubmit,
+  initialLabel = "",
+  initialType = "drill",
+  title = "Configure Hotspot",
+  submitText
+}: Props) {
+  const [label, setLabel] = useState(initialLabel);
+  const [type, setType] = useState<"leaf" | "drill">(initialType);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,7 +33,7 @@ export function HotspotConfigModal({ onClose, onSubmit }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
       <div className="bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl w-full max-w-md p-6">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="font-serif text-2xl font-bold text-white">Configure Hotspot</h2>
+          <h2 className="font-serif text-2xl font-bold text-white">{title}</h2>
           <button onClick={onClose} className="text-brand-text-muted hover:text-white">
             <X className="h-5 w-5" />
           </button>
@@ -91,7 +102,7 @@ export function HotspotConfigModal({ onClose, onSubmit }: Props) {
               disabled={!label.trim()}
               className="px-6 py-2 text-sm font-medium bg-brand-accent text-white rounded-sm hover:bg-brand-accent-hover disabled:opacity-50"
             >
-              Save Hotspot
+              {submitText || (initialLabel ? "Save Changes" : "Save Hotspot")}
             </button>
           </div>
         </form>

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
+import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
@@ -22,6 +23,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showHotspotsList, setShowHotspotsList] = useState(false);
+  const [editingHotspot, setEditingHotspot] = useState<SpatialHotspot | null>(null);
   const router = useRouter();
   
   // Room Edit State
@@ -132,25 +134,51 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     try {
       const newHotspot = await createHotspot(activePhotoId, label, shapePoints, isLeaf);
       setHotspots(prev => [...prev, newHotspot]);
-      setIsEditing(false);
-
-      if (!isLeaf) {
-        // Automatically prompt for child photo upload (simulated via file input click logic)
-        // For now, we'll just alert to upload in the UI. 
-        // Real implementation might trigger a hidden file input here.
-        alert(`Hotspot created. Please upload the inside photo for '${label}'.`);
-        // We set up a temporary state to expect the next upload to link to this hotspot.
-        setPendingChildUpload(newHotspot);
-      } else {
-        // Immediately select the new leaf storage location and open the add component UI
-        setSelectedLeafHotspot(newHotspot);
-        setLeafComponents([]);
-        setIsAddingComponent(true);
-        getInventory().then(setAllInventory).catch(console.error);
-      }
+      // Do not exit edit mode or immediately prompt for upload/components.
+      // The user will click "Done Editing" when finished mapping, and later clicking
+      // the hotspot will trigger the add image/components flow.
     } catch (err) {
       console.error(err);
       alert("Failed to save hotspot");
+    }
+  };
+
+  const handleUpdateHotspotDetails = async (hotspotId: string, newLabel: string, newIsLeaf: boolean) => {
+    try {
+      await updateHotspot(hotspotId, {
+        label: newLabel,
+        is_leaf: newIsLeaf
+      });
+      
+      setHotspots(prev => prev.map(h => h.id === hotspotId ? { ...h, label: newLabel, is_leaf: newIsLeaf } : h));
+
+      // If this hotspot was open in the leaf side drawer
+      if (selectedLeafHotspot?.id === hotspotId) {
+        if (newIsLeaf) {
+          setSelectedLeafHotspot(prev => prev ? { ...prev, label: newLabel, is_leaf: true } : null);
+        } else {
+          // Converted from leaf to drilldown! Close leaf drawer and prompt for child upload
+          setSelectedLeafHotspot(null);
+          setPendingChildUpload({ ...selectedLeafHotspot, label: newLabel, is_leaf: false });
+        }
+      }
+
+      // If this hotspot was pending child photo upload
+      if (pendingChildUpload?.id === hotspotId) {
+        if (!newIsLeaf) {
+          setPendingChildUpload(prev => prev ? { ...prev, label: newLabel, is_leaf: false } : null);
+        } else {
+          // Converted from drilldown to leaf! Close upload card and open leaf components drawer
+          const updatedLeaf = { ...pendingChildUpload, label: newLabel, is_leaf: true };
+          setPendingChildUpload(null);
+          handleHotspotClick(updatedLeaf);
+        }
+      }
+
+      setEditingHotspot(null);
+    } catch (err) {
+      console.error("Failed to update hotspot:", err);
+      alert("Failed to update hotspot details");
     }
   };
 
@@ -630,18 +658,34 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                     </div>
                                   </div>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteHotspot(hs);
-                                  }}
-                                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors shrink-0"
-                                  title={`Delete hotspot "${hs.label}"`}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                  <span>Delete</span>
-                                </button>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {!hs.child_photo_id && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingHotspot(hs);
+                                      }}
+                                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-brand-accent bg-brand-accent/10 hover:bg-brand-accent/20 border border-brand-accent/30 rounded transition-colors"
+                                      title="Edit hotspot name and storage type"
+                                    >
+                                      <Edit2 className="h-3 w-3" />
+                                      <span>Edit</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteHotspot(hs);
+                                    }}
+                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors"
+                                    title={`Delete hotspot "${hs.label}"`}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                    <span>Delete</span>
+                                  </button>
+                                </div>
                               </div>
                             );
                           })
@@ -687,7 +731,18 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
 
       {pendingChildUpload && (
         <div className="mb-6 p-4 bg-brand-accent/10 border border-brand-accent/30 rounded-lg text-sm text-brand-text">
-          <p className="mb-3 font-medium">Please upload the inside photo for <strong>{pendingChildUpload.label}</strong></p>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <p className="font-medium">Please upload the inside photo for <strong>{pendingChildUpload.label}</strong></p>
+            <button
+              type="button"
+              onClick={() => setEditingHotspot(pendingChildUpload)}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-[#1a1816] hover:bg-[#252320] text-brand-accent hover:text-white border border-[#332f2a] rounded transition-colors"
+              title="Edit hotspot name and storage type"
+            >
+              <Edit2 className="h-3.5 w-3.5" />
+              <span>Edit Hotspot</span>
+            </button>
+          </div>
           <ImageUploadDropzone onUpload={handleChildUpload} isUploading={uploading} label="Upload Drill-down Photo" />
           <button 
             className="mt-3 text-brand-text-muted hover:text-white underline text-xs"
@@ -830,6 +885,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               onHotspotCreated={handleHotspotCreated}
               onHotspotClick={handleHotspotClick}
               onHotspotDelete={handleDeleteHotspot}
+              onHotspotEdit={setEditingHotspot}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-brand-text-muted flex-col">
@@ -850,13 +906,22 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               <h2 className="font-serif text-lg font-bold text-white tracking-widest uppercase truncate mr-2">{selectedLeafHotspot.label}</h2>
               <div className="flex items-center gap-1 shrink-0">
                 {isOnline && (
-                  <button 
-                    onClick={() => handleDeleteHotspot(selectedLeafHotspot)}
-                    className="p-1.5 text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                    title={`Delete hotspot "${selectedLeafHotspot.label}"`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <>
+                    <button 
+                      onClick={() => setEditingHotspot(selectedLeafHotspot)}
+                      className="p-1.5 text-brand-text-muted hover:text-brand-accent hover:bg-brand-accent/10 rounded transition-colors"
+                      title={`Edit hotspot "${selectedLeafHotspot.label}"`}
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteHotspot(selectedLeafHotspot)}
+                      className="p-1.5 text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                      title={`Delete hotspot "${selectedLeafHotspot.label}"`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </>
                 )}
                 <button onClick={() => setSelectedLeafHotspot(null)} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
                   <X className="h-5 w-5" />
@@ -1052,6 +1117,19 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           </div>
         )}
       </div>
+
+      {editingHotspot && (
+        <HotspotConfigModal
+          title="Edit Hotspot"
+          initialLabel={editingHotspot.label}
+          initialType={editingHotspot.is_leaf ? "leaf" : "drill"}
+          submitText="Save Changes"
+          onClose={() => setEditingHotspot(null)}
+          onSubmit={(label, isLeaf) => {
+            handleUpdateHotspotDetails(editingHotspot.id, label, isLeaf);
+          }}
+        />
+      )}
     </div>
   );
 }
