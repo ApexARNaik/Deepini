@@ -90,8 +90,17 @@ export function HotspotCanvas({
         }
       } else if (drawMode === 'rectangle') {
         if (e.key === 'Enter' && rectStage === 'resizing' && rectBounds) {
+          e.preventDefault();
+          const pts = [
+            { x: rectBounds.minX, y: rectBounds.minY },
+            { x: rectBounds.maxX, y: rectBounds.minY },
+            { x: rectBounds.maxX, y: rectBounds.maxY },
+            { x: rectBounds.minX, y: rectBounds.maxY }
+          ];
+          setCurrentPoints(pts);
           setShowConfig(true);
         } else if (e.key === 'Escape') {
+          e.preventDefault();
           resetRectangleState();
           setCurrentPoints([]);
           setIsDrawing(false);
@@ -179,8 +188,8 @@ export function HotspotCanvas({
         }
       }
     } else if (drawMode === 'rectangle') {
-      // If user clicks on canvas in rectangle mode (when not resizing handles)
-      if (rectStage === 'idle' || rectStage === 'resizing') {
+      // Only start drawing on pointerdown if idle (do not reset if in resizing stage!)
+      if (rectStage === 'idle') {
         e.preventDefault();
         const pt = getNormalizedPoint(e);
         containerRef.current?.setPointerCapture(e.pointerId);
@@ -746,6 +755,10 @@ export function HotspotCanvas({
 
           return (
             <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerMove={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
               style={{
                 left: `${Math.max(12, Math.min(88, centerX))}%`,
                 top: `${Math.max(4, Math.min(96, posY))}%`
@@ -756,8 +769,18 @@ export function HotspotCanvas({
             >
               <button
                 type="button"
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (rectBounds) {
+                    const pts = [
+                      { x: rectBounds.minX, y: rectBounds.minY },
+                      { x: rectBounds.maxX, y: rectBounds.minY },
+                      { x: rectBounds.maxX, y: rectBounds.maxY },
+                      { x: rectBounds.minX, y: rectBounds.maxY }
+                    ];
+                    setCurrentPoints(pts);
+                  }
                   setShowConfig(true);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
@@ -768,10 +791,12 @@ export function HotspotCanvas({
               </button>
               <button
                 type="button"
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   resetRectangleState();
                   setCurrentPoints([]);
+                  setIsDrawing(false);
                 }}
                 className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
                 title="Cancel and redraw (Esc)"
@@ -863,10 +888,19 @@ export function HotspotCanvas({
             setShowConfig(false);
             setCurrentPoints([]);
             resetRectangleState();
-            onCancelEdit();
           }}
           onSubmit={(label, isLeaf) => {
-            onHotspotCreated(currentPoints, label, isLeaf);
+            const finalPoints = (currentPoints.length >= 3)
+              ? currentPoints
+              : (rectBounds ? [
+                  { x: rectBounds.minX, y: rectBounds.minY },
+                  { x: rectBounds.maxX, y: rectBounds.minY },
+                  { x: rectBounds.maxX, y: rectBounds.maxY },
+                  { x: rectBounds.minX, y: rectBounds.maxY }
+                ] : []);
+            if (finalPoints.length >= 3) {
+              onHotspotCreated(finalPoints, label, isLeaf);
+            }
             setShowConfig(false);
             setCurrentPoints([]);
             resetRectangleState();
