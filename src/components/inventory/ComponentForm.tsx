@@ -18,6 +18,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const { isOnline } = useNetworkState();
   
   const typeParam = searchParams.get('type');
+  const locationIdParam = searchParams.get('locationId') || searchParams.get('location');
   const isInitialPersonal = initialData ? isPersonalItem(initialData) : (typeParam === 'personal');
   const [itemType, setItemType] = useState<'component' | 'personal'>(isInitialPersonal ? 'personal' : 'component');
 
@@ -68,17 +69,39 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     getTags().then(setAvailableTags).catch(console.error);
     getAllLeafHotspots().then((hotspots) => {
       setAvailableHotspots(hotspots);
-      setLocations((prevLocations) =>
-        prevLocations.map((loc) => {
+      setLocations((prevLocations) => {
+        let updated = prevLocations.map((loc) => {
           const matched = hotspots.find((h) => h.id === loc.hotspot_id);
           if (matched && (!loc.label || loc.label === "Unknown Location" || !loc.label.includes('→'))) {
             return { ...loc, label: matched.fullLabel || matched.label || loc.label };
           }
           return loc;
-        })
-      );
+        });
+
+        // If creating new component with locationIdParam and no assigned locations yet, pre-assign it
+        if (!initialData && locationIdParam && updated.length === 0) {
+          const matched = hotspots.find((h) => h.id === locationIdParam);
+          if (matched) {
+            updated = [{
+              hotspot_id: matched.id,
+              quantity: 1,
+              label: matched.fullLabel || matched.label
+            }];
+          }
+        }
+
+        return updated;
+      });
+
+      // Pre-select in the dropdown as well
+      if (!initialData && locationIdParam) {
+        const matched = hotspots.find((h) => h.id === locationIdParam);
+        if (matched) {
+          setSelectedHotspot(matched.id);
+        }
+      }
     }).catch(console.error);
-  }, []);
+  }, [initialData, locationIdParam]);
 
   const handleAddTag = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -118,6 +141,9 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
 
   const handleRemoveLocation = (id: string) => {
     setLocations(locations.filter(l => l.hotspot_id !== id));
+    if (selectedHotspot === id) {
+      setSelectedHotspot("");
+    }
   };
 
   const handleAddCustomField = () => {

@@ -886,14 +886,24 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 <div className="text-sm text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded flex flex-col items-center gap-2">
                   <span>This location is empty.</span>
                   {!isAddingComponent && (
-                    <button
-                      type="button"
-                      onClick={() => setIsAddingComponent(true)}
-                      className="mt-1 flex items-center gap-1 px-3 py-1.5 bg-[#2a2a2a] hover:bg-brand-accent text-white rounded text-xs font-medium transition-colors"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      <span>Add Components</span>
-                    </button>
+                    <div className="flex items-center gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingComponent(true)}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-[#2a2a2a] hover:bg-brand-accent text-white rounded text-xs font-medium transition-colors"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Add Components</span>
+                      </button>
+                      <Link
+                        href={`/inventory/new?locationId=${selectedLeafHotspot.id}`}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-brand-accent/15 hover:bg-brand-accent border border-brand-accent/40 hover:border-brand-accent text-brand-accent hover:text-white rounded text-xs font-medium transition-colors"
+                        title="Create and assign new item to this location"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>New Item</span>
+                      </Link>
+                    </div>
                   )}
                 </div>
               ) : (
@@ -975,7 +985,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">Add Items to Location</div>
                     <Link 
-                      href="/inventory/new" 
+                      href={`/inventory/new?locationId=${selectedLeafHotspot.id}`} 
                       className="text-[10px] text-brand-accent hover:underline flex items-center gap-1 font-semibold"
                       title="Create new item in inventory"
                     >

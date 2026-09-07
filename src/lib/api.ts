@@ -26,6 +26,8 @@ export interface SpatialHotspot {
   shape_points: { x: number; y: number }[];
   is_leaf: boolean;
   child_photo_id: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type CustomField = { type: 'text' | 'number' | 'link' | 'image'; value: any };
@@ -342,14 +344,35 @@ export async function getFullHotspotPath(hotspotId: string) {
     if (!photo) break;
     chain.unshift({ type: 'photo', id: photo.id, label: photo.label || 'View' });
     
-    currentHotspotId = photo.parent_hotspot_id;
+    if (photo.parent_hotspot_id) {
+      currentHotspotId = photo.parent_hotspot_id;
+    } else if (photo.room_id) {
+      const { data: room }: any = await supabase.from("rooms").select("name").eq("id", photo.room_id).single();
+      if (room?.name) {
+        chain.unshift({ type: 'photo', id: photo.room_id, label: room.name });
+      }
+      break;
+    } else {
+      break;
+    }
   }
   return chain;
 }
 
 export async function getAllLeafHotspots() {
-  const { data, error } = await supabase.from('spatial_hotspots').select('*').eq('is_leaf', true);
-  if (error) throw new Error(error.message || "Failed to fetch leaf hotspots");
+  let data: any[] = [];
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const allHotspots = await db.spatial_hotspots.toArray();
+    data = allHotspots.filter(h => h.is_leaf);
+  } else {
+    const { data: dbData, error } = await supabase
+      .from('spatial_hotspots')
+      .select('*')
+      .eq('is_leaf', true)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message || "Failed to fetch leaf hotspots");
+    data = dbData || [];
+  }
   
   const hotspotsWithPaths = await Promise.all(data.map(async (hs) => {
     const path = await getFullHotspotPath(hs.id);
@@ -357,7 +380,15 @@ export async function getAllLeafHotspots() {
     return { ...hs, fullLabel: label };
   }));
   
-  return hotspotsWithPaths.sort((a, b) => a.fullLabel.localeCompare(b.fullLabel));
+  // Arrange in the order of recently added (newest first)
+  return hotspotsWithPaths.sort((a, b) => {
+    const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    if (timeB !== timeA) {
+      return timeB - timeA;
+    }
+    return a.fullLabel.localeCompare(b.fullLabel);
+  });
 }
 
 export async function getHotspotComponents(hotspotId: string) {
