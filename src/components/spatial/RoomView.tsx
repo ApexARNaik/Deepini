@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
@@ -89,7 +89,9 @@ export type UndoAction =
       description: string;
       data: {
         photoId: string;
+        parentHotspotId?: string | null;
         previousLabel: string;
+        previousParentHotspotLabel?: string | null;
       };
     }
   | {
@@ -111,7 +113,26 @@ export type UndoAction =
         deletedHotspot: SpatialHotspot;
         deletedComponentLocations: { component_id: string; quantity: number }[];
       };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'delete_photo';
+      description: string;
+      data: {
+        photoId: string;
+        photoTree: {
+          photos: SpatialPhoto[];
+          hotspots: SpatialHotspot[];
+          component_locations: { hotspot_id: string; component_id: string; quantity: number }[];
+        };
+        parentHotspotId: string | null;
+        previousActivePhotoId: string | null;
+        previousBreadcrumbChain: { id: string; label: string }[];
+      };
     };
+
+const MAX_UNDO_STACK_SIZE = 50;
 
 interface Props {
   roomId: string;
@@ -134,7 +155,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [isUndoing, setIsUndoing] = useState(false);
 
   const pushUndoAction = useCallback((action: UndoAction) => {
-    setUndoStack(prev => [...prev.slice(-29), action]);
+    setUndoStack(prev => [...prev.slice(-(MAX_UNDO_STACK_SIZE - 1)), action]);
   }, []);
 
   const [insertIntermediateTarget, setInsertIntermediateTarget] = useState<{
@@ -277,6 +298,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         label: newLabel,
         is_leaf: newIsLeaf
       });
+
+      // Keep child photo label synchronized if this is a drilldown hotspot
+      if (existing?.child_photo_id) {
+        try {
+          await updatePhotoLabel(existing.child_photo_id, newLabel);
+          setPhotos(prev => prev.map(p => p.id === existing.child_photo_id ? { ...p, label: newLabel } : p));
+        } catch (childErr) {
+          console.warn("Failed to sync child photo label:", childErr);
+        }
+      }
       
       if (existing) {
         pushUndoAction({
@@ -504,7 +535,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     if (!pendingChildUpload) return;
     setUploading(true);
     try {
-      const newPhoto = await uploadPhotoAndCreate(file, roomId, pendingChildUpload.id, `Inside ${pendingChildUpload.label}`);
+      const newPhoto = await uploadPhotoAndCreate(file, roomId, pendingChildUpload.id, pendingChildUpload.label);
       setPhotos(prev => [...prev, newPhoto]);
       
       // Update local hotspot child_photo_id
@@ -724,6 +755,10 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             label: previousHotspot.label,
             is_leaf: previousHotspot.is_leaf
           });
+          if (previousHotspot.child_photo_id) {
+            await updatePhotoLabel(previousHotspot.child_photo_id, previousHotspot.label);
+            setPhotos(prev => prev.map(p => p.id === previousHotspot.child_photo_id ? { ...p, label: previousHotspot.label } : p));
+          }
           setHotspots(prev =>
             prev.map(h =>
               h.id === hotspotId
@@ -740,8 +775,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         }
 
         case 'update_photo_label': {
-          const { photoId, previousLabel } = action.data;
+          const { photoId, parentHotspotId, previousLabel, previousParentHotspotLabel } = action.data;
           await updatePhotoLabel(photoId, previousLabel);
+          if (parentHotspotId && previousParentHotspotLabel) {
+            try {
+              await updateHotspot(parentHotspotId, { label: previousParentHotspotLabel });
+              setHotspots(prev => prev.map(h => h.id === parentHotspotId ? { ...h, label: previousParentHotspotLabel } : h));
+            } catch (pErr) {
+              console.warn("Failed to revert parent hotspot label:", pErr);
+            }
+          }
           setPhotos(prev => prev.map(p => (p.id === photoId ? { ...p, label: previousLabel } : p)));
           setBreadcrumbChain(prev => {
             const newChain = [...prev];
@@ -769,6 +812,25 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           setHotspots(prev => [...prev, deletedHotspot]);
           break;
         }
+
+        case 'delete_photo': {
+          const { photoTree, parentHotspotId, previousActivePhotoId, previousBreadcrumbChain } = action.data;
+          await restoreDeletedSpatialPhotoTree(photoTree, parentHotspotId);
+
+          const refreshedPhotos = await getPhotosForRoom(roomId);
+          setPhotos(refreshedPhotos);
+
+          if (parentHotspotId) {
+            setHotspots(prev => prev.map(h => h.id === parentHotspotId ? { ...h, child_photo_id: action.data.photoId } : h));
+          }
+
+          if (previousActivePhotoId) {
+            setActivePhotoId(previousActivePhotoId);
+            setBreadcrumbChain(previousBreadcrumbChain);
+            await loadHotspots(previousActivePhotoId);
+          }
+          break;
+        }
       }
 
       setUndoStack(prev => prev.slice(0, -1));
@@ -776,11 +838,14 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       setTimeout(() => setReplaceImageNotice(null), 5000);
     } catch (err: any) {
       console.error("Undo failed:", err);
-      alert(err.message || "Failed to undo action");
+      // Ensure the undo stack is never permanently stuck on an unexecutable or invalidated action
+      setUndoStack(prev => prev.slice(0, -1));
+      setReplaceImageNotice(`Could not undo "${action.description}" (target may have been deleted or modified). Action skipped.`);
+      setTimeout(() => setReplaceImageNotice(null), 6000);
     } finally {
       setIsUndoing(false);
     }
-  }, [undoStack, isUndoing, activePhotoId, selectedLeafHotspot]);
+  }, [undoStack, isUndoing, activePhotoId, selectedLeafHotspot, roomId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -820,7 +885,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   };
 
   const navigateToDrilldown = (hotspot: SpatialHotspot, childPhotoId: string) => {
-    setBreadcrumbChain(prev => [...prev, { id: childPhotoId, label: hotspot.label }]);
+    const childPhoto = photos.find(p => p.id === childPhotoId);
+    const targetLabel = childPhoto?.label || hotspot.label;
+    setBreadcrumbChain(prev => [...prev, { id: childPhotoId, label: targetLabel }]);
     setActivePhotoId(childPhotoId);
     resetViewInteractionState();
   };
@@ -1024,6 +1091,22 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
     try {
       await updatePhotoLabel(activePhotoId, newLabel);
+
+      // Keep parent hotspot label synchronized if this is a child view
+      let previousParentHotspotLabel: string | null = null;
+      if (activePhoto?.parent_hotspot_id) {
+        try {
+          const parentHs = hotspots.find(h => h.id === activePhoto.parent_hotspot_id) || await getHotspotById(activePhoto.parent_hotspot_id);
+          if (parentHs) {
+            previousParentHotspotLabel = parentHs.label;
+            await updateHotspot(activePhoto.parent_hotspot_id, { label: newLabel });
+            setHotspots(prev => prev.map(h => h.id === activePhoto.parent_hotspot_id ? { ...h, label: newLabel } : h));
+          }
+        } catch (hsErr) {
+          console.warn("Could not sync parent hotspot label:", hsErr);
+        }
+      }
+
       pushUndoAction({
         id: crypto.randomUUID(),
         timestamp: Date.now(),
@@ -1031,7 +1114,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         description: `Rename view to "${newLabel}"`,
         data: {
           photoId: activePhotoId,
-          previousLabel
+          parentHotspotId: activePhoto?.parent_hotspot_id || null,
+          previousLabel,
+          previousParentHotspotLabel
         }
       });
       
@@ -1087,8 +1172,33 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     if (!activePhotoId) return;
     if (!confirm("Are you sure you want to delete this view? This will recursively delete all child views, hotspots, and remove components stored within them.")) return;
     try {
+      const targetPhoto = photos.find(p => p.id === activePhotoId);
+      const parentHotspotId = targetPhoto?.parent_hotspot_id || null;
+      const prevActiveId = activePhotoId;
+      const prevBreadcrumbs = JSON.parse(JSON.stringify(breadcrumbChain));
+
+      // 1. Serialize entire sub-tree before deleting to allow full atomic restoration
+      const photoTree = await serializeSpatialPhotoTree(activePhotoId);
+
+      // 2. Perform deletion
       await deleteSpatialPhoto(activePhotoId);
-      // Reset active photo to root or clear it, loadRoomData does this well.
+
+      // 3. Push to undo stack
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'delete_photo',
+        description: `Delete view "${targetPhoto?.label || 'View'}"`,
+        data: {
+          photoId: activePhotoId,
+          photoTree,
+          parentHotspotId,
+          previousActivePhotoId: prevActiveId,
+          previousBreadcrumbChain: prevBreadcrumbs,
+        }
+      });
+
+      // 4. Reset active photo to root or clear it, loadRoomData does this well.
       setActivePhotoId(null);
       setBreadcrumbChain([]);
       loadRoomData();

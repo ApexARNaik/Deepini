@@ -768,6 +768,129 @@ export async function restoreDeletedHotspot(
   }
 }
 
+export async function serializeSpatialPhotoTree(photoId: string): Promise<{
+  photos: SpatialPhoto[];
+  hotspots: SpatialHotspot[];
+  component_locations: { hotspot_id: string; component_id: string; quantity: number }[];
+}> {
+  if (typeof window === 'undefined' || navigator.onLine) {
+    const { data, error } = await supabase.rpc('serialize_spatial_photo_tree', {
+      p_photo_id: photoId
+    });
+    if (!error && data && data.photos) {
+      return data;
+    }
+  }
+
+  // Fallback: serialize using local/Supabase queries
+  const photoList: SpatialPhoto[] = [];
+  const hotspotList: SpatialHotspot[] = [];
+  const compLocList: { hotspot_id: string; component_id: string; quantity: number }[] = [];
+
+  const traverse = async (currPhotoId: string) => {
+    let p: SpatialPhoto | null = null;
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      p = (await db.spatial_photos.get(currPhotoId)) || null;
+    } else {
+      const { data } = await supabase.from('spatial_photos').select('*').eq('id', currPhotoId).single();
+      p = data;
+    }
+    if (!p) return;
+    photoList.push(p);
+
+    let hs: SpatialHotspot[] = [];
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      hs = await db.spatial_hotspots.where('photo_id').equals(currPhotoId).toArray();
+    } else {
+      const { data } = await supabase.from('spatial_hotspots').select('*').eq('photo_id', currPhotoId);
+      hs = data || [];
+    }
+    for (const h of hs) {
+      hotspotList.push(h);
+      let cls: any[] = [];
+      if (typeof window !== 'undefined' && !navigator.onLine) {
+        cls = await db.component_locations.where('hotspot_id').equals(h.id).toArray();
+      } else {
+        const { data } = await supabase.from('component_locations').select('*').eq('hotspot_id', h.id);
+        cls = data || [];
+      }
+      for (const cl of cls) {
+        compLocList.push({ hotspot_id: h.id, component_id: cl.component_id, quantity: cl.quantity });
+      }
+      if (h.child_photo_id) {
+        await traverse(h.child_photo_id);
+      }
+    }
+  };
+
+  await traverse(photoId);
+
+  return {
+    photos: photoList,
+    hotspots: hotspotList,
+    component_locations: compLocList
+  };
+}
+
+export async function restoreDeletedSpatialPhotoTree(
+  tree: {
+    photos: SpatialPhoto[];
+    hotspots: SpatialHotspot[];
+    component_locations: { hotspot_id: string; component_id: string; quantity: number }[];
+  },
+  parentHotspotId?: string | null
+): Promise<void> {
+  if (typeof window === 'undefined' || navigator.onLine) {
+    const { error: rpcErr } = await supabase.rpc('restore_deleted_spatial_photo_tree', {
+      p_tree: tree,
+      p_parent_hotspot_id: parentHotspotId || null
+    });
+
+    if (rpcErr) {
+      console.warn("RPC restore_deleted_spatial_photo_tree failed, executing fallback:", rpcErr);
+      if (tree.photos && tree.photos.length > 0) {
+        await supabase.from('spatial_photos').upsert(tree.photos);
+      }
+      if (tree.hotspots && tree.hotspots.length > 0) {
+        await supabase.from('spatial_hotspots').upsert(tree.hotspots);
+      }
+      if (tree.component_locations && tree.component_locations.length > 0) {
+        await supabase.from('component_locations').insert(tree.component_locations);
+      }
+      if (parentHotspotId && tree.photos && tree.photos.length > 0) {
+        await supabase.from('spatial_hotspots').update({ child_photo_id: tree.photos[0].id }).eq('id', parentHotspotId);
+      }
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      if (tree.photos && tree.photos.length > 0) {
+        await db.spatial_photos.bulkPut(tree.photos);
+      }
+      if (tree.hotspots && tree.hotspots.length > 0) {
+        await db.spatial_hotspots.bulkPut(tree.hotspots);
+      }
+      if (tree.component_locations && tree.component_locations.length > 0) {
+        await db.component_locations.bulkPut(
+          tree.component_locations.map(cl => ({
+            id: crypto.randomUUID(),
+            hotspot_id: cl.hotspot_id,
+            component_id: cl.component_id,
+            quantity: cl.quantity
+          }))
+        );
+      }
+      if (parentHotspotId && tree.photos && tree.photos.length > 0) {
+        await db.spatial_hotspots.update(parentHotspotId, { child_photo_id: tree.photos[0].id });
+      }
+    } catch (dbErr) {
+      console.warn("Offline db sync error on restoreDeletedSpatialPhotoTree:", dbErr);
+    }
+  }
+}
+
+
 
 export async function insertIntermediateSpatialPhoto(params: {
   roomId: string;
