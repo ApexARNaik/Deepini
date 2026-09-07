@@ -4,21 +4,25 @@ import { useRef, useState, useEffect } from "react";
 import { SpatialHotspot } from "@/lib/api";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { useNetworkState } from "@/hooks/useNetworkState";
-import { Trash2, MapPin, Check, RotateCcw, Edit2 } from "lucide-react";
+import { Trash2, MapPin, Check, RotateCcw, Edit2, Sliders, Crop, Move } from "lucide-react";
 
 interface Props {
   imageUrl: string;
   hotspots: SpatialHotspot[];
   isEditing: boolean;
   highlightedHotspotId?: string | null;
+  reshapingHotspot?: SpatialHotspot | null;
   onHotspotCreated: (shapePoints: { x: number; y: number }[], label: string, isLeaf: boolean) => void;
   onHotspotClick: (hotspot: SpatialHotspot) => void;
   onHotspotDelete?: (hotspot: SpatialHotspot) => void;
   onHotspotEdit?: (hotspot: SpatialHotspot) => void;
+  onConfirmReshape?: (hotspotId: string, newPoints: { x: number; y: number }[]) => void;
+  onCancelReshape?: () => void;
+  onBatchUpdateHotspots?: (updates: { id: string; shape_points: { x: number; y: number }[] }[]) => void;
   onCancelEdit: () => void;
 }
 
-type DrawMode = 'freehand' | 'polygon' | 'rectangle' | 'delete' | 'edit';
+type DrawMode = 'freehand' | 'polygon' | 'rectangle' | 'delete' | 'edit' | 'adjust';
 type RectStage = 'idle' | 'drawing' | 'resizing';
 type ResizeHandle = 'top' | 'bottom' | 'left' | 'right' | 'tl' | 'tr' | 'bl' | 'br' | 'move';
 
@@ -27,10 +31,14 @@ export function HotspotCanvas({
   hotspots, 
   isEditing, 
   highlightedHotspotId, 
+  reshapingHotspot,
   onHotspotCreated, 
   onHotspotClick, 
   onHotspotDelete,
   onHotspotEdit,
+  onConfirmReshape,
+  onCancelReshape,
+  onBatchUpdateHotspots,
   onCancelEdit 
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -57,6 +65,29 @@ export function HotspotCanvas({
   } | null>(null);
   const lastPolygonClickRef = useRef<number>(0);
 
+  // Adjust Mode States
+  const [adjustBounds, setAdjustBounds] = useState<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
+  const [adjustedHotspots, setAdjustedHotspots] = useState<SpatialHotspot[]>([]);
+  const [activeAdjustHandle, setActiveAdjustHandle] = useState<ResizeHandle | null>(null);
+  const [adjustDragStart, setAdjustDragStart] = useState<{
+    startX: number;
+    startY: number;
+    origBounds: { minX: number; minY: number; maxX: number; maxY: number };
+    origHotspots: SpatialHotspot[];
+  } | null>(null);
+
+  const initAdjustMode = () => {
+    if (hotspots.length === 0) return;
+    const allPts = hotspots.flatMap(h => h.shape_points || []);
+    if (allPts.length === 0) return;
+    const minX = Math.min(...allPts.map(p => p.x));
+    const maxX = Math.max(...allPts.map(p => p.x));
+    const minY = Math.min(...allPts.map(p => p.y));
+    const maxY = Math.max(...allPts.map(p => p.y));
+    setAdjustBounds({ minX, minY, maxX, maxY });
+    setAdjustedHotspots(JSON.parse(JSON.stringify(hotspots)));
+  };
+
   const resetRectangleState = () => {
     setRectStage('idle');
     setRectStart(null);
@@ -74,8 +105,22 @@ export function HotspotCanvas({
       setIsDrawing(false);
       setPolygonMousePos(null);
       resetRectangleState();
+      setAdjustBounds(null);
+      setAdjustedHotspots([]);
     }
   }, [isEditing]);
+
+  // When reshaping a specific hotspot, reset drawing points & adjust bounds
+  useEffect(() => {
+    if (reshapingHotspot) {
+      setDrawMode('polygon');
+      setCurrentPoints([]);
+      setIsDrawing(false);
+      resetRectangleState();
+      setAdjustBounds(null);
+      setAdjustedHotspots([]);
+    }
+  }, [reshapingHotspot]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -83,12 +128,20 @@ export function HotspotCanvas({
       if (drawMode === 'polygon') {
         if (e.key === 'Enter' && currentPoints.length > 2) {
           setIsDrawing(false);
-          setShowConfig(true);
+          if (reshapingHotspot) {
+            onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+            setCurrentPoints([]);
+          } else {
+            setShowConfig(true);
+          }
           setPolygonMousePos(null);
         } else if (e.key === 'Escape') {
           setIsDrawing(false);
           setCurrentPoints([]);
           setPolygonMousePos(null);
+          if (reshapingHotspot) {
+            onCancelReshape?.();
+          }
         }
       } else if (drawMode === 'rectangle') {
         if (e.key === 'Enter' && rectStage === 'resizing' && rectBounds) {
@@ -100,18 +153,33 @@ export function HotspotCanvas({
             { x: rectBounds.minX, y: rectBounds.maxY }
           ];
           setCurrentPoints(pts);
-          setShowConfig(true);
+          if (reshapingHotspot) {
+            onConfirmReshape?.(reshapingHotspot.id, pts);
+            resetRectangleState();
+            setCurrentPoints([]);
+          } else {
+            setShowConfig(true);
+          }
         } else if (e.key === 'Escape') {
           e.preventDefault();
           resetRectangleState();
           setCurrentPoints([]);
           setIsDrawing(false);
+          if (reshapingHotspot) {
+            onCancelReshape?.();
+          }
+        }
+      } else if (drawMode === 'adjust') {
+        if (e.key === 'Escape') {
+          setDrawMode('polygon');
+          setAdjustBounds(null);
+          setAdjustedHotspots([]);
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isEditing, isOnline, drawMode, currentPoints, rectStage, rectBounds]);
+  }, [isEditing, isOnline, drawMode, currentPoints, rectStage, rectBounds, reshapingHotspot, onConfirmReshape, onCancelReshape]);
 
   const getNormalizedPoint = (e: React.PointerEvent) => {
     if (!containerRef.current) return { x: 0, y: 0 };
@@ -164,7 +232,7 @@ export function HotspotCanvas({
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (!isEditing || !isOnline || drawMode === 'delete' || drawMode === 'edit') return;
+    if (!isEditing || !isOnline || drawMode === 'delete' || drawMode === 'edit' || drawMode === 'adjust') return;
     
     if (drawMode === 'freehand') {
       e.preventDefault();
@@ -183,7 +251,12 @@ export function HotspotCanvas({
         // snap to close if clicking near start
         if (currentPoints.length > 2 && dist < 0.03) {
           setIsDrawing(false);
-          setShowConfig(true);
+          if (reshapingHotspot) {
+            onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+            setCurrentPoints([]);
+          } else {
+            setShowConfig(true);
+          }
           setPolygonMousePos(null);
         } else {
           setCurrentPoints([...currentPoints, pt]);
@@ -207,6 +280,12 @@ export function HotspotCanvas({
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (!isEditing || !isOnline || drawMode === 'delete' || drawMode === 'edit') return;
+    if (drawMode === 'adjust') {
+      if (activeAdjustHandle) {
+        handleAdjustMove(e);
+      }
+      return;
+    }
     if (drawMode === 'freehand') {
       if (!isDrawing) return;
       e.preventDefault();
@@ -227,6 +306,12 @@ export function HotspotCanvas({
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (!isEditing || !isOnline) return;
+    if (drawMode === 'adjust') {
+      if (activeAdjustHandle) {
+        handleAdjustResizeEnd(e);
+      }
+      return;
+    }
     if (drawMode === 'freehand') {
       if (!isDrawing) return;
       e.preventDefault();
@@ -234,7 +319,12 @@ export function HotspotCanvas({
       setIsDrawing(false);
       
       if (currentPoints.length > 3) {
-        setShowConfig(true);
+        if (reshapingHotspot) {
+          onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+          setCurrentPoints([]);
+        } else {
+          setShowConfig(true);
+        }
       } else {
         setCurrentPoints([]);
       }
@@ -370,6 +460,205 @@ export function HotspotCanvas({
     }
   };
 
+  // Adjust Mode Handlers
+  const handleAdjustResizeStart = (e: React.PointerEvent, handle: ResizeHandle) => {
+    if (drawMode !== 'adjust' || !adjustBounds) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    setActiveAdjustHandle(handle);
+    const pt = getNormalizedPoint(e);
+    setAdjustDragStart({
+      startX: pt.x,
+      startY: pt.y,
+      origBounds: { ...adjustBounds },
+      origHotspots: JSON.parse(JSON.stringify(adjustedHotspots))
+    });
+  };
+
+  const handleAdjustMove = (e: React.PointerEvent) => {
+    if (!activeAdjustHandle || !adjustDragStart || !adjustBounds) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pt = getNormalizedPoint(e);
+    const dx = pt.x - adjustDragStart.startX;
+    const dy = pt.y - adjustDragStart.startY;
+    const orig = adjustDragStart.origBounds;
+
+    let newMinX = orig.minX;
+    let newMaxX = orig.maxX;
+    let newMinY = orig.minY;
+    let newMaxY = orig.maxY;
+
+    const MIN_SIZE = 0.02;
+
+    switch (activeAdjustHandle) {
+      case 'top':
+        newMinY = Math.max(0.005, Math.min(orig.maxY - MIN_SIZE, orig.minY + dy));
+        break;
+      case 'bottom':
+        newMaxY = Math.min(0.995, Math.max(orig.minY + MIN_SIZE, orig.maxY + dy));
+        break;
+      case 'left':
+        newMinX = Math.max(0.005, Math.min(orig.maxX - MIN_SIZE, orig.minX + dx));
+        break;
+      case 'right':
+        newMaxX = Math.min(0.995, Math.max(orig.minX + MIN_SIZE, orig.maxX + dx));
+        break;
+      case 'tl':
+        newMinX = Math.max(0.005, Math.min(orig.maxX - MIN_SIZE, orig.minX + dx));
+        newMinY = Math.max(0.005, Math.min(orig.maxY - MIN_SIZE, orig.minY + dy));
+        break;
+      case 'tr':
+        newMaxX = Math.min(0.995, Math.max(orig.minX + MIN_SIZE, orig.maxX + dx));
+        newMinY = Math.max(0.005, Math.min(orig.maxY - MIN_SIZE, orig.minY + dy));
+        break;
+      case 'bl':
+        newMinX = Math.max(0.005, Math.min(orig.maxX - MIN_SIZE, orig.minX + dx));
+        newMaxY = Math.min(0.995, Math.max(orig.minY + MIN_SIZE, orig.maxY + dy));
+        break;
+      case 'br':
+        newMaxX = Math.min(0.995, Math.max(orig.minX + MIN_SIZE, orig.maxX + dx));
+        newMaxY = Math.min(0.995, Math.max(orig.minY + MIN_SIZE, orig.maxY + dy));
+        break;
+      case 'move': {
+        let clampedDx = dx;
+        let clampedDy = dy;
+        if (orig.minX + clampedDx < 0.005) clampedDx = 0.005 - orig.minX;
+        if (orig.maxX + clampedDx > 0.995) clampedDx = 0.995 - orig.maxX;
+        if (orig.minY + clampedDy < 0.005) clampedDy = 0.005 - orig.minY;
+        if (orig.maxY + clampedDy > 0.995) clampedDy = 0.995 - orig.maxY;
+        newMinX = orig.minX + clampedDx;
+        newMaxX = orig.maxX + clampedDx;
+        newMinY = orig.minY + clampedDy;
+        newMaxY = orig.maxY + clampedDy;
+        break;
+      }
+    }
+
+    const updatedBounds = { minX: newMinX, minY: newMinY, maxX: newMaxX, maxY: newMaxY };
+    setAdjustBounds(updatedBounds);
+
+    const origW = orig.maxX - orig.minX || 1;
+    const origH = orig.maxY - orig.minY || 1;
+    const newW = newMaxX - newMinX;
+    const newH = newMaxY - newMinY;
+
+    const remapped = adjustDragStart.origHotspots.map(hs => {
+      const updatedPts = (hs.shape_points || []).map(p => {
+        if (activeAdjustHandle === 'move') {
+          const moveDx = newMinX - orig.minX;
+          const moveDy = newMinY - orig.minY;
+          return {
+            x: Math.max(0.005, Math.min(0.995, p.x + moveDx)),
+            y: Math.max(0.005, Math.min(0.995, p.y + moveDy))
+          };
+        } else {
+          const relX = (p.x - orig.minX) / origW;
+          const relY = (p.y - orig.minY) / origH;
+          return {
+            x: Math.max(0.005, Math.min(0.995, newMinX + relX * newW)),
+            y: Math.max(0.005, Math.min(0.995, newMinY + relY * newH))
+          };
+        }
+      });
+      return { ...hs, shape_points: updatedPts };
+    });
+
+    setAdjustedHotspots(remapped);
+  };
+
+  const handleAdjustResizeEnd = (e: React.PointerEvent) => {
+    if (activeAdjustHandle) {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+      } catch {}
+      setActiveAdjustHandle(null);
+      setAdjustDragStart(null);
+    }
+  };
+
+  const handleScaleToFitAll = () => {
+    if (!adjustBounds || adjustedHotspots.length === 0) return;
+    const orig = adjustBounds;
+    const origW = orig.maxX - orig.minX || 1;
+    const origH = orig.maxY - orig.minY || 1;
+
+    const TARGET_MIN = 0.04;
+    const TARGET_MAX = 0.96;
+    const targetW = TARGET_MAX - TARGET_MIN;
+    const targetH = TARGET_MAX - TARGET_MIN;
+
+    const scale = Math.min(targetW / origW, targetH / origH);
+    const fittedW = origW * scale;
+    const fittedH = origH * scale;
+    const newMinX = 0.5 - fittedW / 2;
+    const newMaxX = newMinX + fittedW;
+    const newMinY = 0.5 - fittedH / 2;
+    const newMaxY = newMinY + fittedH;
+
+    const newBounds = { minX: newMinX, minY: newMinY, maxX: newMaxX, maxY: newMaxY };
+    setAdjustBounds(newBounds);
+
+    const remapped = adjustedHotspots.map(hs => {
+      const updatedPts = (hs.shape_points || []).map(p => {
+        const relX = (p.x - orig.minX) / origW;
+        const relY = (p.y - orig.minY) / origH;
+        return {
+          x: Math.max(0.005, Math.min(0.995, newMinX + relX * fittedW)),
+          y: Math.max(0.005, Math.min(0.995, newMinY + relY * fittedH))
+        };
+      });
+      return { ...hs, shape_points: updatedPts };
+    });
+    setAdjustedHotspots(remapped);
+  };
+
+  const handleCenterAll = () => {
+    if (!adjustBounds || adjustedHotspots.length === 0) return;
+    const orig = adjustBounds;
+    const curW = orig.maxX - orig.minX;
+    const curH = orig.maxY - orig.minY;
+    const newMinX = Math.max(0.005, (1 - curW) / 2);
+    const newMaxX = newMinX + curW;
+    const newMinY = Math.max(0.005, (1 - curH) / 2);
+    const newMaxY = newMinY + curH;
+    const dx = newMinX - orig.minX;
+    const dy = newMinY - orig.minY;
+
+    setAdjustBounds({ minX: newMinX, minY: newMinY, maxX: newMaxX, maxY: newMaxY });
+
+    const remapped = adjustedHotspots.map(hs => {
+      const updatedPts = (hs.shape_points || []).map(p => ({
+        x: Math.max(0.005, Math.min(0.995, p.x + dx)),
+        y: Math.max(0.005, Math.min(0.995, p.y + dy))
+      }));
+      return { ...hs, shape_points: updatedPts };
+    });
+    setAdjustedHotspots(remapped);
+  };
+
+  const handleApplyAdjustments = () => {
+    if (adjustedHotspots.length > 0 && onBatchUpdateHotspots) {
+      const updates = adjustedHotspots.map(h => ({
+        id: h.id,
+        shape_points: h.shape_points
+      }));
+      onBatchUpdateHotspots(updates);
+    }
+    setDrawMode('polygon');
+    setAdjustBounds(null);
+    setAdjustedHotspots([]);
+  };
+
+  const handleCancelAdjustments = () => {
+    setDrawMode('polygon');
+    setAdjustBounds(null);
+    setAdjustedHotspots([]);
+  };
+
   const toPolygonString = (points: { x: number; y: number }[]) => {
     return points.map(p => `${p.x * 100},${p.y * 100}`).join(" ");
   };
@@ -435,6 +724,34 @@ export function HotspotCanvas({
             <button 
               type="button"
               onClick={() => { 
+                if (drawMode === 'adjust') {
+                  setDrawMode('polygon');
+                  setAdjustBounds(null);
+                  setAdjustedHotspots([]);
+                } else {
+                  setDrawMode('adjust');
+                  setCurrentPoints([]);
+                  setIsDrawing(false);
+                  setPolygonMousePos(null);
+                  resetRectangleState();
+                  initAdjustMode();
+                }
+              }}
+              disabled={hotspots.length === 0}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
+                drawMode === 'adjust' 
+                  ? 'bg-sky-600 text-white shadow-md' 
+                  : 'text-sky-400/90 hover:text-sky-300 hover:bg-sky-500/10 disabled:opacity-40 disabled:pointer-events-none'
+              }`}
+              title="Adjust, scale, or move all hotspots collectively (Fit / Adjust Hotspots)"
+            >
+              <Sliders className="h-3.5 w-3.5" />
+              <span>Adjust Hotspots</span>
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => { 
                 setDrawMode('edit'); 
                 setCurrentPoints([]); 
                 setIsDrawing(false); 
@@ -475,6 +792,69 @@ export function HotspotCanvas({
 
           {/* Right: Contextual Status, Guidance & Quick Action Buttons */}
           <div className="flex items-center gap-2">
+            {reshapingHotspot && (
+              <div className="bg-sky-950/90 text-sky-200 border border-sky-600/70 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-sm animate-pulse">
+                <Crop className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                <span>
+                  Redrawing shape for <strong>&quot;{reshapingHotspot.label}&quot;</strong> — draw new outline with Polygon, Rect, or Freehand.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentPoints([]);
+                    setIsDrawing(false);
+                    resetRectangleState();
+                    onCancelReshape?.();
+                  }}
+                  className="ml-2 px-2 py-0.5 bg-[#252320] hover:bg-[#332f2a] text-white text-[11px] rounded border border-sky-400/40"
+                >
+                  Cancel Redraw
+                </button>
+              </div>
+            )}
+
+            {drawMode === 'adjust' && (
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="bg-sky-950/80 text-sky-200 border border-sky-600/60 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+                  <Sliders className="h-3.5 w-3.5 text-sky-400" />
+                  <span>Adjusting {adjustedHotspots.length} hotspots — Drag box or handles to move/scale</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleScaleToFitAll}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-[#252320] hover:bg-[#332f2a] text-sky-300 hover:text-white text-xs font-medium rounded border border-[#332f2a] transition-colors"
+                  title="Scale hotspots proportionally to fit canvas bounds"
+                >
+                  <span>Fit to Canvas</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCenterAll}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-[#252320] hover:bg-[#332f2a] text-sky-300 hover:text-white text-xs font-medium rounded border border-[#332f2a] transition-colors"
+                  title="Center all hotspots horizontally and vertically"
+                >
+                  <span>Center</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyAdjustments}
+                  className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
+                  title="Save new positions for all hotspots"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  <span>Save Adjustments</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelAdjustments}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Cancel</span>
+                </button>
+              </div>
+            )}
+
             {drawMode === 'edit' && (
               <div className="bg-amber-950/80 text-amber-200 border border-amber-700/60 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-sm">
                 <Edit2 className="h-3.5 w-3.5 text-amber-400" />
@@ -525,8 +905,14 @@ export function HotspotCanvas({
                           { x: rectBounds.maxX, y: rectBounds.maxY },
                           { x: rectBounds.minX, y: rectBounds.maxY }
                         ];
-                        setCurrentPoints(pts);
-                        setShowConfig(true);
+                        if (reshapingHotspot) {
+                          onConfirmReshape?.(reshapingHotspot.id, pts);
+                          resetRectangleState();
+                          setCurrentPoints([]);
+                        } else {
+                          setCurrentPoints(pts);
+                          setShowConfig(true);
+                        }
                       }}
                       className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
                       title="Confirm rectangle hotspot (Enter)"
@@ -597,12 +983,184 @@ export function HotspotCanvas({
           viewBox="0 0 100 100" 
           preserveAspectRatio="none"
         >
-          {/* Existing Hotspots */}
-          {hotspots.map((hs) => {
+          {/* Adjust Mode: Collective Hotspot Polygons & Collective Bounding Box */}
+          {drawMode === 'adjust' && (
+            <>
+              {adjustedHotspots.map((hs) => (
+                <polygon
+                  key={`adj-${hs.id}`}
+                  points={hs.shape_points.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
+                  fill="rgba(56, 189, 248, 0.25)"
+                  stroke="#38bdf8"
+                  strokeWidth="0.5"
+                  strokeDasharray="2,2"
+                  className="pointer-events-none"
+                />
+              ))}
+
+              {adjustBounds && (() => {
+                const minX = adjustBounds.minX * 100;
+                const maxX = adjustBounds.maxX * 100;
+                const minY = adjustBounds.minY * 100;
+                const maxY = adjustBounds.maxY * 100;
+                const w = maxX - minX;
+                const h = maxY - minY;
+                const midX = (minX + maxX) / 2;
+                const midY = (minY + maxY) / 2;
+
+                return (
+                  <g className="adjust-editor-group">
+                    {/* Draggable collective bounding box */}
+                    <rect 
+                      x={minX} 
+                      y={minY} 
+                      width={w} 
+                      height={h} 
+                      className="fill-sky-500/10 stroke-sky-400 stroke-[0.5] cursor-move pointer-events-auto"
+                      strokeDasharray="2,2"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'move')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+
+                    {/* Top Edge */}
+                    <line x1={minX} y1={minY} x2={maxX} y2={minY} stroke="#38bdf8" strokeWidth="0.5" className="pointer-events-none" />
+                    <line 
+                      x1={minX} y1={minY} x2={maxX} y2={minY} 
+                      stroke="transparent" strokeWidth="4" 
+                      className="cursor-ns-resize pointer-events-auto"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'top')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+                    <circle 
+                      cx={midX} cy={minY} r="1.1" 
+                      fill="#ffffff" stroke="#0284c7" strokeWidth="0.35" 
+                      className="cursor-ns-resize pointer-events-auto shadow hover:scale-125 transition-transform"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'top')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+
+                    {/* Bottom Edge */}
+                    <line x1={minX} y1={maxY} x2={maxX} y2={maxY} stroke="#38bdf8" strokeWidth="0.5" className="pointer-events-none" />
+                    <line 
+                      x1={minX} y1={maxY} x2={maxX} y2={maxY} 
+                      stroke="transparent" strokeWidth="4" 
+                      className="cursor-ns-resize pointer-events-auto"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'bottom')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+                    <circle 
+                      cx={midX} cy={maxY} r="1.1" 
+                      fill="#ffffff" stroke="#0284c7" strokeWidth="0.35" 
+                      className="cursor-ns-resize pointer-events-auto shadow hover:scale-125 transition-transform"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'bottom')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+
+                    {/* Left Edge */}
+                    <line x1={minX} y1={minY} x2={minX} y2={maxY} stroke="#38bdf8" strokeWidth="0.5" className="pointer-events-none" />
+                    <line 
+                      x1={minX} y1={minY} x2={minX} y2={maxY} 
+                      stroke="transparent" strokeWidth="4" 
+                      className="cursor-ew-resize pointer-events-auto"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'left')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+                    <circle 
+                      cx={minX} cy={midY} r="1.1" 
+                      fill="#ffffff" stroke="#0284c7" strokeWidth="0.35" 
+                      className="cursor-ew-resize pointer-events-auto shadow hover:scale-125 transition-transform"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'left')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+
+                    {/* Right Edge */}
+                    <line x1={maxX} y1={minY} x2={maxX} y2={maxY} stroke="#38bdf8" strokeWidth="0.5" className="pointer-events-none" />
+                    <line 
+                      x1={maxX} y1={minY} x2={maxX} y2={maxY} 
+                      stroke="transparent" strokeWidth="4" 
+                      className="cursor-ew-resize pointer-events-auto"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'right')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+                    <circle 
+                      cx={maxX} cy={midY} r="1.1" 
+                      fill="#ffffff" stroke="#0284c7" strokeWidth="0.35" 
+                      className="cursor-ew-resize pointer-events-auto shadow hover:scale-125 transition-transform"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'right')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+
+                    {/* 4 Corners */}
+                    <rect 
+                      x={minX - 1.4} y={minY - 1.4} width="2.8" height="2.8" rx="0.5"
+                      fill="#ffffff" stroke="#0284c7" strokeWidth="0.4"
+                      className="cursor-nwse-resize pointer-events-auto hover:fill-sky-300 transition-colors shadow"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'tl')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+                    <rect 
+                      x={maxX - 1.4} y={minY - 1.4} width="2.8" height="2.8" rx="0.5"
+                      fill="#ffffff" stroke="#0284c7" strokeWidth="0.4"
+                      className="cursor-nesw-resize pointer-events-auto hover:fill-sky-300 transition-colors shadow"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'tr')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+                    <rect 
+                      x={maxX - 1.4} y={maxY - 1.4} width="2.8" height="2.8" rx="0.5"
+                      fill="#ffffff" stroke="#0284c7" strokeWidth="0.4"
+                      className="cursor-nwse-resize pointer-events-auto hover:fill-sky-300 transition-colors shadow"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'br')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+                    <rect 
+                      x={minX - 1.4} y={maxY - 1.4} width="2.8" height="2.8" rx="0.5"
+                      fill="#ffffff" stroke="#0284c7" strokeWidth="0.4"
+                      className="cursor-nesw-resize pointer-events-auto hover:fill-sky-300 transition-colors shadow"
+                      onPointerDown={(e) => handleAdjustResizeStart(e, 'bl')}
+                      onPointerMove={handleAdjustMove}
+                      onPointerUp={handleAdjustResizeEnd}
+                    />
+                  </g>
+                );
+              })()}
+            </>
+          )}
+
+          {/* Existing Hotspots (when not in adjust mode) */}
+          {drawMode !== 'adjust' && hotspots.map((hs) => {
             const isHovered = hoveredHotspotId === hs.id;
             const isHighlighted = highlightedHotspotId === hs.id;
-            const isClickable = isDeleteMode || isEditMode || !isEditing;
+            const isReshaping = reshapingHotspot?.id === hs.id;
+            const isClickable = !isReshaping && (isDeleteMode || isEditMode || !isEditing);
             
+            if (isReshaping) {
+              return (
+                <polygon
+                  key={hs.id}
+                  points={hs.shape_points.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
+                  fill="rgba(56, 189, 248, 0.15)"
+                  stroke="#38bdf8"
+                  strokeWidth="0.5"
+                  strokeDasharray="3,3"
+                  className="pointer-events-none"
+                >
+                  <title>Current outline of &quot;{hs.label}&quot; (Redraw new boundary)</title>
+                </polygon>
+              );
+            }
+
             return (
               <polygon
                 key={hs.id}
@@ -883,9 +1441,15 @@ export function HotspotCanvas({
                       { x: rectBounds.maxX, y: rectBounds.maxY },
                       { x: rectBounds.minX, y: rectBounds.maxY }
                     ];
-                    setCurrentPoints(pts);
+                    if (reshapingHotspot) {
+                      onConfirmReshape?.(reshapingHotspot.id, pts);
+                      resetRectangleState();
+                      setCurrentPoints([]);
+                    } else {
+                      setCurrentPoints(pts);
+                      setShowConfig(true);
+                    }
                   }
-                  setShowConfig(true);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
                 title="Confirm rectangle hotspot (Enter)"

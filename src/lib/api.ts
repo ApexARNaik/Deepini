@@ -539,7 +539,7 @@ export async function createHotspot(
 
 export async function updateHotspot(
   hotspotId: string,
-  updates: { label?: string; is_leaf?: boolean }
+  updates: { label?: string; is_leaf?: boolean; shape_points?: { x: number; y: number }[] }
 ): Promise<SpatialHotspot> {
   const { data, error } = await supabase
     .from('spatial_hotspots')
@@ -559,6 +559,57 @@ export async function updateHotspot(
   }
 
   return data as SpatialHotspot;
+}
+
+export async function replaceSpatialPhoto(
+  photoId: string,
+  file: File
+): Promise<string> {
+  const publicUrl = await uploadImage(file, 'media');
+  const { error } = await supabase
+    .from('spatial_photos')
+    .update({ image_url: publicUrl })
+    .eq('id', photoId);
+
+  if (error) throw error;
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_photos.update(photoId, { image_url: publicUrl });
+    } catch (dbErr) {
+      console.warn("Offline db update error on photo replace:", dbErr);
+    }
+  }
+
+  return publicUrl;
+}
+
+export async function batchUpdateHotspotPoints(
+  updates: { id: string; shape_points: { x: number; y: number }[] }[]
+): Promise<void> {
+  if (updates.length === 0) return;
+
+  const results = await Promise.all(
+    updates.map(u =>
+      supabase
+        .from('spatial_hotspots')
+        .update({ shape_points: u.shape_points })
+        .eq('id', u.id)
+    )
+  );
+
+  const firstErr = results.find(r => r.error)?.error;
+  if (firstErr) throw firstErr;
+
+  if (typeof window !== 'undefined') {
+    try {
+      await Promise.all(
+        updates.map(u => db.spatial_hotspots.update(u.id, { shape_points: u.shape_points }))
+      );
+    } catch (dbErr) {
+      console.warn("Offline db batch update error:", dbErr);
+    }
+  }
 }
 
 export interface Project {

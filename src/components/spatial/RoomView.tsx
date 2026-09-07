@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -24,6 +24,10 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [showHotspotsList, setShowHotspotsList] = useState(false);
   const [editingHotspot, setEditingHotspot] = useState<SpatialHotspot | null>(null);
+  const [reshapingHotspot, setReshapingHotspot] = useState<SpatialHotspot | null>(null);
+  const [replacingImage, setReplacingImage] = useState(false);
+  const [replaceImageNotice, setReplaceImageNotice] = useState<string | null>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   
   // Room Edit State
@@ -182,6 +186,130 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
   };
 
+  const getImageDimensions = (urlOrBlob: string): Promise<{ width: number; height: number }> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.onerror = reject;
+      img.src = urlOrBlob;
+    });
+  };
+
+  const handleStartReshape = (hotspot: SpatialHotspot) => {
+    setReshapingHotspot(hotspot);
+    setIsEditing(true);
+    setEditingHotspot(null);
+  };
+
+  const handleConfirmReshape = async (hotspotId: string, newPoints: { x: number; y: number }[]) => {
+    try {
+      await updateHotspot(hotspotId, { shape_points: newPoints });
+      setHotspots(prev => prev.map(h => h.id === hotspotId ? { ...h, shape_points: newPoints } : h));
+      if (selectedLeafHotspot?.id === hotspotId) {
+        setSelectedLeafHotspot(prev => prev ? { ...prev, shape_points: newPoints } : null);
+      }
+      setReshapingHotspot(null);
+    } catch (err) {
+      console.error("Failed to reshape hotspot:", err);
+      alert("Failed to save new hotspot shape");
+    }
+  };
+
+  const handleCancelReshape = () => {
+    setReshapingHotspot(null);
+  };
+
+  const handleBatchUpdateHotspots = async (updates: { id: string; shape_points: { x: number; y: number }[] }[]) => {
+    try {
+      await batchUpdateHotspotPoints(updates);
+      const updateMap = new Map(updates.map(u => [u.id, u.shape_points]));
+      setHotspots(prev => prev.map(h => updateMap.has(h.id) ? { ...h, shape_points: updateMap.get(h.id)! } : h));
+      if (selectedLeafHotspot && updateMap.has(selectedLeafHotspot.id)) {
+        setSelectedLeafHotspot(prev => prev ? { ...prev, shape_points: updateMap.get(selectedLeafHotspot.id)! } : null);
+      }
+    } catch (err) {
+      console.error("Failed to batch update hotspots:", err);
+      alert("Failed to save adjusted hotspot positions");
+    }
+  };
+
+  const handleReplaceImageFile = async (file: File) => {
+    if (!activePhotoId || !activePhoto) return;
+    setReplacingImage(true);
+    try {
+      // 1. Measure dimensions of old and new images to determine if framing is preserved
+      let oldDims = { width: 1, height: 1 };
+      try {
+        oldDims = await getImageDimensions(activePhoto.image_url);
+      } catch (err) {
+        console.warn("Could not determine old image dimensions", err);
+      }
+
+      const objectUrl = URL.createObjectURL(file);
+      let newDims = { width: 1, height: 1 };
+      try {
+        newDims = await getImageDimensions(objectUrl);
+      } catch (err) {
+        console.warn("Could not determine new image dimensions", err);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+
+      const oldAspect = oldDims.width / (oldDims.height || 1);
+      const newAspect = newDims.width / (newDims.height || 1);
+      const aspectDelta = Math.abs(oldAspect - newAspect) / (oldAspect || 1);
+      const isSameFraming = aspectDelta < 0.04; // Proportional scaling when framing is genuinely the same
+
+      // Clamp normalized coordinates within [0.005, 0.995] to prevent edge overflows.
+      // For changed/cropped aspect ratios, preserve normalized coordinates directly (no blind distortion/scaling)
+      // and provide the Adjust Hotspots workflow for manual correction.
+      const clampedUpdates: { id: string; shape_points: { x: number; y: number }[] }[] = [];
+      let hadClamping = false;
+
+      for (const hs of hotspots) {
+        if (hs.shape_points && hs.shape_points.length > 0) {
+          let changed = false;
+          const newPts = hs.shape_points.map(pt => {
+            const cx = Math.max(0.005, Math.min(0.995, pt.x));
+            const cy = Math.max(0.005, Math.min(0.995, pt.y));
+            if (cx !== pt.x || cy !== pt.y) changed = true;
+            return { x: cx, y: cy };
+          });
+          if (changed) hadClamping = true;
+          clampedUpdates.push({ id: hs.id, shape_points: newPts });
+        }
+      }
+
+      // 2. Upload image and update spatial_photos table (Supabase & Dexie)
+      // All hotspot IDs, component links, and child photos remain 100% intact!
+      const newImageUrl = await replaceSpatialPhoto(activePhotoId, file);
+
+      // 3. Persist clamped points if any
+      if (hadClamping && clampedUpdates.length > 0) {
+        await batchUpdateHotspotPoints(clampedUpdates);
+        const updateMap = new Map(clampedUpdates.map(u => [u.id, u.shape_points]));
+        setHotspots(prev => prev.map(h => updateMap.has(h.id) ? { ...h, shape_points: updateMap.get(h.id)! } : h));
+      }
+
+      // 4. Update local photos state with the new image URL
+      setPhotos(prev => prev.map(p => p.id === activePhotoId ? { ...p, image_url: newImageUrl } : p));
+
+      if (!isSameFraming) {
+        setReplaceImageNotice(
+          "Image replaced! Because the aspect ratio changed, hotspots were kept at their normalized positions. You can use the 'Adjust Hotspots' tool in Edit mode to adjust them collectively if needed."
+        );
+      } else {
+        setReplaceImageNotice("Image replaced successfully! All hotspots and assignments preserved.");
+      }
+      setTimeout(() => setReplaceImageNotice(null), 8000);
+    } catch (err) {
+      console.error("Failed to replace image:", err);
+      alert("Failed to replace image. Please try again.");
+    } finally {
+      setReplacingImage(false);
+    }
+  };
+
   const [pendingChildUpload, setPendingChildUpload] = useState<SpatialHotspot | null>(null);
 
   const handleChildUpload = async (file: File) => {
@@ -207,6 +335,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
 
   const resetViewInteractionState = () => {
     setIsEditing(false);
+    setReshapingHotspot(null);
     setSelectedLeafHotspot(null);
     setHighlightedHotspotId(null);
     setPendingChildUpload(null);
@@ -659,6 +788,19 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setShowHotspotsList(false);
+                                      handleStartReshape(hs);
+                                    }}
+                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded transition-colors"
+                                    title={`Redraw boundary shape for "${hs.label}"`}
+                                  >
+                                    <Crop className="h-3 w-3" />
+                                    <span>Redraw</span>
+                                  </button>
                                   {!hs.child_photo_id && (
                                     <button
                                       type="button"
@@ -698,13 +840,46 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             )}
 
             {isEditing && isOnline && (
-              <button
-                onClick={handleDeletePhoto}
-                className="flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors"
-                title="Delete View"
-              >
-                <Trash2 className="h-3 w-3 mr-2" /> Delete View
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => replaceFileInputRef.current?.click()}
+                  disabled={replacingImage}
+                  className="flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest border border-amber-500/50 text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+                  title="Replace this view's background image (preserves all hotspots & items)"
+                >
+                  {replacingImage ? (
+                    <>
+                      <RefreshCw className="h-3 w-3 mr-1.5 animate-spin" />
+                      <span>Replacing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ImageIcon className="h-3 w-3 mr-1.5" />
+                      <span>Replace Image</span>
+                    </>
+                  )}
+                </button>
+                <input
+                  ref={replaceFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleReplaceImageFile(e.target.files[0]);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+                <button
+                  onClick={handleDeletePhoto}
+                  className="flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors"
+                  title="Delete View"
+                >
+                  <Trash2 className="h-3 w-3 mr-2" /> Delete View
+                </button>
+              </>
             )}
             <button 
               onClick={() => {
@@ -712,6 +887,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   setSelectedLeafHotspot(null);
                 } else {
                   setShowHotspotsList(false);
+                  setReshapingHotspot(null);
                 }
                 setIsEditing(!isEditing);
               }}
@@ -728,6 +904,19 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           </div>
         )}
       </div>
+
+      {replaceImageNotice && (
+        <div className="mb-4 p-3 bg-brand-accent/20 border border-brand-accent/50 rounded-lg text-xs text-brand-text flex items-center justify-between gap-2 shadow-lg animate-fadeIn">
+          <span>{replaceImageNotice}</span>
+          <button 
+            type="button" 
+            onClick={() => setReplaceImageNotice(null)} 
+            className="text-brand-text-muted hover:text-white p-1"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {pendingChildUpload && (
         <div className="mb-6 p-4 bg-brand-accent/10 border border-brand-accent/30 rounded-lg text-sm text-brand-text">
@@ -881,11 +1070,18 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               hotspots={hotspots}
               isEditing={isEditing}
               highlightedHotspotId={highlightedHotspotId}
-              onCancelEdit={() => setIsEditing(false)}
+              reshapingHotspot={reshapingHotspot}
+              onCancelEdit={() => {
+                setIsEditing(false);
+                setReshapingHotspot(null);
+              }}
               onHotspotCreated={handleHotspotCreated}
               onHotspotClick={handleHotspotClick}
               onHotspotDelete={handleDeleteHotspot}
               onHotspotEdit={setEditingHotspot}
+              onConfirmReshape={handleConfirmReshape}
+              onCancelReshape={handleCancelReshape}
+              onBatchUpdateHotspots={handleBatchUpdateHotspots}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-brand-text-muted flex-col">
@@ -907,6 +1103,13 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               <div className="flex items-center gap-1 shrink-0">
                 {isOnline && (
                   <>
+                    <button 
+                      onClick={() => handleStartReshape(selectedLeafHotspot)}
+                      className="p-1.5 text-brand-text-muted hover:text-sky-400 hover:bg-sky-500/10 rounded transition-colors"
+                      title={`Redraw boundary for "${selectedLeafHotspot.label}"`}
+                    >
+                      <Crop className="h-4 w-4" />
+                    </button>
                     <button 
                       onClick={() => setEditingHotspot(selectedLeafHotspot)}
                       className="p-1.5 text-brand-text-muted hover:text-brand-accent hover:bg-brand-accent/10 rounded transition-colors"
@@ -1128,6 +1331,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           onSubmit={(label, isLeaf) => {
             handleUpdateHotspotDetails(editingHotspot.id, label, isLeaf);
           }}
+          onRedrawShape={() => handleStartReshape(editingHotspot)}
         />
       )}
     </div>
