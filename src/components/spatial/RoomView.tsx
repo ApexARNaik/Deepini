@@ -1,14 +1,117 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem } from "@/lib/api";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw } from "lucide-react";
+import { InsertIntermediateModal } from "./InsertIntermediateModal";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
+export type UndoAction =
+  | {
+      id: string;
+      timestamp: number;
+      type: 'insert_intermediate_photo';
+      description: string;
+      data: {
+        parentHotspotId: string;
+        intermediatePhotoId: string;
+        intermediateHotspotId: string;
+        childPhotoId: string;
+        previousActivePhotoId: string;
+        previousBreadcrumbChain: { id: string; label: string }[];
+        previousParentHotspot: SpatialHotspot;
+        previousChildPhoto: SpatialPhoto;
+      };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'replace_photo_image';
+      description: string;
+      data: {
+        photoId: string;
+        previousImageUrl: string;
+        previousHotspots: SpatialHotspot[];
+      };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'create_hotspot';
+      description: string;
+      data: {
+        createdHotspotId: string;
+        photoId: string;
+        createdHotspot: SpatialHotspot;
+      };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'reshape_hotspot';
+      description: string;
+      data: {
+        hotspotId: string;
+        photoId: string;
+        previousShapePoints: { x: number; y: number }[];
+      };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'batch_update_hotspots';
+      description: string;
+      data: {
+        photoId: string;
+        previousHotspots: { id: string; shape_points: { x: number; y: number }[] }[];
+      };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'update_hotspot_details';
+      description: string;
+      data: {
+        hotspotId: string;
+        photoId: string;
+        previousHotspot: SpatialHotspot;
+      };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'update_photo_label';
+      description: string;
+      data: {
+        photoId: string;
+        previousLabel: string;
+      };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'reorder_photos';
+      description: string;
+      data: {
+        previousPhotoOrders: { id: string; order_index: number }[];
+        previousPhotosList: SpatialPhoto[];
+      };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'delete_hotspot';
+      description: string;
+      data: {
+        deletedHotspot: SpatialHotspot;
+        deletedComponentLocations: { component_id: string; quantity: number }[];
+      };
+    };
 
 interface Props {
   roomId: string;
@@ -27,6 +130,18 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [reshapingHotspot, setReshapingHotspot] = useState<SpatialHotspot | null>(null);
   const [replacingImage, setReplacingImage] = useState(false);
   const [replaceImageNotice, setReplaceImageNotice] = useState<string | null>(null);
+  const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
+  const [isUndoing, setIsUndoing] = useState(false);
+
+  const pushUndoAction = useCallback((action: UndoAction) => {
+    setUndoStack(prev => [...prev.slice(-29), action]);
+  }, []);
+
+  const [insertIntermediateTarget, setInsertIntermediateTarget] = useState<{
+    parentHotspot: SpatialHotspot;
+    childPhoto: SpatialPhoto;
+  } | null>(null);
+  const [isInsertingIntermediate, setIsInsertingIntermediate] = useState(false);
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   
@@ -138,9 +253,17 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     try {
       const newHotspot = await createHotspot(activePhotoId, label, shapePoints, isLeaf);
       setHotspots(prev => [...prev, newHotspot]);
-      // Do not exit edit mode or immediately prompt for upload/components.
-      // The user will click "Done Editing" when finished mapping, and later clicking
-      // the hotspot will trigger the add image/components flow.
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'create_hotspot',
+        description: `Create hotspot "${newHotspot.label}"`,
+        data: {
+          createdHotspotId: newHotspot.id,
+          photoId: activePhotoId,
+          createdHotspot: JSON.parse(JSON.stringify(newHotspot))
+        }
+      });
     } catch (err) {
       console.error(err);
       alert("Failed to save hotspot");
@@ -148,12 +271,27 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   };
 
   const handleUpdateHotspotDetails = async (hotspotId: string, newLabel: string, newIsLeaf: boolean) => {
+    const existing = hotspots.find(h => h.id === hotspotId);
     try {
       await updateHotspot(hotspotId, {
         label: newLabel,
         is_leaf: newIsLeaf
       });
       
+      if (existing) {
+        pushUndoAction({
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          type: 'update_hotspot_details',
+          description: `Edit hotspot "${newLabel}"`,
+          data: {
+            hotspotId,
+            photoId: existing.photo_id,
+            previousHotspot: JSON.parse(JSON.stringify(existing))
+          }
+        });
+      }
+
       setHotspots(prev => prev.map(h => h.id === hotspotId ? { ...h, label: newLabel, is_leaf: newIsLeaf } : h));
 
       // If this hotspot was open in the leaf side drawer
@@ -202,11 +340,28 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   };
 
   const handleConfirmReshape = async (hotspotId: string, newPoints: { x: number; y: number }[]) => {
+    const target = hotspots.find(h => h.id === hotspotId) || reshapingHotspot;
+    const previousShapePoints = target?.shape_points
+      ? JSON.parse(JSON.stringify(target.shape_points))
+      : [];
     try {
       await updateHotspot(hotspotId, { shape_points: newPoints });
       setHotspots(prev => prev.map(h => h.id === hotspotId ? { ...h, shape_points: newPoints } : h));
       if (selectedLeafHotspot?.id === hotspotId) {
         setSelectedLeafHotspot(prev => prev ? { ...prev, shape_points: newPoints } : null);
+      }
+      if (target) {
+        pushUndoAction({
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          type: 'reshape_hotspot',
+          description: `Reshape hotspot "${target.label}"`,
+          data: {
+            hotspotId,
+            photoId: target.photo_id,
+            previousShapePoints
+          }
+        });
       }
       setReshapingHotspot(null);
     } catch (err) {
@@ -220,6 +375,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   };
 
   const handleBatchUpdateHotspots = async (updates: { id: string; shape_points: { x: number; y: number }[] }[]) => {
+    const previousHotspots = updates.map(u => {
+      const existing = hotspots.find(h => h.id === u.id);
+      return {
+        id: u.id,
+        shape_points: existing?.shape_points
+          ? JSON.parse(JSON.stringify(existing.shape_points))
+          : []
+      };
+    });
     try {
       await batchUpdateHotspotPoints(updates);
       const updateMap = new Map(updates.map(u => [u.id, u.shape_points]));
@@ -227,6 +391,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       if (selectedLeafHotspot && updateMap.has(selectedLeafHotspot.id)) {
         setSelectedLeafHotspot(prev => prev ? { ...prev, shape_points: updateMap.get(selectedLeafHotspot.id)! } : null);
       }
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'batch_update_hotspots',
+        description: `Adjust ${updates.length} hotspots`,
+        data: {
+          photoId: activePhotoId || '',
+          previousHotspots
+        }
+      });
     } catch (err) {
       console.error("Failed to batch update hotspots:", err);
       alert("Failed to save adjusted hotspot positions");
@@ -236,6 +410,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const handleReplaceImageFile = async (file: File) => {
     if (!activePhotoId || !activePhoto) return;
     setReplacingImage(true);
+    const previousImageUrl = activePhoto.image_url;
+    const previousHotspots = JSON.parse(JSON.stringify(hotspots));
     try {
       // 1. Measure dimensions of old and new images to determine if framing is preserved
       let oldDims = { width: 1, height: 1 };
@@ -294,6 +470,18 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       // 4. Update local photos state with the new image URL
       setPhotos(prev => prev.map(p => p.id === activePhotoId ? { ...p, image_url: newImageUrl } : p));
 
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'replace_photo_image',
+        description: `Replace image on "${activePhoto.label || 'View'}"`,
+        data: {
+          photoId: activePhotoId,
+          previousImageUrl,
+          previousHotspots
+        }
+      });
+
       if (!isSameFraming) {
         setReplaceImageNotice(
           "Image replaced! Because the aspect ratio changed, hotspots were kept at their normalized positions. You can use the 'Adjust Hotspots' tool in Edit mode to adjust them collectively if needed."
@@ -333,6 +521,287 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
   };
 
+  const handleOpenInsertIntermediate = (parentHotspot: SpatialHotspot) => {
+    // Find child photo
+    const childPhoto = photos.find(p => p.id === parentHotspot.child_photo_id || p.parent_hotspot_id === parentHotspot.id);
+    if (!childPhoto) {
+      alert("Child view for this hotspot could not be found.");
+      return;
+    }
+    setInsertIntermediateTarget({ parentHotspot, childPhoto });
+    setEditingHotspot(null);
+    setShowHotspotsList(false);
+  };
+
+  const handleOpenInsertIntermediateFromChild = async () => {
+    if (!activePhoto || !activePhoto.parent_hotspot_id) return;
+    try {
+      const parentHs = await getHotspotById(activePhoto.parent_hotspot_id);
+      if (parentHs) {
+        setInsertIntermediateTarget({ parentHotspot: parentHs, childPhoto: activePhoto });
+      } else {
+        alert("Parent hotspot for this view could not be found.");
+      }
+    } catch (err) {
+      console.error("Failed to find parent hotspot:", err);
+      alert("Failed to locate parent hotspot.");
+    }
+  };
+
+  const handleExecuteInsertIntermediate = async (data: { file: File; photoLabel: string; hotspotLabel: string }) => {
+    if (!insertIntermediateTarget) return;
+    const { parentHotspot, childPhoto } = insertIntermediateTarget;
+    const prevActiveId = activePhotoId || parentHotspot.photo_id;
+    const prevBreadcrumbs = JSON.parse(JSON.stringify(breadcrumbChain));
+    const prevParentHotspot = JSON.parse(JSON.stringify(parentHotspot));
+    const prevChildPhoto = JSON.parse(JSON.stringify(childPhoto));
+
+    setIsInsertingIntermediate(true);
+    try {
+      const { newPhoto, newHotspot } = await insertIntermediateSpatialPhoto({
+        roomId,
+        parentHotspotId: parentHotspot.id,
+        childPhotoId: childPhoto.id,
+        file: data.file,
+        photoLabel: data.photoLabel,
+        hotspotLabel: data.hotspotLabel
+      });
+
+      // 1. Update photos state: add newPhoto and update childPhoto's parent_hotspot_id
+      setPhotos(prev => [
+        ...prev.map(p => p.id === childPhoto.id ? { ...p, parent_hotspot_id: newHotspot.id } : p),
+        newPhoto
+      ]);
+
+      // 2. Update hotspots state: update parentHotspot's child_photo_id
+      setHotspots(prev => prev.map(h => h.id === parentHotspot.id ? { ...h, child_photo_id: newPhoto.id } : h));
+
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'insert_intermediate_photo',
+        description: `Insert view "${newPhoto.label}"`,
+        data: {
+          parentHotspotId: parentHotspot.id,
+          intermediatePhotoId: newPhoto.id,
+          intermediateHotspotId: newHotspot.id,
+          childPhotoId: childPhoto.id,
+          previousActivePhotoId: prevActiveId,
+          previousBreadcrumbChain: prevBreadcrumbs,
+          previousParentHotspot: prevParentHotspot,
+          previousChildPhoto: prevChildPhoto
+        }
+      });
+
+      // 3. Close modal
+      setInsertIntermediateTarget(null);
+
+      // 4. Navigate into the new intermediate photo
+      const path = await getFullHotspotPath(newHotspot.id);
+      const photoNodes = path.filter(p => p.type === 'photo');
+      if (photoNodes.length > 0) {
+        setBreadcrumbChain(photoNodes.map(p => ({ id: p.id, label: p.label })));
+      } else {
+        setBreadcrumbChain(prev => [...prev.slice(0, -1), { id: newPhoto.id, label: newPhoto.label || 'View' }]);
+      }
+      setActivePhotoId(newPhoto.id);
+      setHighlightedHotspotId(newHotspot.id);
+      setIsEditing(true);
+
+      setReplaceImageNotice(
+        `Intermediate view "${newPhoto.label}" created! Hotspot "${newHotspot.label}" connects to "${childPhoto.label}". You can resize or adjust it.`
+      );
+      setTimeout(() => setReplaceImageNotice(null), 8000);
+    } catch (err: any) {
+      console.error("Failed to insert intermediate view:", err);
+      alert(err.message || "Failed to insert intermediate view");
+    } finally {
+      setIsInsertingIntermediate(false);
+    }
+  };
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.length === 0 || isUndoing) return;
+    setIsUndoing(true);
+    const action = undoStack[undoStack.length - 1];
+    try {
+      switch (action.type) {
+        case 'insert_intermediate_photo': {
+          const {
+            parentHotspotId,
+            intermediatePhotoId,
+            intermediateHotspotId,
+            childPhotoId,
+            previousActivePhotoId,
+            previousBreadcrumbChain
+          } = action.data;
+
+          await undoInsertIntermediateSpatialPhoto({
+            parentHotspotId,
+            intermediatePhotoId,
+            intermediateHotspotId,
+            childPhotoId
+          });
+
+          setPhotos(prev =>
+            prev
+              .filter(p => p.id !== intermediatePhotoId)
+              .map(p => (p.id === childPhotoId ? { ...p, parent_hotspot_id: parentHotspotId } : p))
+          );
+
+          setHotspots(prev =>
+            prev
+              .filter(h => h.id !== intermediateHotspotId)
+              .map(h => (h.id === parentHotspotId ? { ...h, child_photo_id: childPhotoId } : h))
+          );
+
+          setActivePhotoId(previousActivePhotoId);
+          setBreadcrumbChain(previousBreadcrumbChain);
+          setHighlightedHotspotId(null);
+          break;
+        }
+
+        case 'replace_photo_image': {
+          const { photoId, previousImageUrl, previousHotspots } = action.data;
+          const hotspotUpdates = previousHotspots.map(h => ({
+            id: h.id,
+            shape_points: h.shape_points || []
+          }));
+
+          await undoReplaceSpatialPhoto({
+            photoId,
+            previousImageUrl,
+            previousHotspotsUpdates: hotspotUpdates
+          });
+
+          setPhotos(prev => prev.map(p => (p.id === photoId ? { ...p, image_url: previousImageUrl } : p)));
+          if (activePhotoId === photoId) {
+            setHotspots(previousHotspots);
+          }
+          break;
+        }
+
+        case 'create_hotspot': {
+          const { createdHotspotId } = action.data;
+          await deleteHotspot(createdHotspotId);
+          setHotspots(prev => prev.filter(h => h.id !== createdHotspotId));
+          if (selectedLeafHotspot?.id === createdHotspotId) {
+            setSelectedLeafHotspot(null);
+          }
+          break;
+        }
+
+        case 'reshape_hotspot': {
+          const { hotspotId, previousShapePoints } = action.data;
+          await updateHotspot(hotspotId, { shape_points: previousShapePoints });
+          setHotspots(prev =>
+            prev.map(h => (h.id === hotspotId ? { ...h, shape_points: previousShapePoints } : h))
+          );
+          if (selectedLeafHotspot?.id === hotspotId) {
+            setSelectedLeafHotspot(prev => (prev ? { ...prev, shape_points: previousShapePoints } : null));
+          }
+          break;
+        }
+
+        case 'batch_update_hotspots': {
+          const { previousHotspots } = action.data;
+          await batchUpdateHotspotPoints(previousHotspots);
+          const updateMap = new Map(previousHotspots.map(u => [u.id, u.shape_points]));
+          setHotspots(prev =>
+            prev.map(h => (updateMap.has(h.id) ? { ...h, shape_points: updateMap.get(h.id)! } : h))
+          );
+          if (selectedLeafHotspot && updateMap.has(selectedLeafHotspot.id)) {
+            setSelectedLeafHotspot(prev =>
+              prev ? { ...prev, shape_points: updateMap.get(selectedLeafHotspot.id)! } : null
+            );
+          }
+          break;
+        }
+
+        case 'update_hotspot_details': {
+          const { hotspotId, previousHotspot } = action.data;
+          await updateHotspot(hotspotId, {
+            label: previousHotspot.label,
+            is_leaf: previousHotspot.is_leaf
+          });
+          setHotspots(prev =>
+            prev.map(h =>
+              h.id === hotspotId
+                ? { ...h, label: previousHotspot.label, is_leaf: previousHotspot.is_leaf }
+                : h
+            )
+          );
+          if (selectedLeafHotspot?.id === hotspotId) {
+            setSelectedLeafHotspot(prev =>
+              prev ? { ...prev, label: previousHotspot.label, is_leaf: previousHotspot.is_leaf } : null
+            );
+          }
+          break;
+        }
+
+        case 'update_photo_label': {
+          const { photoId, previousLabel } = action.data;
+          await updatePhotoLabel(photoId, previousLabel);
+          setPhotos(prev => prev.map(p => (p.id === photoId ? { ...p, label: previousLabel } : p)));
+          setBreadcrumbChain(prev => {
+            const newChain = [...prev];
+            if (newChain.length > 0 && newChain[newChain.length - 1].id === photoId) {
+              newChain[newChain.length - 1].label = previousLabel;
+            }
+            return newChain;
+          });
+          break;
+        }
+
+        case 'reorder_photos': {
+          const { previousPhotoOrders } = action.data;
+          await reorderSpatialPhotos(previousPhotoOrders);
+          setPhotos(prev => {
+            const orderMap = new Map(previousPhotoOrders.map(p => [p.id, p.order_index]));
+            return prev.map(p => (orderMap.has(p.id) ? { ...p, order_index: orderMap.get(p.id)! } : p));
+          });
+          break;
+        }
+
+        case 'delete_hotspot': {
+          const { deletedHotspot, deletedComponentLocations } = action.data;
+          await restoreDeletedHotspot(deletedHotspot, deletedComponentLocations);
+          setHotspots(prev => [...prev, deletedHotspot]);
+          break;
+        }
+      }
+
+      setUndoStack(prev => prev.slice(0, -1));
+      setReplaceImageNotice(`Undid: ${action.description}`);
+      setTimeout(() => setReplaceImageNotice(null), 5000);
+    } catch (err: any) {
+      console.error("Undo failed:", err);
+      alert(err.message || "Failed to undo action");
+    } finally {
+      setIsUndoing(false);
+    }
+  }, [undoStack, isUndoing, activePhotoId, selectedLeafHotspot]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        const target = e.target as HTMLElement | null;
+        if (
+          target &&
+          (target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.isContentEditable)
+        ) {
+          return;
+        }
+        e.preventDefault();
+        handleUndo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo]);
+
   const resetViewInteractionState = () => {
     setIsEditing(false);
     setReshapingHotspot(null);
@@ -340,6 +809,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     setHighlightedHotspotId(null);
     setPendingChildUpload(null);
     setShowHotspotsList(false);
+    setInsertIntermediateTarget(null);
 
     if (typeof document !== 'undefined') {
       const mainEl = document.querySelector('main');
@@ -415,6 +885,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [dragOverState, setDragOverState] = useState<{ id: string; position: 'before' | 'after' } | null>(null);
 
   const handleReorderViews = async (newOrderedRootPhotos: SpatialPhoto[]) => {
+    const previousPhotoOrders = rootPhotos.map(p => ({ id: p.id, order_index: p.order_index }));
+    const previousPhotosList = JSON.parse(JSON.stringify(rootPhotos));
+
     // 1. Assign sequential order_index
     const updatedRootPhotos = newOrderedRootPhotos.map((photo, index) => ({
       ...photo,
@@ -434,6 +907,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         order_index: p.order_index,
       }));
       await reorderSpatialPhotos(updates);
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'reorder_photos',
+        description: 'Reorder views',
+        data: {
+          previousPhotoOrders,
+          previousPhotosList
+        }
+      });
     } catch (err) {
       console.error("Failed to persist view order:", err);
       // Re-fetch to restore state if persistence failed
@@ -534,8 +1017,23 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
     
     const newLabel = editingLabel.trim();
+    const previousLabel = breadcrumbChain[breadcrumbChain.length - 1]?.label || activePhoto?.label || 'View';
+    if (newLabel === previousLabel) {
+      setIsEditingPhotoLabel(false);
+      return;
+    }
     try {
       await updatePhotoLabel(activePhotoId, newLabel);
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'update_photo_label',
+        description: `Rename view to "${newLabel}"`,
+        data: {
+          photoId: activePhotoId,
+          previousLabel
+        }
+      });
       
       // Update local state
       setPhotos(prev => prev.map(p => p.id === activePhotoId ? { ...p, label: newLabel } : p));
@@ -613,7 +1111,29 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     if (!confirm(warningMsg)) return;
 
     try {
+      // Serialize component assignments before deletion
+      let serializedComps: { component_id: string; quantity: number }[] = [];
+      try {
+        const comps = await getHotspotComponents(hotspot.id);
+        if (comps && Array.isArray(comps)) {
+          serializedComps = comps.map((c: any) => ({ component_id: c.component_id, quantity: c.quantity }));
+        }
+      } catch (cErr) {
+        console.warn("Could not serialize hotspot component locations before delete:", cErr);
+      }
+
       await deleteHotspot(hotspot.id);
+
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'delete_hotspot',
+        description: `Delete hotspot "${hotspot.label}"`,
+        data: {
+          deletedHotspot: JSON.parse(JSON.stringify(hotspot)),
+          deletedComponentLocations: serializedComps
+        }
+      });
       
       if (selectedLeafHotspot?.id === hotspot.id) {
         setSelectedLeafHotspot(null);
@@ -801,6 +1321,20 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                     <Crop className="h-3 w-3" />
                                     <span>Redraw</span>
                                   </button>
+                                  {!hs.is_leaf && hs.child_photo_id && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenInsertIntermediate(hs);
+                                      }}
+                                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors"
+                                      title={`Insert an intermediate view between "${hs.label}" and its child view`}
+                                    >
+                                      <Layers className="h-3 w-3" />
+                                      <span>Insert Step</span>
+                                    </button>
+                                  )}
                                   {!hs.child_photo_id && (
                                     <button
                                       type="button"
@@ -841,6 +1375,18 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
 
             {isEditing && isOnline && (
               <>
+                {activePhoto.parent_hotspot_id && (
+                  <button
+                    type="button"
+                    onClick={handleOpenInsertIntermediateFromChild}
+                    disabled={replacingImage}
+                    className="flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest border border-amber-500/50 text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+                    title="Insert an intermediate view above this view"
+                  >
+                    <Layers className="h-3 w-3 mr-1.5" />
+                    <span>Insert View Above</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => replaceFileInputRef.current?.click()}
@@ -881,6 +1427,27 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 </button>
               </>
             )}
+            {/* Undo Button */}
+            <button
+              type="button"
+              onClick={handleUndo}
+              disabled={undoStack.length === 0 || isUndoing}
+              className="flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest border transition-all bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c] hover:text-white disabled:opacity-30 disabled:pointer-events-none"
+              title={
+                undoStack.length > 0
+                  ? `Undo: ${undoStack[undoStack.length - 1].description} (Ctrl+Z)`
+                  : "Nothing to undo (Ctrl+Z)"
+              }
+            >
+              <RotateCcw className={`h-3.5 w-3.5 mr-1.5 ${isUndoing ? 'animate-spin' : ''}`} />
+              <span>Undo</span>
+              {undoStack.length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 bg-brand-accent/20 text-brand-accent rounded text-[10px] font-mono leading-none">
+                  {undoStack.length}
+                </span>
+              )}
+            </button>
+
             <button 
               onClick={() => {
                 if (!isEditing) {
@@ -906,15 +1473,27 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       </div>
 
       {replaceImageNotice && (
-        <div className="mb-4 p-3 bg-brand-accent/20 border border-brand-accent/50 rounded-lg text-xs text-brand-text flex items-center justify-between gap-2 shadow-lg animate-fadeIn">
+        <div className="mb-4 p-3 bg-brand-accent/20 border border-brand-accent/50 rounded-lg text-xs text-brand-text flex items-center justify-between gap-3 shadow-lg animate-fadeIn">
           <span>{replaceImageNotice}</span>
-          <button 
-            type="button" 
-            onClick={() => setReplaceImageNotice(null)} 
-            className="text-brand-text-muted hover:text-white p-1"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {undoStack.length > 0 && !isUndoing && (
+              <button
+                type="button"
+                onClick={handleUndo}
+                className="flex items-center gap-1 px-2.5 py-1 bg-brand-accent hover:bg-brand-accent/80 text-white font-bold rounded shadow transition-colors text-[11px]"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>Undo</span>
+              </button>
+            )}
+            <button 
+              type="button" 
+              onClick={() => setReplaceImageNotice(null)} 
+              className="text-brand-text-muted hover:text-white p-1"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1082,6 +1661,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               onConfirmReshape={handleConfirmReshape}
               onCancelReshape={handleCancelReshape}
               onBatchUpdateHotspots={handleBatchUpdateHotspots}
+              onUndo={handleUndo}
+              canUndo={undoStack.length > 0 && !isUndoing}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-brand-text-muted flex-col">
@@ -1332,6 +1913,21 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             handleUpdateHotspotDetails(editingHotspot.id, label, isLeaf);
           }}
           onRedrawShape={() => handleStartReshape(editingHotspot)}
+          onInsertIntermediate={
+            !editingHotspot.is_leaf && editingHotspot.child_photo_id
+              ? () => handleOpenInsertIntermediate(editingHotspot)
+              : undefined
+          }
+        />
+      )}
+
+      {insertIntermediateTarget && (
+        <InsertIntermediateModal
+          parentHotspot={insertIntermediateTarget.parentHotspot}
+          childPhoto={insertIntermediateTarget.childPhoto}
+          isSubmitting={isInsertingIntermediate}
+          onClose={() => setInsertIntermediateTarget(null)}
+          onSubmit={handleExecuteInsertIntermediate}
         />
       )}
     </div>

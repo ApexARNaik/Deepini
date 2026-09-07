@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { X, Crop } from "lucide-react";
+import { X, Crop, Layers } from "lucide-react";
 
 interface Props {
   onClose: () => void;
   onSubmit: (label: string, isLeaf: boolean) => void;
   onRedrawShape?: () => void;
+  onInsertIntermediate?: () => void;
   initialLabel?: string;
   initialType?: "leaf" | "drill";
   title?: string;
@@ -17,6 +18,7 @@ export function HotspotConfigModal({
   onClose, 
   onSubmit,
   onRedrawShape,
+  onInsertIntermediate,
   initialLabel = "",
   initialType = "drill",
   title = "Configure Hotspot",
@@ -92,17 +94,30 @@ export function HotspotConfigModal({
           </div>
 
           <div className="flex items-center justify-between gap-3 pt-4 border-t border-[#332f2a]">
-            {onRedrawShape ? (
-              <button
-                type="button"
-                onClick={onRedrawShape}
-                className="px-3 py-2 text-xs font-bold text-cyan-400 hover:text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded transition-colors flex items-center gap-1.5"
-                title="Redraw boundary points on the map"
-              >
-                <Crop className="h-3.5 w-3.5" />
-                <span>Redraw Shape</span>
-              </button>
-            ) : <div />}
+            <div className="flex flex-wrap items-center gap-2">
+              {onRedrawShape && (
+                <button
+                  type="button"
+                  onClick={onRedrawShape}
+                  className="px-3 py-2 text-xs font-bold text-cyan-400 hover:text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded transition-colors flex items-center gap-1.5"
+                  title="Redraw boundary points on the map"
+                >
+                  <Crop className="h-3.5 w-3.5" />
+                  <span>Redraw Shape</span>
+                </button>
+              )}
+              {onInsertIntermediate && (
+                <button
+                  type="button"
+                  onClick={onInsertIntermediate}
+                  className="px-3 py-2 text-xs font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors flex items-center gap-1.5"
+                  title="Insert an intermediate view between this hotspot and its child view"
+                >
+                  <Layers className="h-3.5 w-3.5" />
+                  <span>Insert View In-Between</span>
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-3">
               <button
                 type="button"

@@ -19,6 +19,8 @@ interface Props {
   onConfirmReshape?: (hotspotId: string, newPoints: { x: number; y: number }[]) => void;
   onCancelReshape?: () => void;
   onBatchUpdateHotspots?: (updates: { id: string; shape_points: { x: number; y: number }[] }[]) => void;
+  onUndo?: () => void;
+  canUndo?: boolean;
   onCancelEdit: () => void;
 }
 
@@ -39,6 +41,8 @@ export function HotspotCanvas({
   onConfirmReshape,
   onCancelReshape,
   onBatchUpdateHotspots,
+  onUndo,
+  canUndo = false,
   onCancelEdit 
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -788,6 +792,22 @@ export function HotspotCanvas({
               <Trash2 className="h-3.5 w-3.5" />
               <span>Delete Hotspot</span>
             </button>
+
+            {onUndo && (
+              <>
+                <div className="h-4 w-px bg-[#332f2a] mx-1" />
+                <button
+                  type="button"
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors text-brand-text-muted hover:text-white hover:bg-[#252320] disabled:opacity-30 disabled:pointer-events-none"
+                  title="Undo recent action (Ctrl+Z)"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Undo</span>
+                </button>
+              </>
+            )}
           </div>
 
           {/* Right: Contextual Status, Guidance & Quick Action Buttons */}
