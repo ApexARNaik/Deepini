@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, getAllLeafHotspots, isPersonalItem } from "@/lib/api";
-import { X, Plus, UploadCloud } from "lucide-react";
+import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, isPersonalItem } from "@/lib/api";
+import { X, Plus, UploadCloud, FileText } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 
 interface Props {
@@ -18,6 +18,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const { isOnline } = useNetworkState();
   
   const typeParam = searchParams.get('type');
+  const locationIdParam = searchParams.get('locationId') || searchParams.get('location');
   const isInitialPersonal = initialData ? isPersonalItem(initialData) : (typeParam === 'personal');
   const [itemType, setItemType] = useState<'component' | 'personal'>(isInitialPersonal ? 'personal' : 'component');
 
@@ -37,31 +38,70 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   
   // Locations
   const [locations, setLocations] = useState<{ hotspot_id: string, quantity: number, label?: string }[]>(
-    initialLocations?.map(l => ({ 
-      hotspot_id: l.hotspot_id, 
-      quantity: l.quantity, 
-      label: l.spatial_hotspots?.label || "Unknown Location" 
-    })) || []
+    initialLocations?.map(l => {
+      const fullPath = l.room?.name && l.hotspot?.label
+        ? `${l.room.name}${l.photo?.label ? ` → ${l.photo.label}` : ''} → ${l.hotspot.label}`
+        : null;
+      return {
+        hotspot_id: l.hotspot_id,
+        quantity: l.quantity,
+        label: l.label || fullPath || l.hotspot?.label || l.spatial_hotspots?.label || "Unknown Location"
+      };
+    }) || []
   );
   const [availableHotspots, setAvailableHotspots] = useState<any[]>([]);
   const [selectedHotspot, setSelectedHotspot] = useState("");
   const [locationQuantity, setLocationQuantity] = useState("1");
   
   // Custom Fields
-  const [customFields, setCustomFields] = useState<Record<string, { type: 'text' | 'number' | 'link' | 'image'; value: any }>>(() => {
+  const [customFields, setCustomFields] = useState<Record<string, { type: 'text' | 'number' | 'link' | 'image' | 'file'; value: any; fileName?: string; fileSize?: number }>>(() => {
     const fields = { ...(initialData?.custom_fields || {}) };
     delete fields.item_type;
     return fields;
   });
   const [newFieldName, setNewFieldName] = useState("");
-  const [newFieldType, setNewFieldType] = useState<'text' | 'number' | 'link' | 'image'>('text');
+  const [newFieldType, setNewFieldType] = useState<'text' | 'number' | 'link' | 'image' | 'file'>('text');
+  const [uploadingFieldKey, setUploadingFieldKey] = useState<string | null>(null);
   
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     getTags().then(setAvailableTags).catch(console.error);
-    getAllLeafHotspots().then(setAvailableHotspots).catch(console.error);
-  }, []);
+    getAllLeafHotspots().then((hotspots) => {
+      setAvailableHotspots(hotspots);
+      setLocations((prevLocations) => {
+        let updated = prevLocations.map((loc) => {
+          const matched = hotspots.find((h) => h.id === loc.hotspot_id);
+          if (matched && (!loc.label || loc.label === "Unknown Location" || !loc.label.includes('→'))) {
+            return { ...loc, label: matched.fullLabel || matched.label || loc.label };
+          }
+          return loc;
+        });
+
+        // If creating new component with locationIdParam and no assigned locations yet, pre-assign it
+        if (!initialData && locationIdParam && updated.length === 0) {
+          const matched = hotspots.find((h) => h.id === locationIdParam);
+          if (matched) {
+            updated = [{
+              hotspot_id: matched.id,
+              quantity: 1,
+              label: matched.fullLabel || matched.label
+            }];
+          }
+        }
+
+        return updated;
+      });
+
+      // Pre-select in the dropdown as well
+      if (!initialData && locationIdParam) {
+        const matched = hotspots.find((h) => h.id === locationIdParam);
+        if (matched) {
+          setSelectedHotspot(matched.id);
+        }
+      }
+    }).catch(console.error);
+  }, [initialData, locationIdParam]);
 
   const handleAddTag = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -101,6 +141,9 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
 
   const handleRemoveLocation = (id: string) => {
     setLocations(locations.filter(l => l.hotspot_id !== id));
+    if (selectedHotspot === id) {
+      setSelectedHotspot("");
+    }
   };
 
   const handleAddCustomField = () => {
@@ -126,12 +169,36 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   };
 
   const handleCustomFieldImageUpload = async (key: string, file: File) => {
+    setUploadingFieldKey(key);
     try {
       const url = await uploadImage(file, 'custom');
       handleCustomFieldValueChange(key, url);
     } catch (err) {
       console.error(err);
       alert("Failed to upload image");
+    } finally {
+      setUploadingFieldKey(null);
+    }
+  };
+
+  const handleCustomFieldFileUpload = async (key: string, file: File) => {
+    setUploadingFieldKey(key);
+    try {
+      const result = await uploadFile(file, 'docs');
+      setCustomFields(prev => ({
+        ...prev,
+        [key]: {
+          ...prev[key],
+          value: result.url,
+          fileName: result.name,
+          fileSize: result.size,
+        }
+      }));
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to upload file: " + (err?.message || String(err)));
+    } finally {
+      setUploadingFieldKey(null);
     }
   };
 
@@ -149,10 +216,27 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     e.preventDefault();
     if (!name.trim()) return;
     
+    if (uploadingFieldKey) {
+      alert("Please wait for the file to finish uploading before saving.");
+      return;
+    }
+
     setLoading(true);
     let success = false;
     try {
       let finalTagIds = tags.map(t => t.id);
+
+      // Auto-commit any pending tag input if user didn't click Add / press Enter
+      if (tagInput.trim()) {
+        try {
+          const autoTag = await upsertTag(tagInput.trim());
+          if (!finalTagIds.includes(autoTag.id)) {
+            finalTagIds.push(autoTag.id);
+          }
+        } catch (tErr) {
+          console.warn("Could not auto-add tagInput:", tErr);
+        }
+      }
 
       // If personal item, automatically ensure it has a "Personal" tag
       if (itemType === 'personal') {
@@ -169,6 +253,18 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         }
       }
 
+      // Auto-commit any pending location if user selected a hotspot but didn't click Add
+      let finalLocations = [...locations];
+      if (selectedHotspot) {
+        const qty = parseInt(locationQuantity, 10);
+        if (!isNaN(qty) && qty > 0) {
+          const existing = finalLocations.find(l => l.hotspot_id === selectedHotspot);
+          if (!existing) {
+            finalLocations.push({ hotspot_id: selectedHotspot, quantity: qty });
+          }
+        }
+      }
+
       const payload: Partial<Component> = {
         name: name.trim(),
         item_type: itemType,
@@ -181,10 +277,10 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
       };
 
       if (itemType === 'component') {
-        payload.price = price ? parseFloat(price) : undefined;
-        payload.purchase_source = purchaseSource || undefined;
-        payload.datasheet_link = datasheetLink || undefined;
-        payload.low_stock_threshold = lowStock ? parseInt(lowStock, 10) : undefined;
+        payload.price = (price && price.trim() !== "") ? parseFloat(price.trim()) : undefined;
+        payload.purchase_source = purchaseSource ? purchaseSource.trim() : undefined;
+        payload.datasheet_link = datasheetLink ? datasheetLink.trim() : undefined;
+        payload.low_stock_threshold = (lowStock && lowStock.trim() !== "") ? parseInt(lowStock.trim(), 10) : undefined;
       } else {
         payload.price = undefined;
         payload.purchase_source = undefined;
@@ -196,7 +292,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         payload.id = initialData.id;
       }
 
-      await upsertComponent(payload, finalTagIds, locations);
+      await upsertComponent(payload, finalTagIds, finalLocations);
       success = true;
     } catch (err: any) {
       console.error("Full error:", err);
@@ -500,8 +596,75 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                     )}
                     {field.type === 'image' && (
                       <div className="flex items-center gap-4">
-                        {field.value && <img src={field.value} alt={key} className="h-10 w-10 object-cover border border-[#332f2a] rounded" />}
-                        <input type="file" accept="image/*" onChange={e => e.target.files?.[0] && handleCustomFieldImageUpload(key, e.target.files[0])} className="text-xs text-brand-text-muted" />
+                        {field.value && (
+                          <a href={field.value} target="_blank" rel="noreferrer" title="Open full image">
+                            <img src={field.value} alt={key} className="h-12 w-12 object-cover border border-[#332f2a] rounded hover:opacity-80 transition-opacity" />
+                          </a>
+                        )}
+                        <label className="cursor-pointer text-xs text-brand-text-muted hover:text-white flex items-center gap-1.5 px-3 py-1.5 bg-black/30 border border-[#332f2a] hover:border-brand-accent rounded transition-colors">
+                          <UploadCloud className="h-3.5 w-3.5 text-brand-accent" />
+                          <span>{uploadingFieldKey === key ? "Uploading image..." : (field.value ? "Change Image" : "Upload Image")}</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={e => e.target.files?.[0] && handleCustomFieldImageUpload(key, e.target.files[0])} 
+                            className="hidden"
+                            disabled={uploadingFieldKey === key}
+                          />
+                        </label>
+                      </div>
+                    )}
+                    {field.type === 'file' && (
+                      <div className="space-y-2">
+                        {field.value ? (
+                          <div className="flex items-center justify-between p-2.5 bg-black/40 border border-[#332f2a] rounded">
+                            <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                              <FileText className="h-5 w-5 text-brand-accent shrink-0" />
+                              <div className="min-w-0">
+                                <a 
+                                  href={field.value} 
+                                  target="_blank" 
+                                  rel="noreferrer" 
+                                  className="text-xs font-semibold text-white hover:text-brand-accent underline truncate block"
+                                  title={field.fileName || field.value}
+                                >
+                                  {field.fileName || field.value.split('/').pop()?.split('_').slice(2).join('_') || field.value.split('/').pop() || "Document"}
+                                </a>
+                                {field.fileSize && (
+                                  <span className="text-[10px] text-brand-text-muted font-mono">
+                                    {(field.fileSize / (1024 * 1024)).toFixed(2)} MB
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <label className="cursor-pointer text-[11px] font-bold text-brand-accent hover:underline px-2.5 py-1 bg-brand-accent/10 border border-brand-accent/30 rounded shrink-0 transition-colors hover:bg-brand-accent/20">
+                              {uploadingFieldKey === key ? "Uploading..." : "Replace"}
+                              <input 
+                                type="file" 
+                                accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.txt,application/*,image/*" 
+                                onChange={e => e.target.files?.[0] && handleCustomFieldFileUpload(key, e.target.files[0])} 
+                                className="hidden" 
+                                disabled={uploadingFieldKey === key}
+                              />
+                            </label>
+                          </div>
+                        ) : (
+                          <label className={`flex items-center gap-2 px-3 py-2 border border-dashed rounded text-xs font-medium cursor-pointer transition-colors ${
+                            uploadingFieldKey === key 
+                              ? 'border-brand-accent text-brand-accent bg-brand-accent/10' 
+                              : 'border-[#332f2a] text-brand-text-muted hover:border-brand-accent hover:text-white bg-black/30'
+                          }`}>
+                            <FileText className="h-4 w-4 text-brand-accent" />
+                            <span>{uploadingFieldKey === key ? "Uploading file..." : "Upload File (PDF, PPT, Word, etc.)"}</span>
+                            <input 
+                              type="file" 
+                              accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.txt,application/*,image/*" 
+                              onChange={e => e.target.files?.[0] && handleCustomFieldFileUpload(key, e.target.files[0])} 
+                              className="hidden" 
+                              disabled={uploadingFieldKey === key}
+                            />
+                          </label>
+                        )}
                       </div>
                     )}
                   </div>
@@ -523,12 +686,13 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               <select 
                 value={newFieldType}
                 onChange={e => setNewFieldType(e.target.value as any)}
-                className="w-32 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:outline-none"
+                className="w-36 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:outline-none"
               >
                 <option value="text">Text</option>
                 <option value="number">Number</option>
                 <option value="link">Link</option>
                 <option value="image">Image</option>
+                <option value="file">File (PDF, PPT...)</option>
               </select>
               <button type="button" onClick={handleAddCustomField} className="px-3 py-2 bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30 rounded text-sm flex items-center">
                 <Plus className="h-4 w-4 mr-1" /> Add
@@ -569,12 +733,18 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               <button type="button" onClick={() => router.back()} className="px-6 py-2 text-brand-text-muted hover:text-white text-sm">
                 Cancel
               </button>
-              <button type="submit" disabled={loading} className="px-8 py-2 bg-brand-accent text-white font-bold tracking-widest text-sm rounded-sm hover:bg-brand-accent-hover disabled:opacity-50">
+              <button 
+                type="submit" 
+                disabled={loading || !!uploadingFieldKey} 
+                className="px-8 py-2 bg-brand-accent text-white font-bold tracking-widest text-sm rounded-sm hover:bg-brand-accent-hover disabled:opacity-50 transition-opacity"
+              >
                 {loading 
                   ? "SAVING..." 
-                  : (initialData 
-                      ? (itemType === 'personal' ? "UPDATE PERSONAL ITEM" : "UPDATE COMPONENT") 
-                      : (itemType === 'personal' ? "SAVE PERSONAL ITEM" : "SAVE COMPONENT"))}
+                  : uploadingFieldKey 
+                    ? "UPLOADING FILE..." 
+                    : (initialData 
+                        ? (itemType === 'personal' ? "UPDATE PERSONAL ITEM" : "UPDATE COMPONENT") 
+                        : (itemType === 'personal' ? "SAVE PERSONAL ITEM" : "SAVE COMPONENT"))}
               </button>
             </div>
           </>

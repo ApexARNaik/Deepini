@@ -26,6 +26,8 @@ export interface SpatialHotspot {
   shape_points: { x: number; y: number }[];
   is_leaf: boolean;
   child_photo_id: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type CustomField = { type: 'text' | 'number' | 'link' | 'image'; value: any };
@@ -175,7 +177,7 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
 
   let query = supabase.from("components").select(`
     *,
-    component_tags(tags(*))
+    component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))
   `).eq("pending_delete", false).order("name");
 
   const { data: compData, error: compErr } = await query;
@@ -251,7 +253,7 @@ export async function getComponentDetails(id: string): Promise<{ component: Comp
   }
 
   // get component
-  const { data: comp, error: compErr } = await supabase.from("components").select(`*, component_tags(tags(*))`).eq("id", id).single();
+  const { data: comp, error: compErr } = await supabase.from("components").select(`*, component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))`).eq("id", id).single();
   if (compErr) throw new Error(compErr.message || "Failed to fetch component");
   
   const { data: totalsData } = await supabase.from("component_totals").select("*").eq("component_id", id).single();
@@ -265,11 +267,11 @@ export async function getComponentDetails(id: string): Promise<{ component: Comp
   // get locations
   const { data: locs, error: locErr } = await supabase.from("component_locations").select(`
     *,
-    spatial_hotspots(
+    spatial_hotspots!component_locations_hotspot_id_fkey(
       *,
       spatial_photos!spatial_hotspots_photo_id_fkey(
         *,
-        rooms(*)
+        rooms!spatial_photos_room_id_fkey(*)
       )
     )
   `).eq("component_id", id);
@@ -302,10 +304,10 @@ export async function upsertComponent(
     p_id: componentData.id || null,
     p_name: componentData.name,
     p_photo_url: componentData.photo_url || null,
-    p_price: componentData.price || null,
+    p_price: componentData.price !== undefined && componentData.price !== null ? componentData.price : null,
     p_purchase_source: componentData.purchase_source || null,
     p_datasheet_link: componentData.datasheet_link || null,
-    p_low_stock_threshold: componentData.low_stock_threshold || null,
+    p_low_stock_threshold: componentData.low_stock_threshold !== undefined && componentData.low_stock_threshold !== null ? componentData.low_stock_threshold : null,
     p_notes: componentData.notes || null,
     p_custom_fields: customFields,
     p_tag_ids: tagIds,
@@ -342,14 +344,35 @@ export async function getFullHotspotPath(hotspotId: string) {
     if (!photo) break;
     chain.unshift({ type: 'photo', id: photo.id, label: photo.label || 'View' });
     
-    currentHotspotId = photo.parent_hotspot_id;
+    if (photo.parent_hotspot_id) {
+      currentHotspotId = photo.parent_hotspot_id;
+    } else if (photo.room_id) {
+      const { data: room }: any = await supabase.from("rooms").select("name").eq("id", photo.room_id).single();
+      if (room?.name) {
+        chain.unshift({ type: 'photo', id: photo.room_id, label: room.name });
+      }
+      break;
+    } else {
+      break;
+    }
   }
   return chain;
 }
 
 export async function getAllLeafHotspots() {
-  const { data, error } = await supabase.from('spatial_hotspots').select('*').eq('is_leaf', true);
-  if (error) throw new Error(error.message || "Failed to fetch leaf hotspots");
+  let data: any[] = [];
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const allHotspots = await db.spatial_hotspots.toArray();
+    data = allHotspots.filter(h => h.is_leaf);
+  } else {
+    const { data: dbData, error } = await supabase
+      .from('spatial_hotspots')
+      .select('*')
+      .eq('is_leaf', true)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(error.message || "Failed to fetch leaf hotspots");
+    data = dbData || [];
+  }
   
   const hotspotsWithPaths = await Promise.all(data.map(async (hs) => {
     const path = await getFullHotspotPath(hs.id);
@@ -357,11 +380,19 @@ export async function getAllLeafHotspots() {
     return { ...hs, fullLabel: label };
   }));
   
-  return hotspotsWithPaths.sort((a, b) => a.fullLabel.localeCompare(b.fullLabel));
+  // Arrange in the order of recently added (newest first)
+  return hotspotsWithPaths.sort((a, b) => {
+    const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    if (timeB !== timeA) {
+      return timeB - timeA;
+    }
+    return a.fullLabel.localeCompare(b.fullLabel);
+  });
 }
 
 export async function getHotspotComponents(hotspotId: string) {
-  const { data, error } = await supabase.from('component_locations').select('*, components(*)').eq('hotspot_id', hotspotId);
+  const { data, error } = await supabase.from('component_locations').select('*, components!component_locations_component_id_fkey(*)').eq('hotspot_id', hotspotId);
   if (error) throw new Error(error.message || "Failed to fetch components for hotspot");
   return data;
 }
@@ -392,6 +423,26 @@ export async function uploadImage(file: File, pathPrefix: string): Promise<strin
   
   const { data } = supabase.storage.from('images').getPublicUrl(fileName);
   return data.publicUrl;
+}
+
+export async function uploadFile(file: File, pathPrefix: string = 'file'): Promise<{ url: string; name: string; size: number }> {
+  const ext = file.name.split('.').pop() || 'bin';
+  const cleanBaseName = file.name.substring(0, file.name.lastIndexOf('.')) || 'file';
+  const safeBaseName = cleanBaseName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+  const fileName = `${pathPrefix}_${Date.now()}_${safeBaseName}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage.from('images').upload(fileName, file, {
+    contentType: file.type || 'application/octet-stream',
+    upsert: false
+  });
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage.from('images').getPublicUrl(fileName);
+  return {
+    url: data.publicUrl,
+    name: file.name,
+    size: file.size,
+  };
 }
 
 export async function uploadPhotoAndCreate(
@@ -517,7 +568,7 @@ export async function getProjects(): Promise<(Project & { active_count: number }
     });
   }
 
-  const { data, error } = await supabase.from('projects').select('*, project_components(quantity, returned_at)').order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('projects').select('*, project_components!project_components_project_id_fkey(quantity, returned_at)').order('created_at', { ascending: false });
   if (error) throw error;
   
   return data.map(p => {
@@ -555,7 +606,7 @@ export async function getProjectDetails(id: string): Promise<{ project: Project,
   const { data: project, error } = await supabase.from('projects').select('*').eq('id', id).single();
   if (error) throw error;
   
-  const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components(*), source_hotspot:spatial_hotspots!project_components_source_location_id_fkey(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
+  const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components!project_components_component_id_fkey(*), source_hotspot:spatial_hotspots!fk_project_components_source_loc(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
   if (itemsErr) throw itemsErr;
   
   return { project, items };
@@ -579,14 +630,94 @@ export async function checkinComponent(projectComponentId: string, returnLocatio
   if (error) throw error;
 }
 
+export async function getComponentLocationAssignments(componentId: string): Promise<{ id: string; quantity: number; hotspot_id: string; label?: string }[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const locs = await db.component_locations.where('component_id').equals(componentId).toArray();
+    return locs.map(l => ({ id: l.id, quantity: l.quantity, hotspot_id: l.hotspot_id }));
+  }
+
+  const { data, error } = await supabase
+    .from('component_locations')
+    .select(`
+      id,
+      quantity,
+      hotspot_id,
+      spatial_hotspots!component_locations_hotspot_id_fkey(
+        label
+      )
+    `)
+    .eq('component_id', componentId);
+
+  if (error) {
+    const { data: simpleData } = await supabase
+      .from('component_locations')
+      .select('id, quantity, hotspot_id')
+      .eq('component_id', componentId);
+    return (simpleData || []).map(l => ({ ...l, label: undefined }));
+  }
+
+  return (data || []).map((l: any) => ({
+    id: l.id,
+    quantity: l.quantity,
+    hotspot_id: l.hotspot_id,
+    label: l.spatial_hotspots?.label
+  }));
+}
+
 export async function deleteComponent(id: string): Promise<void> {
   const { error } = await supabase.rpc('delete_component_safe', { p_component_id: id });
-  if (error) throw error;
+  if (error) {
+    console.warn("RPC delete_component_safe error, falling back to direct delete:", error);
+    await supabase.from('component_tags').delete().eq('component_id', id);
+    await supabase.from('component_locations').delete().eq('component_id', id);
+    const { error: delErr } = await supabase.from('components').delete().eq('id', id);
+    if (delErr) throw delErr;
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.components.delete(id);
+      await db.component_locations.where('component_id').equals(id).delete();
+      await db.component_tags.where('component_id').equals(id).delete();
+      await db.component_totals.delete(id);
+    } catch (dbErr) {
+      console.warn("Offline db cleanup error on component delete:", dbErr);
+    }
+  }
 }
 
 export async function deleteSpatialPhoto(photoId: string): Promise<void> {
   const { error } = await supabase.rpc('delete_spatial_photo_recursive', { p_photo_id: photoId });
   if (error) throw error;
+}
+
+export async function deleteHotspot(hotspotId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_hotspot_recursive', { p_hotspot_id: hotspotId });
+  if (error) {
+    console.warn("RPC delete_hotspot_recursive error, running client cascade fallback:", error);
+    const { data: hs } = await supabase.from('spatial_hotspots').select('*').eq('id', hotspotId).single();
+    if (hs?.child_photo_id) {
+      await deleteSpatialPhoto(hs.child_photo_id).catch(() => {});
+    }
+    const { data: childPhotos } = await supabase.from('spatial_photos').select('id').eq('parent_hotspot_id', hotspotId);
+    if (childPhotos && childPhotos.length > 0) {
+      for (const cp of childPhotos) {
+        await deleteSpatialPhoto(cp.id).catch(() => {});
+      }
+    }
+    await supabase.from('component_locations').delete().eq('hotspot_id', hotspotId);
+    const { error: delErr } = await supabase.from('spatial_hotspots').delete().eq('id', hotspotId);
+    if (delErr) throw delErr;
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_hotspots.delete(hotspotId);
+      await db.component_locations.where('hotspot_id').equals(hotspotId).delete();
+    } catch (dbErr) {
+      console.warn("Offline db cleanup error on hotspot delete:", dbErr);
+    }
+  }
 }
 
 export async function deleteRoom(roomId: string): Promise<void> {

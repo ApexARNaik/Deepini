@@ -5,7 +5,7 @@ import { getComponentDetails, ComponentWithTotals, ComponentLocation, isPersonal
 import { formatCurrency } from "@/lib/utils";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Edit2, MapPin, ExternalLink, ArrowLeft } from "lucide-react";
+import { Edit2, MapPin, ExternalLink, ArrowLeft, FileText } from "lucide-react";
 
 export default function ComponentDetailPage() {
   const { componentId } = useParams();
@@ -180,7 +180,26 @@ export default function ComponentDetailPage() {
                             <a href={field.value} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline text-sm truncate block">{field.value}</a>
                           ) : field.type === 'image' ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#332f2a] rounded mt-1" />
+                            <a href={field.value} target="_blank" rel="noreferrer" title="View full image">
+                              <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#332f2a] rounded mt-1 hover:opacity-80 transition-opacity" />
+                            </a>
+                          ) : field.type === 'file' ? (
+                            <div className="mt-1 flex items-center justify-between p-2.5 bg-black/30 border border-[#332f2a] rounded">
+                              <div className="flex items-center gap-2 min-w-0 pr-2">
+                                <FileText className="h-4 w-4 text-brand-accent shrink-0" />
+                                <span className="text-xs text-white truncate" title={field.fileName || field.value}>
+                                  {field.fileName || (typeof field.value === 'string' ? field.value.split('/').pop()?.split('_').slice(2).join('_') || field.value.split('/').pop() : 'Document')}
+                                </span>
+                              </div>
+                              <a 
+                                href={typeof field.value === 'string' ? field.value : field.value?.url} 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="text-xs font-bold text-brand-accent hover:underline shrink-0 flex items-center gap-1"
+                              >
+                                Open <ExternalLink className="h-3 w-3" />
+                              </a>
+                            </div>
                           ) : (
                             <div className="text-white text-sm">{field.value}</div>
                           )}
