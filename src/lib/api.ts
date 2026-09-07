@@ -219,7 +219,7 @@ export async function getTags(): Promise<Tag[]> {
 
 export async function upsertTag(name: string): Promise<Tag> {
   // check if exists
-  const { data: existing } = await supabase.from("tags").select("*").eq("name", name).single();
+  const { data: existing } = await supabase.from("tags").select("*").eq("name", name).maybeSingle();
   if (existing) return existing;
   const { data, error } = await supabase.from("tags").insert([{ name }]).select().single();
   if (error) throw error;
@@ -256,7 +256,7 @@ export async function getComponentDetails(id: string): Promise<{ component: Comp
   const { data: comp, error: compErr } = await supabase.from("components").select(`*, component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))`).eq("id", id).single();
   if (compErr) throw new Error(compErr.message || "Failed to fetch component");
   
-  const { data: totalsData } = await supabase.from("component_totals").select("*").eq("component_id", id).single();
+  const { data: totalsData } = await supabase.from("component_totals").select("*").eq("component_id", id).maybeSingle();
   
   const component: ComponentWithTotals = {
     ...comp,
