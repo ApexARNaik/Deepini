@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
@@ -29,8 +29,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [searchQuery, setSearchQuery] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isSidebarPinned, setIsSidebarPinned] = useState(true);
+  const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("deepini_sidebar_pinned");
+      if (saved !== null) {
+        setIsSidebarPinned(saved === "true");
+      }
+    } catch {
+      // Ignore localStorage access errors
+    }
+  }, []);
+
+  const handleToggleSidebarPin = () => {
+    setIsSidebarPinned((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("deepini_sidebar_pinned", String(next));
+      } catch {}
+      return next;
+    });
+  };
   
   const isSidebarExpanded = isSidebarPinned || isSidebarHovered;
 
@@ -58,7 +79,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           
           {isSidebarExpanded && (
             <button 
-              onClick={() => setIsSidebarPinned(!isSidebarPinned)}
+              onClick={handleToggleSidebarPin}
               className="text-brand-text-muted hover:text-white transition-colors h-8 w-8 flex items-center justify-center rounded hover:bg-[#24211e] shrink-0"
               title={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
             >

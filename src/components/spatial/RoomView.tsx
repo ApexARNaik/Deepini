@@ -7,7 +7,7 @@ import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { InsertIntermediateModal } from "./InsertIntermediateModal";
 import { MoveHotspotModal } from "./MoveHotspotModal";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -164,6 +164,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showHotspotsList, setShowHotspotsList] = useState(false);
+  const [showViewOptionsMenu, setShowViewOptionsMenu] = useState(false);
+  const [hotspotSearchFilter, setHotspotSearchFilter] = useState("");
   const [editingHotspot, setEditingHotspot] = useState<SpatialHotspot | null>(null);
   const [reshapingHotspot, setReshapingHotspot] = useState<SpatialHotspot | null>(null);
   const [replacingImage, setReplacingImage] = useState(false);
@@ -223,6 +225,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     } else {
       setHotspots([]);
     }
+    setHotspotSearchFilter("");
   }, [activePhotoId]);
 
   const loadRoomData = async () => {
@@ -1654,58 +1657,112 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             )}
 
             {isEditing && isOnline && (
-              <>
-                {activePhoto.parent_hotspot_id && (
-                  <button
-                    type="button"
-                    onClick={handleOpenInsertIntermediateFromChild}
-                    disabled={replacingImage}
-                    className="flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest border border-amber-500/50 text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
-                    title="Insert an intermediate view above this view"
-                  >
-                    <Layers className="h-3 w-3 mr-1.5" />
-                    <span>Insert View Above</span>
-                  </button>
-                )}
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => replaceFileInputRef.current?.click()}
-                  disabled={replacingImage}
-                  className="flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest border border-amber-500/50 text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
-                  title="Replace this view's background image (preserves all hotspots & items)"
-                >
-                  {replacingImage ? (
-                    <>
-                      <RefreshCw className="h-3 w-3 mr-1.5 animate-spin" />
-                      <span>Replacing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <ImageIcon className="h-3 w-3 mr-1.5" />
-                      <span>Replace Image</span>
-                    </>
-                  )}
-                </button>
-                <input
-                  ref={replaceFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files[0]) {
-                      handleReplaceImageFile(e.target.files[0]);
-                      e.target.value = '';
-                    }
+                  onClick={() => {
+                    setShowViewOptionsMenu(!showViewOptionsMenu);
+                    setShowHotspotsList(false);
                   }}
-                />
-                <button
-                  onClick={handleDeletePhoto}
-                  className="flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors"
-                  title="Delete View"
+                  className={`flex items-center px-3 py-2 text-xs font-bold uppercase tracking-widest border transition-all ${
+                    showViewOptionsMenu
+                      ? 'bg-brand-accent/20 border-brand-accent text-brand-accent'
+                      : 'bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c] hover:text-white'
+                  }`}
+                  title="View options and management actions"
                 >
-                  <Trash2 className="h-3 w-3 mr-2" /> Delete View
+                  <SlidersHorizontal className="h-3.5 w-3.5 mr-1.5 text-brand-accent" />
+                  <span>View Options</span>
+                  <ChevronDown className={`h-3.5 w-3.5 ml-1.5 transition-transform duration-200 ${showViewOptionsMenu ? 'rotate-180 text-brand-accent' : 'text-brand-text-muted'}`} />
                 </button>
-              </>
+
+                {showViewOptionsMenu && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setShowViewOptionsMenu(false)} 
+                    />
+                    <div className="absolute right-0 top-full mt-2 w-64 bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl z-50 overflow-hidden py-1 animate-fadeIn">
+                      <div className="px-3.5 py-2 border-b border-[#332f2a] bg-black/40">
+                        <div className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider">
+                          View Settings & Actions
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowViewOptionsMenu(false);
+                          replaceFileInputRef.current?.click();
+                        }}
+                        disabled={replacingImage}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-brand-text hover:text-white hover:bg-white/5 text-left transition-colors group"
+                        title="Replace this view's background image (preserves all hotspots & items)"
+                      >
+                        {replacingImage ? (
+                          <RefreshCw className="h-4 w-4 text-amber-400 animate-spin shrink-0" />
+                        ) : (
+                          <ImageIcon className="h-4 w-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
+                        )}
+                        <div className="min-w-0">
+                          <div className="font-semibold text-white/90 group-hover:text-white">Replace Image</div>
+                          <div className="text-[10px] text-brand-text-muted truncate">Preserves hotspots & items</div>
+                        </div>
+                      </button>
+
+                      <input
+                        ref={replaceFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            handleReplaceImageFile(e.target.files[0]);
+                            e.target.value = '';
+                          }
+                        }}
+                      />
+
+                      {activePhoto.parent_hotspot_id && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowViewOptionsMenu(false);
+                            handleOpenInsertIntermediateFromChild();
+                          }}
+                          disabled={replacingImage}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-brand-text hover:text-white hover:bg-white/5 text-left transition-colors group"
+                          title="Insert an intermediate view above this view"
+                        >
+                          <Layers className="h-4 w-4 text-amber-300 shrink-0 group-hover:scale-110 transition-transform" />
+                          <div className="min-w-0">
+                            <div className="font-semibold text-white/90 group-hover:text-white">Insert View Above</div>
+                            <div className="text-[10px] text-brand-text-muted truncate">Add step between parent & view</div>
+                          </div>
+                        </button>
+                      )}
+
+                      <div className="h-px bg-[#332f2a] my-1" />
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowViewOptionsMenu(false);
+                          handleDeletePhoto();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 text-left transition-colors group"
+                        title="Delete View"
+                      >
+                        <Trash2 className="h-4 w-4 text-red-400 shrink-0 group-hover:scale-110 transition-transform" />
+                        <div className="min-w-0">
+                          <div className="font-semibold">Delete View</div>
+                          <div className="text-[10px] text-red-400/70 truncate">Delete view and sub-views</div>
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
             {/* Undo Button */}
             <button
@@ -1734,6 +1791,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   setSelectedLeafHotspot(null);
                 } else {
                   setShowHotspotsList(false);
+                  setShowViewOptionsMenu(false);
                   setReshapingHotspot(null);
                 }
                 setIsEditing(!isEditing);
@@ -1920,40 +1978,197 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           )}
         </div>
 
-        {/* Main Canvas Area */}
-        <div className="flex-1 w-full bg-black/40 rounded-lg border border-[#332f2a] overflow-auto">
-          {activePhoto ? (
-            <HotspotCanvas 
-              key={activePhoto.id}
-              imageUrl={activePhoto.image_url} 
-              hotspots={hotspots}
-              isEditing={isEditing}
-              highlightedHotspotId={highlightedHotspotId}
-              reshapingHotspot={reshapingHotspot}
-              movingHotspot={activeMoveSession ? { hotspot: activeMoveSession.hotspot, sourcePhotoId: activeMoveSession.sourcePhotoId } : null}
-              onCancelEdit={() => {
-                setIsEditing(false);
-                setReshapingHotspot(null);
-                setActiveMoveSession(null);
-              }}
-              onHotspotCreated={handleHotspotCreated}
-              onHotspotClick={handleHotspotClick}
-              onHotspotDelete={handleDeleteHotspot}
-              onHotspotEdit={setEditingHotspot}
-              onConfirmReshape={handleConfirmReshape}
-              onCancelReshape={handleCancelReshape}
-              onConfirmMoveHotspot={handleConfirmMoveHotspot}
-              onCancelMoveHotspot={handleCancelMoveHotspot}
-              onBatchUpdateHotspots={handleBatchUpdateHotspots}
-              onUndo={handleUndo}
-              canUndo={undoStack.length > 0 && !isUndoing}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-brand-text-muted flex-col">
-              <p className="mb-4 text-center">No views uploaded for this room yet.</p>
-              {!uploading && (
-                <div className="w-72">
-                  <ImageUploadDropzone onUpload={handleUploadRootPhoto} isUploading={uploading} label="Upload First Photo" />
+        {/* Main Column */}
+        <div className="flex-1 w-full min-w-0 flex flex-col gap-4">
+          {/* Main Canvas Area */}
+          <div className="w-full bg-black/40 rounded-lg border border-[#332f2a] overflow-auto">
+            {activePhoto ? (
+              <HotspotCanvas 
+                key={activePhoto.id}
+                imageUrl={activePhoto.image_url} 
+                hotspots={hotspots}
+                isEditing={isEditing}
+                highlightedHotspotId={highlightedHotspotId}
+                reshapingHotspot={reshapingHotspot}
+                movingHotspot={activeMoveSession ? { hotspot: activeMoveSession.hotspot, sourcePhotoId: activeMoveSession.sourcePhotoId } : null}
+                onCancelEdit={() => {
+                  setIsEditing(false);
+                  setReshapingHotspot(null);
+                  setActiveMoveSession(null);
+                }}
+                onHotspotCreated={handleHotspotCreated}
+                onHotspotClick={handleHotspotClick}
+                onHotspotDelete={handleDeleteHotspot}
+                onHotspotEdit={setEditingHotspot}
+                onConfirmReshape={handleConfirmReshape}
+                onCancelReshape={handleCancelReshape}
+                onConfirmMoveHotspot={handleConfirmMoveHotspot}
+                onCancelMoveHotspot={handleCancelMoveHotspot}
+                onBatchUpdateHotspots={handleBatchUpdateHotspots}
+                onUndo={handleUndo}
+                canUndo={undoStack.length > 0 && !isUndoing}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-brand-text-muted flex-col p-8">
+                <p className="mb-4 text-center">No views uploaded for this room yet.</p>
+                {!uploading && (
+                  <div className="w-72">
+                    <ImageUploadDropzone onUpload={handleUploadRootPhoto} isUploading={uploading} label="Upload First Photo" />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Available Hotspots on this Selected View */}
+          {activePhoto && (
+            <div className="w-full bg-[#161412] rounded-lg border border-[#332f2a] p-4 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-3 border-b border-[#2d2924]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded bg-brand-accent/15 text-brand-accent border border-brand-accent/25">
+                    <MapPin className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-serif text-base font-bold text-white tracking-wide flex items-center gap-2">
+                      <span>Hotspots on {breadcrumbChain[breadcrumbChain.length - 1]?.label || activePhoto.label || 'View'}</span>
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#252320] border border-[#332f2a] text-brand-text-muted">
+                        {hotspots.length}
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-brand-text-muted">
+                      Click any hotspot name to locate and inspect its contents
+                    </p>
+                  </div>
+                </div>
+
+                {hotspots.length > 3 && (
+                  <div className="relative w-full sm:w-56">
+                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-brand-text-muted" />
+                    <input
+                      type="text"
+                      value={hotspotSearchFilter}
+                      onChange={(e) => setHotspotSearchFilter(e.target.value)}
+                      placeholder="Filter hotspots..."
+                      className="w-full bg-[#0d0c0b] border border-[#332f2a] rounded pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {hotspots.filter(h => !hotspotSearchFilter || h.label.toLowerCase().includes(hotspotSearchFilter.toLowerCase())).length === 0 ? (
+                <div className="text-center py-6 text-xs text-brand-text-muted border border-dashed border-[#2d2924] rounded-md p-4 bg-black/20">
+                  {hotspots.length === 0 ? (
+                    <>
+                      <MapPin className="h-5 w-5 mx-auto mb-1.5 text-brand-text-muted/60" />
+                      <span>No hotspots created on this view yet.</span>
+                      {isEditing && (
+                        <span className="block mt-1 text-brand-accent/80">Use Polygon, Rectangle, or Freehand above to trace a storage region.</span>
+                      )}
+                    </>
+                  ) : (
+                    <span>No hotspots match &quot;{hotspotSearchFilter}&quot;</span>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2.5">
+                  {hotspots
+                    .filter(h => !hotspotSearchFilter || h.label.toLowerCase().includes(hotspotSearchFilter.toLowerCase()))
+                    .map((hs) => {
+                      const isHighlighted = highlightedHotspotId === hs.id;
+                      const isSelectedLeaf = selectedLeafHotspot?.id === hs.id;
+                      const isActive = isHighlighted || isSelectedLeaf;
+
+                      return (
+                        <div
+                          key={hs.id}
+                          onClick={() => {
+                            setHighlightedHotspotId(hs.id);
+                            handleHotspotClick(hs);
+                          }}
+                          onMouseEnter={() => setHighlightedHotspotId(hs.id)}
+                          className={`p-3 rounded border transition-all cursor-pointer group flex flex-col justify-between ${
+                            isActive
+                              ? 'bg-brand-accent/20 border-brand-accent shadow-[0_0_12px_rgba(188,115,83,0.3)] ring-1 ring-brand-accent'
+                              : 'bg-[#1a1816]/70 border-[#2d2924] hover:border-[#4a443c] hover:bg-[#1a1816]'
+                          }`}
+                          title={hs.is_leaf ? `Open contents for "${hs.label}"` : `Drill down into "${hs.label}"`}
+                        >
+                          <div className="flex items-start justify-between gap-2 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className={`p-1.5 rounded shrink-0 transition-colors ${
+                                isActive 
+                                  ? 'bg-brand-accent text-white' 
+                                  : 'bg-[#252320] text-brand-text-muted group-hover:text-brand-accent'
+                              }`}>
+                                {hs.is_leaf ? <Archive className="h-3.5 w-3.5" /> : <Layers className="h-3.5 w-3.5" />}
+                              </div>
+                              <div className="min-w-0">
+                                <div className={`text-sm font-bold truncate transition-colors ${
+                                  isActive ? 'text-white' : 'text-white/90 group-hover:text-brand-accent'
+                                }`}>
+                                  {hs.label}
+                                </div>
+                                <div className="text-[10px] text-brand-text-muted tracking-wider uppercase font-mono mt-0.5 flex items-center gap-1">
+                                  <span>{hs.is_leaf ? "Storage Location" : "Opens Sub-View"}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${
+                              isActive ? 'text-brand-accent translate-x-0.5' : 'text-brand-text-muted group-hover:text-white'
+                            }`} />
+                          </div>
+
+                          {isEditing && isOnline && (
+                            <div className="mt-2.5 pt-2 border-t border-[#262320] flex items-center justify-end gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleStartMoveHotspot(hs);
+                                }}
+                                className="p-1 rounded text-brand-text-muted hover:text-purple-400 hover:bg-purple-500/10 transition-colors"
+                                title={`Move "${hs.label}" to another view`}
+                              >
+                                <ArrowRightLeft className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleStartReshape(hs);
+                                }}
+                                className="p-1 rounded text-brand-text-muted hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
+                                title={`Redraw boundary for "${hs.label}"`}
+                              >
+                                <Crop className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingHotspot(hs);
+                                }}
+                                className="p-1 rounded text-brand-text-muted hover:text-brand-accent hover:bg-brand-accent/10 transition-colors"
+                                title={`Edit "${hs.label}"`}
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteHotspot(hs);
+                                }}
+                                className="p-1 rounded text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                title={`Delete "${hs.label}"`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                 </div>
               )}
             </div>
