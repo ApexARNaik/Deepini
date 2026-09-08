@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { X, Crop, Layers } from "lucide-react";
+import { X, Crop, Layers, ArrowRightLeft } from "lucide-react";
 
 interface Props {
   onClose: () => void;
   onSubmit: (label: string, isLeaf: boolean) => void;
   onRedrawShape?: () => void;
   onInsertIntermediate?: () => void;
+  onMoveHotspot?: () => void;
   initialLabel?: string;
   initialType?: "leaf" | "drill";
   title?: string;
@@ -19,6 +20,7 @@ export function HotspotConfigModal({
   onSubmit,
   onRedrawShape,
   onInsertIntermediate,
+  onMoveHotspot,
   initialLabel = "",
   initialType = "drill",
   title = "Configure Hotspot",
@@ -115,6 +117,17 @@ export function HotspotConfigModal({
                 >
                   <Layers className="h-3.5 w-3.5" />
                   <span>Insert View In-Between</span>
+                </button>
+              )}
+              {onMoveHotspot && (
+                <button
+                  type="button"
+                  onClick={onMoveHotspot}
+                  className="px-3 py-2 text-xs font-bold text-purple-300 hover:text-purple-200 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded transition-colors flex items-center gap-1.5"
+                  title="Relocate this hotspot and all its contents to another view"
+                >
+                  <ArrowRightLeft className="h-3.5 w-3.5" />
+                  <span>Move Location</span>
                 </button>
               )}
             </div>

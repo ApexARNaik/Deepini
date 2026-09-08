@@ -4,7 +4,7 @@ import { useRef, useState, useEffect } from "react";
 import { SpatialHotspot } from "@/lib/api";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { useNetworkState } from "@/hooks/useNetworkState";
-import { Trash2, MapPin, Check, RotateCcw, Edit2, Sliders, Crop, Move } from "lucide-react";
+import { Trash2, MapPin, Check, RotateCcw, Edit2, Sliders, Crop, Move, ArrowRightLeft } from "lucide-react";
 
 interface Props {
   imageUrl: string;
@@ -12,12 +12,15 @@ interface Props {
   isEditing: boolean;
   highlightedHotspotId?: string | null;
   reshapingHotspot?: SpatialHotspot | null;
+  movingHotspot?: { hotspot: SpatialHotspot; sourcePhotoId: string } | null;
   onHotspotCreated: (shapePoints: { x: number; y: number }[], label: string, isLeaf: boolean) => void;
   onHotspotClick: (hotspot: SpatialHotspot) => void;
   onHotspotDelete?: (hotspot: SpatialHotspot) => void;
   onHotspotEdit?: (hotspot: SpatialHotspot) => void;
   onConfirmReshape?: (hotspotId: string, newPoints: { x: number; y: number }[]) => void;
   onCancelReshape?: () => void;
+  onConfirmMoveHotspot?: (hotspotId: string, newPoints: { x: number; y: number }[]) => void;
+  onCancelMoveHotspot?: () => void;
   onBatchUpdateHotspots?: (updates: { id: string; shape_points: { x: number; y: number }[] }[]) => void;
   onUndo?: () => void;
   canUndo?: boolean;
@@ -34,12 +37,15 @@ export function HotspotCanvas({
   isEditing, 
   highlightedHotspotId, 
   reshapingHotspot,
+  movingHotspot,
   onHotspotCreated, 
   onHotspotClick, 
   onHotspotDelete,
   onHotspotEdit,
   onConfirmReshape,
   onCancelReshape,
+  onConfirmMoveHotspot,
+  onCancelMoveHotspot,
   onBatchUpdateHotspots,
   onUndo,
   canUndo = false,
@@ -126,6 +132,18 @@ export function HotspotCanvas({
     }
   }, [reshapingHotspot]);
 
+  // When moving a specific hotspot to this canvas, reset drawing points & adjust bounds
+  useEffect(() => {
+    if (movingHotspot) {
+      setDrawMode('polygon');
+      setCurrentPoints([]);
+      setIsDrawing(false);
+      resetRectangleState();
+      setAdjustBounds(null);
+      setAdjustedHotspots([]);
+    }
+  }, [movingHotspot]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isEditing || !isOnline) return;
@@ -134,6 +152,9 @@ export function HotspotCanvas({
           setIsDrawing(false);
           if (reshapingHotspot) {
             onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+            setCurrentPoints([]);
+          } else if (movingHotspot) {
+            onConfirmMoveHotspot?.(movingHotspot.hotspot.id, currentPoints);
             setCurrentPoints([]);
           } else {
             setShowConfig(true);
@@ -145,6 +166,8 @@ export function HotspotCanvas({
           setPolygonMousePos(null);
           if (reshapingHotspot) {
             onCancelReshape?.();
+          } else if (movingHotspot) {
+            onCancelMoveHotspot?.();
           }
         }
       } else if (drawMode === 'rectangle') {
@@ -161,6 +184,10 @@ export function HotspotCanvas({
             onConfirmReshape?.(reshapingHotspot.id, pts);
             resetRectangleState();
             setCurrentPoints([]);
+          } else if (movingHotspot) {
+            onConfirmMoveHotspot?.(movingHotspot.hotspot.id, pts);
+            resetRectangleState();
+            setCurrentPoints([]);
           } else {
             setShowConfig(true);
           }
@@ -171,6 +198,8 @@ export function HotspotCanvas({
           setIsDrawing(false);
           if (reshapingHotspot) {
             onCancelReshape?.();
+          } else if (movingHotspot) {
+            onCancelMoveHotspot?.();
           }
         }
       } else if (drawMode === 'adjust') {
@@ -183,7 +212,7 @@ export function HotspotCanvas({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isEditing, isOnline, drawMode, currentPoints, rectStage, rectBounds, reshapingHotspot, onConfirmReshape, onCancelReshape]);
+  }, [isEditing, isOnline, drawMode, currentPoints, rectStage, rectBounds, reshapingHotspot, movingHotspot, onConfirmReshape, onCancelReshape, onConfirmMoveHotspot, onCancelMoveHotspot]);
 
   const getNormalizedPoint = (e: React.PointerEvent) => {
     if (!containerRef.current) return { x: 0, y: 0 };
@@ -258,6 +287,9 @@ export function HotspotCanvas({
           if (reshapingHotspot) {
             onConfirmReshape?.(reshapingHotspot.id, currentPoints);
             setCurrentPoints([]);
+          } else if (movingHotspot) {
+            onConfirmMoveHotspot?.(movingHotspot.hotspot.id, currentPoints);
+            setCurrentPoints([]);
           } else {
             setShowConfig(true);
           }
@@ -325,6 +357,9 @@ export function HotspotCanvas({
       if (currentPoints.length > 3) {
         if (reshapingHotspot) {
           onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+          setCurrentPoints([]);
+        } else if (movingHotspot) {
+          onConfirmMoveHotspot?.(movingHotspot.hotspot.id, currentPoints);
           setCurrentPoints([]);
         } else {
           setShowConfig(true);
@@ -833,6 +868,27 @@ export function HotspotCanvas({
               </div>
             )}
 
+            {movingHotspot && (
+              <div className="bg-purple-950/90 text-purple-200 border border-purple-600/70 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-sm animate-pulse">
+                <ArrowRightLeft className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                <span>
+                  Moving <strong>&quot;{movingHotspot.hotspot.label}&quot;</strong> to this view — Draw new boundary outline with Polygon, Rect, or Freehand.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentPoints([]);
+                    setIsDrawing(false);
+                    resetRectangleState();
+                    onCancelMoveHotspot?.();
+                  }}
+                  className="ml-2 px-2 py-0.5 bg-[#252320] hover:bg-[#332f2a] text-white text-[11px] rounded border border-purple-400/40"
+                >
+                  Cancel Move
+                </button>
+              </div>
+            )}
+
             {drawMode === 'adjust' && (
               <div className="flex flex-wrap items-center gap-2">
                 <div className="bg-sky-950/80 text-sky-200 border border-sky-600/60 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-sm">
@@ -927,6 +983,10 @@ export function HotspotCanvas({
                         ];
                         if (reshapingHotspot) {
                           onConfirmReshape?.(reshapingHotspot.id, pts);
+                          resetRectangleState();
+                          setCurrentPoints([]);
+                        } else if (movingHotspot) {
+                          onConfirmMoveHotspot?.(movingHotspot.hotspot.id, pts);
                           resetRectangleState();
                           setCurrentPoints([]);
                         } else {

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { InsertIntermediateModal } from "./InsertIntermediateModal";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw } from "lucide-react";
+import { MoveHotspotModal } from "./MoveHotspotModal";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -130,6 +131,22 @@ export type UndoAction =
         previousActivePhotoId: string | null;
         previousBreadcrumbChain: { id: string; label: string }[];
       };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'move_hotspot';
+      description: string;
+      data: {
+        hotspotId: string;
+        sourcePhotoId: string;
+        targetPhotoId: string;
+        previousShapePoints: { x: number; y: number }[];
+        newShapePoints: { x: number; y: number }[];
+        previousBreadcrumbChain: { id: string; label: string }[];
+        targetBreadcrumbChain: { id: string; label: string }[];
+        hotspotLabel: string;
+      };
     };
 
 const MAX_UNDO_STACK_SIZE = 50;
@@ -163,6 +180,12 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     childPhoto: SpatialPhoto;
   } | null>(null);
   const [isInsertingIntermediate, setIsInsertingIntermediate] = useState(false);
+  const [targetMoveHotspot, setTargetMoveHotspot] = useState<SpatialHotspot | null>(null);
+  const [activeMoveSession, setActiveMoveSession] = useState<{
+    hotspot: SpatialHotspot;
+    sourcePhotoId: string;
+    sourceBreadcrumbChain: { id: string; label: string }[];
+  } | null>(null);
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   
@@ -403,6 +426,119 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
 
   const handleCancelReshape = () => {
     setReshapingHotspot(null);
+  };
+
+  const handleStartMoveHotspot = (hotspot: SpatialHotspot) => {
+    setTargetMoveHotspot(hotspot);
+    setEditingHotspot(null);
+    setShowHotspotsList(false);
+    setSelectedLeafHotspot(null);
+  };
+
+  const handleSelectMoveDestination = async (destinationPhoto: SpatialPhoto) => {
+    if (!targetMoveHotspot) return;
+    const sourcePhotoId = activePhotoId || targetMoveHotspot.photo_id;
+    const sourceBreadcrumbChain = JSON.parse(JSON.stringify(breadcrumbChain));
+
+    setActiveMoveSession({
+      hotspot: targetMoveHotspot,
+      sourcePhotoId,
+      sourceBreadcrumbChain
+    });
+    setTargetMoveHotspot(null);
+
+    // Navigate into destination photo
+    setIsEditing(true);
+    setReshapingHotspot(null);
+    setSelectedLeafHotspot(null);
+    setHighlightedHotspotId(null);
+    setPendingChildUpload(null);
+    setShowHotspotsList(false);
+    setInsertIntermediateTarget(null);
+
+    // Ensure destination photo is in local photos array (supports cross-room or newly loaded views)
+    setPhotos(prev => {
+      if (prev.some(p => p.id === destinationPhoto.id)) return prev;
+      return [...prev, destinationPhoto];
+    });
+
+    setActivePhotoId(destinationPhoto.id);
+
+    if (destinationPhoto.parent_hotspot_id) {
+      try {
+        const path = await getFullHotspotPath(destinationPhoto.parent_hotspot_id);
+        const photoNodes = path.filter(p => p.type === 'photo');
+        setBreadcrumbChain([
+          ...photoNodes.map(p => ({ id: p.id, label: p.label })),
+          { id: destinationPhoto.id, label: destinationPhoto.label || 'View' }
+        ]);
+      } catch {
+        setBreadcrumbChain(prev => [
+          ...prev.slice(0, 1),
+          { id: destinationPhoto.id, label: destinationPhoto.label || 'View' }
+        ]);
+      }
+    } else {
+      setBreadcrumbChain([{ id: destinationPhoto.id, label: destinationPhoto.label || 'Root' }]);
+    }
+  };
+
+  const handleConfirmMoveHotspot = async (hotspotId: string, newPoints: { x: number; y: number }[]) => {
+    if (!activeMoveSession || !activePhotoId) return;
+    const { hotspot, sourcePhotoId, sourceBreadcrumbChain } = activeMoveSession;
+    const targetPhotoId = activePhotoId;
+    const targetBreadcrumbChain = JSON.parse(JSON.stringify(breadcrumbChain));
+
+    try {
+      await moveSpatialHotspot({
+        hotspotId,
+        newPhotoId: targetPhotoId,
+        newShapePoints: newPoints
+      });
+
+      // 1. Record undo action
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'move_hotspot',
+        description: `Move hotspot "${hotspot.label}"`,
+        data: {
+          hotspotId,
+          sourcePhotoId,
+          targetPhotoId,
+          previousShapePoints: hotspot.shape_points || [],
+          newShapePoints: newPoints,
+          previousBreadcrumbChain: sourceBreadcrumbChain,
+          targetBreadcrumbChain,
+          hotspotLabel: hotspot.label
+        }
+      });
+
+      // 2. Add moved hotspot to active photo's local hotspots
+      const movedHotspot: SpatialHotspot = {
+        ...hotspot,
+        photo_id: targetPhotoId,
+        shape_points: newPoints
+      };
+      setHotspots(prev => [...prev.filter(h => h.id !== hotspotId), movedHotspot]);
+
+      // 3. Clear active move session
+      setActiveMoveSession(null);
+
+      setReplaceImageNotice(`Moved "${hotspot.label}" to this view! All child views and components preserved.`);
+      setTimeout(() => setReplaceImageNotice(null), 6000);
+    } catch (err: any) {
+      console.error("Failed to move hotspot:", err);
+      alert(err.message || "Failed to move hotspot");
+    }
+  };
+
+  const handleCancelMoveHotspot = () => {
+    if (!activeMoveSession) return;
+    const { sourcePhotoId, sourceBreadcrumbChain } = activeMoveSession;
+    setActivePhotoId(sourcePhotoId);
+    setBreadcrumbChain(sourceBreadcrumbChain);
+    setActiveMoveSession(null);
   };
 
   const handleBatchUpdateHotspots = async (updates: { id: string; shape_points: { x: number; y: number }[] }[]) => {
@@ -829,6 +965,27 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             setBreadcrumbChain(previousBreadcrumbChain);
             await loadHotspots(previousActivePhotoId);
           }
+          break;
+        }
+
+        case 'move_hotspot': {
+          const { hotspotId, sourcePhotoId, targetPhotoId, previousShapePoints, previousBreadcrumbChain } = action.data;
+          await moveSpatialHotspot({
+            hotspotId,
+            newPhotoId: sourcePhotoId,
+            newShapePoints: previousShapePoints
+          });
+
+          if (activePhotoId === targetPhotoId) {
+            setHotspots(prev => prev.filter(h => h.id !== hotspotId));
+          }
+
+          const currentRoomPhotos = await getPhotosForRoom(roomId);
+          setPhotos(currentRoomPhotos);
+
+          setActivePhotoId(sourcePhotoId);
+          setBreadcrumbChain(previousBreadcrumbChain);
+          await loadHotspots(sourcePhotoId);
           break;
         }
       }
@@ -1423,6 +1580,19 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setShowHotspotsList(false);
+                                      handleStartMoveHotspot(hs);
+                                    }}
+                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded transition-colors"
+                                    title={`Move "${hs.label}" and its contents to another view`}
+                                  >
+                                    <ArrowRightLeft className="h-3 w-3" />
+                                    <span>Move</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setShowHotspotsList(false);
                                       handleStartReshape(hs);
                                     }}
                                     className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded transition-colors"
@@ -1760,9 +1930,11 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               isEditing={isEditing}
               highlightedHotspotId={highlightedHotspotId}
               reshapingHotspot={reshapingHotspot}
+              movingHotspot={activeMoveSession ? { hotspot: activeMoveSession.hotspot, sourcePhotoId: activeMoveSession.sourcePhotoId } : null}
               onCancelEdit={() => {
                 setIsEditing(false);
                 setReshapingHotspot(null);
+                setActiveMoveSession(null);
               }}
               onHotspotCreated={handleHotspotCreated}
               onHotspotClick={handleHotspotClick}
@@ -1770,6 +1942,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               onHotspotEdit={setEditingHotspot}
               onConfirmReshape={handleConfirmReshape}
               onCancelReshape={handleCancelReshape}
+              onConfirmMoveHotspot={handleConfirmMoveHotspot}
+              onCancelMoveHotspot={handleCancelMoveHotspot}
               onBatchUpdateHotspots={handleBatchUpdateHotspots}
               onUndo={handleUndo}
               canUndo={undoStack.length > 0 && !isUndoing}
@@ -1794,6 +1968,13 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               <div className="flex items-center gap-1 shrink-0">
                 {isOnline && (
                   <>
+                    <button 
+                      onClick={() => handleStartMoveHotspot(selectedLeafHotspot)}
+                      className="p-1.5 text-brand-text-muted hover:text-purple-400 hover:bg-purple-500/10 rounded transition-colors"
+                      title={`Move "${selectedLeafHotspot.label}" to another view`}
+                    >
+                      <ArrowRightLeft className="h-4 w-4" />
+                    </button>
                     <button 
                       onClick={() => handleStartReshape(selectedLeafHotspot)}
                       className="p-1.5 text-brand-text-muted hover:text-sky-400 hover:bg-sky-500/10 rounded transition-colors"
@@ -2023,6 +2204,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             handleUpdateHotspotDetails(editingHotspot.id, label, isLeaf);
           }}
           onRedrawShape={() => handleStartReshape(editingHotspot)}
+          onMoveHotspot={() => handleStartMoveHotspot(editingHotspot)}
           onInsertIntermediate={
             !editingHotspot.is_leaf && editingHotspot.child_photo_id
               ? () => handleOpenInsertIntermediate(editingHotspot)
@@ -2038,6 +2220,17 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           isSubmitting={isInsertingIntermediate}
           onClose={() => setInsertIntermediateTarget(null)}
           onSubmit={handleExecuteInsertIntermediate}
+        />
+      )}
+
+      {targetMoveHotspot && (
+        <MoveHotspotModal
+          hotspot={targetMoveHotspot}
+          currentPhotoId={activePhotoId || targetMoveHotspot.photo_id}
+          photos={photos}
+          allHotspots={hotspots}
+          onClose={() => setTargetMoveHotspot(null)}
+          onSelectDestination={handleSelectMoveDestination}
         />
       )}
     </div>

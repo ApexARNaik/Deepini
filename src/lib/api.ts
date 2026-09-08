@@ -890,7 +890,158 @@ export async function restoreDeletedSpatialPhotoTree(
   }
 }
 
+export async function moveSpatialHotspot(params: {
+  hotspotId: string;
+  newPhotoId: string;
+  newShapePoints: { x: number; y: number }[];
+}): Promise<{
+  success: boolean;
+  hotspot_id: string;
+  source_photo_id: string;
+  destination_photo_id: string;
+  source_room_id?: string;
+  destination_room_id?: string;
+}> {
+  if (typeof window === 'undefined' || navigator.onLine) {
+    const { data, error: rpcErr } = await supabase.rpc('move_spatial_hotspot', {
+      p_hotspot_id: params.hotspotId,
+      p_new_photo_id: params.newPhotoId,
+      p_new_shape_points: params.newShapePoints
+    });
 
+    if (!rpcErr && data) {
+      if (typeof window !== 'undefined') {
+        try {
+          await db.spatial_hotspots.update(params.hotspotId, {
+            photo_id: params.newPhotoId,
+            shape_points: params.newShapePoints
+          });
+          if (data.source_room_id && data.destination_room_id && data.source_room_id !== data.destination_room_id) {
+            const allPhotos = await db.spatial_photos.toArray();
+            const allHotspots = await db.spatial_hotspots.toArray();
+            const descendantPhotoIds = new Set<string>();
+            const traverse = (pId: string) => {
+              descendantPhotoIds.add(pId);
+              const childHs = allHotspots.filter(h => h.photo_id === pId);
+              for (const ch of childHs) {
+                if (ch.child_photo_id) traverse(ch.child_photo_id);
+              }
+            };
+            const directChildPhoto = allPhotos.find(p => p.parent_hotspot_id === params.hotspotId);
+            if (directChildPhoto) traverse(directChildPhoto.id);
+            for (const dpId of descendantPhotoIds) {
+              await db.spatial_photos.update(dpId, { room_id: data.destination_room_id });
+            }
+          }
+        } catch (dbErr) {
+          console.warn("Offline db sync error on moveSpatialHotspot:", dbErr);
+        }
+      }
+      return data;
+    }
+
+    if (rpcErr) {
+      console.warn("RPC move_spatial_hotspot failed or unmigrated, executing fallback:", rpcErr);
+    }
+  }
+
+  // Fallback client-side logic
+  const [hsRes, destPhotoRes] = await Promise.all([
+    supabase.from('spatial_hotspots').select('*').eq('id', params.hotspotId).single(),
+    supabase.from('spatial_photos').select('*').eq('id', params.newPhotoId).single()
+  ]);
+  if (hsRes.error || !hsRes.data) throw new Error("Hotspot not found");
+  if (destPhotoRes.error || !destPhotoRes.data) throw new Error("Destination view not found");
+
+  const hotspot = hsRes.data;
+  const destPhoto = destPhotoRes.data;
+
+  if (hotspot.photo_id === params.newPhotoId) {
+    throw new Error("Cannot move hotspot onto the same source view");
+  }
+
+  // Check valid room
+  const { data: roomData, error: roomErr } = await supabase.from('rooms').select('id').eq('id', destPhoto.room_id).single();
+  if (roomErr || !roomData) {
+    throw new Error("Destination view does not belong to a valid room");
+  }
+
+  // Cycle prevention and hierarchy check
+  const { data: allPhotos } = await supabase.from('spatial_photos').select('id, parent_hotspot_id, room_id');
+  const { data: allHotspots } = await supabase.from('spatial_hotspots').select('id, photo_id, child_photo_id');
+  const photoMap = new Map((allPhotos || []).map(p => [p.id, p]));
+
+  // Validate parent_hotspot_id relationship consistency
+  if (hotspot.child_photo_id) {
+    const childPhoto = (allPhotos || []).find(p => p.id === hotspot.child_photo_id);
+    if (childPhoto && childPhoto.parent_hotspot_id && childPhoto.parent_hotspot_id !== params.hotspotId) {
+      throw new Error(`Inconsistent hierarchy: child photo has parent_hotspot_id ${childPhoto.parent_hotspot_id}, expected ${params.hotspotId}`);
+    }
+  }
+
+  const descendantPhotoIds = new Set<string>();
+  const collectDescendants = (hId: string) => {
+    const hs = (allHotspots || []).find(h => h.id === hId);
+    const directChildren = (allPhotos || []).filter(p => p.parent_hotspot_id === hId || (hs?.child_photo_id && p.id === hs.child_photo_id));
+    for (const directChild of directChildren) {
+      if (!descendantPhotoIds.has(directChild.id)) {
+        descendantPhotoIds.add(directChild.id);
+        const childHsList = (allHotspots || []).filter(h => h.photo_id === directChild.id);
+        for (const ch of childHsList) {
+          collectDescendants(ch.id);
+        }
+      }
+    }
+  };
+  collectDescendants(params.hotspotId);
+
+  if (descendantPhotoIds.has(params.newPhotoId)) {
+    throw new Error("Destination view is a descendant of this hotspot; cyclic move rejected");
+  }
+
+  const sourcePhoto = photoMap.get(hotspot.photo_id);
+
+  // Update hotspot
+  const { error: upErr } = await supabase
+    .from('spatial_hotspots')
+    .update({ photo_id: params.newPhotoId, shape_points: params.newShapePoints, updated_at: new Date().toISOString() })
+    .eq('id', params.hotspotId);
+  if (upErr) throw upErr;
+
+  // Propagate room_id to descendant photos if different
+  if (sourcePhoto && sourcePhoto.room_id !== destPhoto.room_id && descendantPhotoIds.size > 0) {
+    await supabase
+      .from('spatial_photos')
+      .update({ room_id: destPhoto.room_id, updated_at: new Date().toISOString() })
+      .in('id', Array.from(descendantPhotoIds));
+  }
+
+  // Dexie sync
+  if (typeof window !== 'undefined') {
+    try {
+      await db.spatial_hotspots.update(params.hotspotId, {
+        photo_id: params.newPhotoId,
+        shape_points: params.newShapePoints
+      });
+      if (sourcePhoto && sourcePhoto.room_id !== destPhoto.room_id) {
+        for (const dpId of descendantPhotoIds) {
+          await db.spatial_photos.update(dpId, { room_id: destPhoto.room_id });
+        }
+      }
+    } catch (dbErr) {
+      console.warn("Offline db sync error in fallback:", dbErr);
+    }
+  }
+
+  return {
+    success: true,
+    hotspot_id: params.hotspotId,
+    source_photo_id: hotspot.photo_id,
+    destination_photo_id: params.newPhotoId,
+    source_room_id: sourcePhoto?.room_id,
+    destination_room_id: destPhoto.room_id
+  };
+}
 
 export async function insertIntermediateSpatialPhoto(params: {
   roomId: string;
