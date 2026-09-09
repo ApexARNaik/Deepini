@@ -7,7 +7,8 @@ import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { InsertIntermediateModal } from "./InsertIntermediateModal";
 import { MoveHotspotModal } from "./MoveHotspotModal";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal } from "lucide-react";
+import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -208,6 +209,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [allInventory, setAllInventory] = useState<ComponentWithTotals[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddingComponent, setIsAddingComponent] = useState(false);
+  const [quickViewComponentId, setQuickViewComponentId] = useState<string | null>(null);
+  const [isExtendedHotspotsView, setIsExtendedHotspotsView] = useState(false);
 
   useEffect(() => {
     getInventory().then(setAllInventory).catch(console.error);
@@ -226,6 +229,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       setHotspots([]);
     }
     setHotspotSearchFilter("");
+    setHighlightedHotspotId(null);
+    setIsExtendedHotspotsView(false);
   }, [activePhotoId]);
 
   const loadRoomData = async () => {
@@ -2041,136 +2046,222 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   </div>
                 </div>
 
-                {hotspots.length > 3 && (
-                  <div className="relative w-full sm:w-56">
-                    <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-brand-text-muted" />
-                    <input
-                      type="text"
-                      value={hotspotSearchFilter}
-                      onChange={(e) => setHotspotSearchFilter(e.target.value)}
-                      placeholder="Filter hotspots..."
-                      className="w-full bg-[#0d0c0b] border border-[#332f2a] rounded pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {hotspots.filter(h => !hotspotSearchFilter || h.label.toLowerCase().includes(hotspotSearchFilter.toLowerCase())).length === 0 ? (
-                <div className="text-center py-6 text-xs text-brand-text-muted border border-dashed border-[#2d2924] rounded-md p-4 bg-black/20">
-                  {hotspots.length === 0 ? (
-                    <>
-                      <MapPin className="h-5 w-5 mx-auto mb-1.5 text-brand-text-muted/60" />
-                      <span>No hotspots created on this view yet.</span>
-                      {isEditing && (
-                        <span className="block mt-1 text-brand-accent/80">Use Polygon, Rectangle, or Freehand above to trace a storage region.</span>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  {hotspots.filter(h => !hotspotSearchFilter || h.label.toLowerCase().includes(hotspotSearchFilter.toLowerCase())).length > 8 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsExtendedHotspotsView(prev => !prev)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded border transition-all shrink-0 ${
+                        isExtendedHotspotsView
+                          ? 'bg-brand-accent/20 border-brand-accent text-brand-accent shadow-sm'
+                          : 'bg-[#141311] border-[#332f2a] hover:border-[#4a443c] text-brand-text hover:text-white'
+                      }`}
+                      title={isExtendedHotspotsView ? "Collapse to 8 hotspots" : "Extend view to 16 hotspots (scrollable)"}
+                    >
+                      {isExtendedHotspotsView ? (
+                        <>
+                          <ChevronUp className="h-3.5 w-3.5 text-brand-accent" />
+                          <span>Show 8</span>
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="h-3.5 w-3.5 text-brand-accent" />
+                          <span>Extend to 16</span>
+                        </>
                       )}
-                    </>
-                  ) : (
-                    <span>No hotspots match &quot;{hotspotSearchFilter}&quot;</span>
+                    </button>
+                  )}
+
+                  {hotspots.length > 3 && (
+                    <div className="relative w-full sm:w-52">
+                      <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-brand-text-muted" />
+                      <input
+                        type="text"
+                        value={hotspotSearchFilter}
+                        onChange={(e) => setHotspotSearchFilter(e.target.value)}
+                        placeholder="Filter hotspots..."
+                        className="w-full bg-[#0d0c0b] border border-[#332f2a] rounded pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none"
+                      />
+                    </div>
                   )}
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2.5">
-                  {hotspots
-                    .filter(h => !hotspotSearchFilter || h.label.toLowerCase().includes(hotspotSearchFilter.toLowerCase()))
-                    .map((hs) => {
-                      const isHighlighted = highlightedHotspotId === hs.id;
-                      const isSelectedLeaf = selectedLeafHotspot?.id === hs.id;
-                      const isActive = isHighlighted || isSelectedLeaf;
+              </div>
 
-                      return (
-                        <div
-                          key={hs.id}
-                          onClick={() => {
-                            setHighlightedHotspotId(hs.id);
-                            handleHotspotClick(hs);
-                          }}
-                          onMouseEnter={() => setHighlightedHotspotId(hs.id)}
-                          className={`p-3 rounded border transition-all cursor-pointer group flex flex-col justify-between ${
-                            isActive
-                              ? 'bg-brand-accent/20 border-brand-accent shadow-[0_0_12px_rgba(188,115,83,0.3)] ring-1 ring-brand-accent'
-                              : 'bg-[#1a1816]/70 border-[#2d2924] hover:border-[#4a443c] hover:bg-[#1a1816]'
-                          }`}
-                          title={hs.is_leaf ? `Open contents for "${hs.label}"` : `Drill down into "${hs.label}"`}
-                        >
-                          <div className="flex items-start justify-between gap-2 min-w-0">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div className={`p-1.5 rounded shrink-0 transition-colors ${
-                                isActive 
-                                  ? 'bg-brand-accent text-white' 
-                                  : 'bg-[#252320] text-brand-text-muted group-hover:text-brand-accent'
-                              }`}>
-                                {hs.is_leaf ? <Archive className="h-3.5 w-3.5" /> : <Layers className="h-3.5 w-3.5" />}
-                              </div>
-                              <div className="min-w-0">
-                                <div className={`text-sm font-bold truncate transition-colors ${
-                                  isActive ? 'text-white' : 'text-white/90 group-hover:text-brand-accent'
-                                }`}>
-                                  {hs.label}
-                                </div>
-                                <div className="text-[10px] text-brand-text-muted tracking-wider uppercase font-mono mt-0.5 flex items-center gap-1">
-                                  <span>{hs.is_leaf ? "Storage Location" : "Opens Sub-View"}</span>
-                                </div>
-                              </div>
-                            </div>
-                            <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${
-                              isActive ? 'text-brand-accent translate-x-0.5' : 'text-brand-text-muted group-hover:text-white'
-                            }`} />
-                          </div>
+              {(() => {
+                // 1. Filter and Alphanumeric Sort (natural numeric ordering first)
+                const filteredSortedHotspots = [...hotspots]
+                  .filter(h => !hotspotSearchFilter || h.label.toLowerCase().includes(hotspotSearchFilter.toLowerCase()))
+                  .sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, { numeric: true, sensitivity: 'base' }));
 
-                          {isEditing && isOnline && (
-                            <div className="mt-2.5 pt-2 border-t border-[#262320] flex items-center justify-end gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleStartMoveHotspot(hs);
-                                }}
-                                className="p-1 rounded text-brand-text-muted hover:text-purple-400 hover:bg-purple-500/10 transition-colors"
-                                title={`Move "${hs.label}" to another view`}
-                              >
-                                <ArrowRightLeft className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleStartReshape(hs);
-                                }}
-                                className="p-1 rounded text-brand-text-muted hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
-                                title={`Redraw boundary for "${hs.label}"`}
-                              >
-                                <Crop className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingHotspot(hs);
-                                }}
-                                className="p-1 rounded text-brand-text-muted hover:text-brand-accent hover:bg-brand-accent/10 transition-colors"
-                                title={`Edit "${hs.label}"`}
-                              >
-                                <Edit2 className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteHotspot(hs);
-                                }}
-                                className="p-1 rounded text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                                title={`Delete "${hs.label}"`}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
+                if (filteredSortedHotspots.length === 0) {
+                  return (
+                    <div className="text-center py-6 text-xs text-brand-text-muted border border-dashed border-[#2d2924] rounded-md p-4 bg-black/20">
+                      {hotspots.length === 0 ? (
+                        <>
+                          <MapPin className="h-5 w-5 mx-auto mb-1.5 text-brand-text-muted/60" />
+                          <span>No hotspots created on this view yet.</span>
+                          {isEditing && (
+                            <span className="block mt-1 text-brand-accent/80">Use Polygon, Rectangle, or Freehand above to trace a storage region.</span>
                           )}
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
+                        </>
+                      ) : (
+                        <span>No hotspots match &quot;{hotspotSearchFilter}&quot;</span>
+                      )}
+                    </div>
+                  );
+                }
+
+                // 2. Limit display to 8 items by default, or 16 when extended
+                const displayLimit = isExtendedHotspotsView ? 16 : 8;
+                const displayedHotspots = filteredSortedHotspots.slice(0, displayLimit);
+
+                return (
+                  <div className="space-y-3">
+                    <div 
+                      onMouseLeave={() => setHighlightedHotspotId(null)}
+                      className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2.5 ${
+                        isExtendedHotspotsView ? 'max-h-[300px] overflow-y-auto pr-1.5' : ''
+                      }`}
+                    >
+                      {displayedHotspots.map((hs) => {
+                        const isHovered = highlightedHotspotId === hs.id;
+                        const isSelectedLeaf = selectedLeafHotspot?.id === hs.id;
+
+                        return (
+                          <div
+                            key={hs.id}
+                            onClick={() => {
+                              setHighlightedHotspotId(hs.id);
+                              handleHotspotClick(hs);
+                            }}
+                            onMouseEnter={() => setHighlightedHotspotId(hs.id)}
+                            onMouseLeave={() => setHighlightedHotspotId(null)}
+                            className={`p-3 rounded border transition-all cursor-pointer group flex flex-col justify-between ${
+                              isHovered
+                                ? 'bg-brand-accent/20 border-brand-accent shadow-[0_0_12px_rgba(188,115,83,0.3)] ring-1 ring-brand-accent'
+                                : isSelectedLeaf
+                                  ? 'bg-[#1f1d1a] border-[#4a443c] ring-1 ring-white/10'
+                                  : 'bg-[#1a1816]/70 border-[#2d2924] hover:border-[#4a443c] hover:bg-[#1a1816]'
+                            }`}
+                            title={hs.is_leaf ? `Open contents for "${hs.label}"` : `Drill down into "${hs.label}"`}
+                          >
+                            <div className="flex items-start justify-between gap-2 min-w-0">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className={`p-1.5 rounded shrink-0 transition-colors ${
+                                  isHovered 
+                                    ? 'bg-brand-accent text-white' 
+                                    : isSelectedLeaf
+                                      ? 'bg-brand-accent/25 text-brand-accent'
+                                      : 'bg-[#252320] text-brand-text-muted group-hover:text-brand-accent'
+                                }`}>
+                                  {hs.is_leaf ? <Archive className="h-3.5 w-3.5" /> : <Layers className="h-3.5 w-3.5" />}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className={`text-sm font-bold truncate transition-colors ${
+                                    isHovered 
+                                      ? 'text-white' 
+                                      : isSelectedLeaf 
+                                        ? 'text-white' 
+                                        : 'text-white/90 group-hover:text-brand-accent'
+                                  }`}>
+                                    {hs.label}
+                                  </div>
+                                  <div className="text-[10px] text-brand-text-muted tracking-wider uppercase font-mono mt-0.5 flex items-center gap-1.5">
+                                    <span>{hs.is_leaf ? "Storage Location" : "Opens Sub-View"}</span>
+                                    {isSelectedLeaf && (
+                                      <span className="text-[9px] text-brand-accent font-semibold px-1 py-0.2 rounded bg-brand-accent/15 border border-brand-accent/30 lowercase">
+                                        open
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${
+                                isHovered ? 'text-brand-accent translate-x-0.5' : 'text-brand-text-muted group-hover:text-white'
+                              }`} />
+                            </div>
+
+                            {isEditing && isOnline && (
+                              <div className="mt-2.5 pt-2 border-t border-[#262320] flex items-center justify-end gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStartMoveHotspot(hs);
+                                  }}
+                                  className="p-1 rounded text-brand-text-muted hover:text-purple-400 hover:bg-purple-500/10 transition-colors"
+                                  title={`Move "${hs.label}" to another view`}
+                                >
+                                  <ArrowRightLeft className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStartReshape(hs);
+                                  }}
+                                  className="p-1 rounded text-brand-text-muted hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
+                                  title={`Redraw boundary for "${hs.label}"`}
+                                >
+                                  <Crop className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingHotspot(hs);
+                                  }}
+                                  className="p-1 rounded text-brand-text-muted hover:text-brand-accent hover:bg-brand-accent/10 transition-colors"
+                                  title={`Edit "${hs.label}"`}
+                                >
+                                  <Edit2 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteHotspot(hs);
+                                  }}
+                                  className="p-1 rounded text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                  title={`Delete "${hs.label}"`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {filteredSortedHotspots.length > 8 && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#262320] text-xs text-brand-text-muted">
+                        <span>
+                          Showing {displayedHotspots.length} of {filteredSortedHotspots.length} hotspots
+                          {filteredSortedHotspots.length > 16 && isExtendedHotspotsView && " (capped at 16, scrollable)"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsExtendedHotspotsView(prev => !prev)}
+                          className="text-xs text-brand-accent hover:underline flex items-center gap-1 font-semibold transition-colors"
+                        >
+                          {isExtendedHotspotsView ? (
+                            <>
+                              <ChevronUp className="h-3.5 w-3.5" />
+                              <span>Collapse to 8 hotspots</span>
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="h-3.5 w-3.5" />
+                              <span>Extend to 16 hotspots (scrollable)</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -2265,9 +2356,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 <div className="flex flex-col gap-2">
                   {leafComponents.map(lc => (
                     <div key={lc.component_id} className="flex items-center justify-between bg-black/40 border border-[#332f2a] p-2.5 rounded group hover:border-[#4a443c] transition-colors">
-                      <div className="flex flex-col flex-1 min-w-0 mr-2">
+                      <div 
+                        onClick={() => setQuickViewComponentId(lc.component_id)}
+                        className="flex flex-col flex-1 min-w-0 mr-2 cursor-pointer group/item"
+                        title="Click to view item details"
+                      >
                         <div className="flex items-center gap-1.5">
-                          <span className="text-sm text-white font-medium truncate">{lc.components?.name || "Unknown Item"}</span>
+                          <span className="text-sm text-white font-medium truncate group-hover/item:text-brand-accent transition-colors">
+                            {lc.components?.name || "Unknown Item"}
+                          </span>
                           {isPersonalItem(lc.components) && (
                             <span className="text-[9px] px-1.5 py-0.5 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
                               Personal
@@ -2275,10 +2372,12 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                           )}
                         </div>
                         {lc.components?.notes && (
-                          <span className="text-[10px] text-brand-text-muted truncate">{lc.components.notes}</span>
+                          <span className="text-[10px] text-brand-text-muted truncate group-hover/item:text-brand-text transition-colors">
+                            {lc.components.notes}
+                          </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
                         {/* Quantity Stepper */}
                         <div className="flex items-center border border-[#332f2a] rounded overflow-hidden bg-[#141311]">
                           <button
@@ -2388,9 +2487,22 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                             Total: {c.totals?.total_owned_qty ?? 0} | In storage: {c.totals?.in_storage_qty ?? 0}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1 text-xs text-brand-accent font-bold px-2 py-1 bg-brand-accent/10 rounded group-hover:bg-brand-accent group-hover:text-white transition-colors shrink-0">
-                          <Plus className="h-3.5 w-3.5" />
-                          <span>Add</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span
+                            role="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQuickViewComponentId(c.id);
+                            }}
+                            className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#332f2a] rounded transition-colors"
+                            title="Preview item details"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </span>
+                          <div className="flex items-center gap-1 text-xs text-brand-accent font-bold px-2 py-1 bg-brand-accent/10 rounded group-hover:bg-brand-accent group-hover:text-white transition-colors">
+                            <Plus className="h-3.5 w-3.5" />
+                            <span>Add</span>
+                          </div>
                         </div>
                       </button>
                     ))}
@@ -2448,6 +2560,14 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           onSelectDestination={handleSelectMoveDestination}
         />
       )}
+
+      {/* Component Quick View Modal */}
+      <ComponentQuickViewModal
+        componentId={quickViewComponentId}
+        isOpen={!!quickViewComponentId}
+        onClose={() => setQuickViewComponentId(null)}
+        currentHotspotId={selectedLeafHotspot?.id}
+      />
     </div>
   );
 }

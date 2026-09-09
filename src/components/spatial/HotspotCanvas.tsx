@@ -757,76 +757,6 @@ export function HotspotCanvas({
             >
               Freehand
             </button>
-            
-            <div className="h-4 w-px bg-[#332f2a] mx-1" />
-
-            <button 
-              type="button"
-              onClick={() => { 
-                if (drawMode === 'adjust') {
-                  setDrawMode('polygon');
-                  setAdjustBounds(null);
-                  setAdjustedHotspots([]);
-                } else {
-                  setDrawMode('adjust');
-                  setCurrentPoints([]);
-                  setIsDrawing(false);
-                  setPolygonMousePos(null);
-                  resetRectangleState();
-                  initAdjustMode();
-                }
-              }}
-              disabled={hotspots.length === 0}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
-                drawMode === 'adjust' 
-                  ? 'bg-sky-600 text-white shadow-md' 
-                  : 'text-sky-400/90 hover:text-sky-300 hover:bg-sky-500/10 disabled:opacity-40 disabled:pointer-events-none'
-              }`}
-              title="Adjust, scale, or move all hotspots collectively (Fit / Adjust Hotspots)"
-            >
-              <Sliders className="h-3.5 w-3.5" />
-              <span>Adjust Hotspots</span>
-            </button>
-
-            <button 
-              type="button"
-              onClick={() => { 
-                setDrawMode('edit'); 
-                setCurrentPoints([]); 
-                setIsDrawing(false); 
-                setPolygonMousePos(null);
-                resetRectangleState();
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
-                drawMode === 'edit' 
-                  ? 'bg-amber-600 text-white shadow-md' 
-                  : 'text-amber-400/90 hover:text-amber-300 hover:bg-amber-500/10'
-              }`}
-              title="Click to select and edit unsaved image hotspots (name and storage type)"
-            >
-              <Edit2 className="h-3.5 w-3.5" />
-              <span>Edit Hotspot</span>
-            </button>
-
-            <button 
-              type="button"
-              onClick={() => { 
-                setDrawMode('delete'); 
-                setCurrentPoints([]); 
-                setIsDrawing(false); 
-                setPolygonMousePos(null);
-                resetRectangleState();
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
-                drawMode === 'delete' 
-                  ? 'bg-red-600 text-white shadow-md' 
-                  : 'text-red-400/90 hover:text-red-300 hover:bg-red-500/10'
-              }`}
-              title="Click to select and delete hotspots"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span>Delete Hotspot</span>
-            </button>
           </div>
 
           {/* Right: Contextual Status, Guidance & Quick Action Buttons */}
@@ -1015,6 +945,78 @@ export function HotspotCanvas({
                 <span>Click & drag on image to trace boundary.</span>
               </div>
             )}
+          </div>
+
+          {/* Right Corner: Minimized Action Icons */}
+          <div className="flex items-center gap-1 shrink-0 ml-auto">
+            <div className="h-4 w-px bg-[#332f2a] mx-1 hidden sm:block" />
+            <button 
+              type="button"
+              onClick={() => { 
+                if (drawMode === 'adjust') {
+                  setDrawMode('polygon');
+                  setAdjustBounds(null);
+                  setAdjustedHotspots([]);
+                } else {
+                  setDrawMode('adjust');
+                  setCurrentPoints([]);
+                  setIsDrawing(false);
+                  setPolygonMousePos(null);
+                  resetRectangleState();
+                  initAdjustMode();
+                }
+              }}
+              disabled={hotspots.length === 0}
+              className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition-colors ${
+                drawMode === 'adjust' 
+                  ? 'bg-sky-600 text-white shadow-md' 
+                  : 'text-sky-400 hover:text-sky-300 hover:bg-sky-500/15 disabled:opacity-30 disabled:pointer-events-none'
+              }`}
+              title="Adjust Hotspots"
+              aria-label="Adjust Hotspots"
+            >
+              <Sliders className="h-4 w-4" />
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => { 
+                setDrawMode(drawMode === 'edit' ? 'polygon' : 'edit'); 
+                setCurrentPoints([]); 
+                setIsDrawing(false); 
+                setPolygonMousePos(null);
+                resetRectangleState();
+              }}
+              className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition-colors ${
+                drawMode === 'edit' 
+                  ? 'bg-amber-600 text-white shadow-md' 
+                  : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/15'
+              }`}
+              title="Edit Hotspot"
+              aria-label="Edit Hotspot"
+            >
+              <Edit2 className="h-4 w-4" />
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => { 
+                setDrawMode(drawMode === 'delete' ? 'polygon' : 'delete'); 
+                setCurrentPoints([]); 
+                setIsDrawing(false); 
+                setPolygonMousePos(null);
+                resetRectangleState();
+              }}
+              className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition-colors ${
+                drawMode === 'delete' 
+                  ? 'bg-red-600 text-white shadow-md' 
+                  : 'text-red-400 hover:text-red-300 hover:bg-red-500/15'
+              }`}
+              title="Delete Hotspot"
+              aria-label="Delete Hotspot"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           </div>
         </div>
       )}
