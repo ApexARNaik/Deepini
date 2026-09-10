@@ -15,14 +15,16 @@ export function NetworkProvider({ children }: { children: React.ReactNode }) {
   }, [isOnline]);
 
   return (
-    <>
+    <div className="flex flex-col h-full w-full overflow-hidden">
       {!isOnline && (
-        <div className="bg-red-500/90 text-white text-xs font-bold uppercase tracking-widest p-2 flex items-center justify-center z-[100] relative shadow-md">
-          <WifiOff className="h-4 w-4 mr-2" />
-          You&apos;re offline &mdash; browsing cached data, editing disabled.
+        <div className="w-full bg-red-600 text-white text-[11px] font-semibold tracking-wider py-1 px-4 flex items-center justify-center gap-2 z-50 shrink-0 shadow-sm border-b border-red-700/60 select-none">
+          <WifiOff className="h-3.5 w-3.5 shrink-0 animate-pulse" />
+          <span>You&apos;re offline &mdash; browsing cached data, editing disabled.</span>
         </div>
       )}
-      {children}
-    </>
+      <div className="flex-1 min-h-0 w-full overflow-hidden flex flex-col">
+        {children}
+      </div>
+    </div>
   );
 }

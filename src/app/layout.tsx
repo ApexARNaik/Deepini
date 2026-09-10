@@ -42,7 +42,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} ${playfair.variable} dark h-full`}>
-      <body className="antialiased text-brand-text bg-brand-bg font-sans h-full overflow-hidden flex">
+      <body className="antialiased text-brand-text bg-brand-bg font-sans h-full w-full overflow-hidden flex flex-col">
         <NetworkProvider>
           <PasswordGate>
             <AppShell>
