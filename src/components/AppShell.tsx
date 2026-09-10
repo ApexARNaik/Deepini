@@ -26,6 +26,7 @@ import {
 import { useDebounce } from "@/hooks/useDebounce";
 import { getInventory, getRooms, ComponentWithTotals, Room, isPersonalItem } from "@/lib/api";
 import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
+import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -51,6 +52,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     rooms: []
   });
   const [quickViewComponentId, setQuickViewComponentId] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const debouncedSearch = useDebounce(searchQuery.trim(), 250);
@@ -381,11 +383,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                 className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
                               >
                                 {comp.photo_url ? (
-                                  <img
-                                    src={comp.photo_url}
-                                    alt={comp.name}
-                                    className="h-10 w-10 rounded object-cover border border-[#332f2a] shrink-0 bg-black/40"
-                                  />
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPreviewImage({
+                                        url: comp.photo_url!,
+                                        title: comp.name,
+                                        subtitle: personal ? "Personal Item Photo" : "Component Image"
+                                      });
+                                    }}
+                                    className="h-10 w-10 rounded overflow-hidden border border-[#332f2a] hover:border-brand-accent shrink-0 bg-black/40 cursor-zoom-in group/img block"
+                                    title="Click to view full image"
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={comp.photo_url}
+                                      alt={comp.name}
+                                      className="h-full w-full object-cover group-hover/img:scale-110 transition-transform duration-200"
+                                    />
+                                  </button>
                                 ) : (
                                   <div className="h-10 w-10 rounded bg-[#2a2622] border border-[#332f2a] flex items-center justify-center shrink-0">
                                     <Package className="h-5 w-5 text-brand-text-muted" />
@@ -552,6 +569,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         componentId={quickViewComponentId}
         isOpen={!!quickViewComponentId}
         onClose={() => setQuickViewComponentId(null)}
+      />
+
+      {/* Full Image Preview Modal */}
+      <ImagePreviewModal
+        isOpen={!!previewImage}
+        imageUrl={previewImage?.url || null}
+        title={previewImage?.title}
+        subtitle={previewImage?.subtitle}
+        onClose={() => setPreviewImage(null)}
       />
     </div>
   );

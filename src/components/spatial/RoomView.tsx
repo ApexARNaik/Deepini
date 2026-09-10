@@ -8,6 +8,7 @@ import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { InsertIntermediateModal } from "./InsertIntermediateModal";
 import { MoveHotspotModal } from "./MoveHotspotModal";
 import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
+import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
@@ -210,6 +211,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddingComponent, setIsAddingComponent] = useState(false);
   const [quickViewComponentId, setQuickViewComponentId] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const [isExtendedHotspotsView, setIsExtendedHotspotsView] = useState(false);
 
   useEffect(() => {
@@ -2356,26 +2358,46 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 <div className="flex flex-col gap-2">
                   {leafComponents.map(lc => (
                     <div key={lc.component_id} className="flex items-center justify-between bg-black/40 border border-[#332f2a] p-2.5 rounded group hover:border-[#4a443c] transition-colors">
-                      <div 
-                        onClick={() => setQuickViewComponentId(lc.component_id)}
-                        className="flex flex-col flex-1 min-w-0 mr-2 cursor-pointer group/item"
-                        title="Click to view item details"
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-sm text-white font-medium truncate group-hover/item:text-brand-accent transition-colors">
-                            {lc.components?.name || "Unknown Item"}
-                          </span>
-                          {isPersonalItem(lc.components) && (
-                            <span className="text-[9px] px-1.5 py-0.5 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
-                              Personal
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0 mr-2">
+                        {lc.components?.photo_url && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPreviewImage({
+                                url: lc.components!.photo_url!,
+                                title: lc.components?.name || "Item",
+                                subtitle: isPersonalItem(lc.components) ? "Personal Item Photo" : "Component Image"
+                              });
+                            }}
+                            className="h-10 w-10 rounded border border-[#332f2a] hover:border-brand-accent overflow-hidden shrink-0 cursor-zoom-in group/thumb block bg-black/40"
+                            title="Click to view full image"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={lc.components.photo_url} alt={lc.components?.name} className="h-full w-full object-cover group-hover/thumb:scale-110 transition-transform duration-200" />
+                          </button>
+                        )}
+                        <div 
+                          onClick={() => setQuickViewComponentId(lc.component_id)}
+                          className="flex flex-col flex-1 min-w-0 cursor-pointer group/item"
+                          title="Click to view item details"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm text-white font-medium truncate group-hover/item:text-brand-accent transition-colors">
+                              {lc.components?.name || "Unknown Item"}
+                            </span>
+                            {isPersonalItem(lc.components) && (
+                              <span className="text-[9px] px-1.5 py-0.5 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
+                                Personal
+                              </span>
+                            )}
+                          </div>
+                          {lc.components?.notes && (
+                            <span className="text-[10px] text-brand-text-muted truncate group-hover/item:text-brand-text transition-colors">
+                              {lc.components.notes}
                             </span>
                           )}
                         </div>
-                        {lc.components?.notes && (
-                          <span className="text-[10px] text-brand-text-muted truncate group-hover/item:text-brand-text transition-colors">
-                            {lc.components.notes}
-                          </span>
-                        )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
                         {/* Quantity Stepper */}
@@ -2567,6 +2589,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         isOpen={!!quickViewComponentId}
         onClose={() => setQuickViewComponentId(null)}
         currentHotspotId={selectedLeafHotspot?.id}
+      />
+
+      {/* Full Image Preview Modal */}
+      <ImagePreviewModal
+        isOpen={!!previewImage}
+        imageUrl={previewImage?.url || null}
+        title={previewImage?.title}
+        subtitle={previewImage?.subtitle}
+        onClose={() => setPreviewImage(null)}
       />
     </div>
   );

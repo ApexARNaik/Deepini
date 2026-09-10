@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { getComponentDetails, ComponentWithTotals, ComponentLocation, isPersonalItem } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import Link from "next/link";
-import { X, ExternalLink, Edit2, MapPin, FileText, Package, AlertCircle } from "lucide-react";
+import { X, ExternalLink, Edit2, MapPin, FileText, Package, AlertCircle, Maximize2 } from "lucide-react";
+import { ImagePreviewModal } from "./ImagePreviewModal";
 
 interface ComponentQuickViewModalProps {
   componentId: string | null;
@@ -22,6 +23,7 @@ export function ComponentQuickViewModal({
   const [data, setData] = useState<{ component: ComponentWithTotals; locations: ComponentLocation[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
 
   useEffect(() => {
     if (!isOpen || !componentId) {
@@ -59,12 +61,16 @@ export function ComponentQuickViewModal({
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        if (previewImage) {
+          setPreviewImage(null);
+        } else {
+          onClose();
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, previewImage]);
 
   if (!isOpen) return null;
 
@@ -141,12 +147,22 @@ export function ComponentQuickViewModal({
               <div className="flex gap-4 items-start bg-[#121110] border border-[#2d2924] rounded-lg p-3.5">
                 <div className="h-20 w-20 bg-[#1a1816] border border-[#332f2a] rounded-md shrink-0 overflow-hidden flex items-center justify-center">
                   {component.photo_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img 
-                      src={component.photo_url} 
-                      alt={component.name} 
-                      className="w-full h-full object-cover" 
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImage({ url: component.photo_url!, title: component.name, subtitle: isPersonal ? "Personal Item Photo" : "Component Image" })}
+                      className="w-full h-full relative group/photo cursor-zoom-in block"
+                      title="Click to view full image"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img 
+                        src={component.photo_url} 
+                        alt={component.name} 
+                        className="w-full h-full object-cover group-hover/photo:scale-105 transition-transform duration-200" 
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/photo:opacity-100 transition-opacity flex items-center justify-center text-white">
+                        <Maximize2 className="h-4 w-4" />
+                      </div>
+                    </button>
                   ) : (
                     <div className="text-[10px] text-brand-text-muted/60 uppercase tracking-widest text-center px-1">
                       No Photo
@@ -264,11 +280,11 @@ export function ComponentQuickViewModal({
                 </div>
               )}
 
-              {/* Custom Specs */}
+              {/* Custom Specs / Custom Fields */}
               {customFieldEntries.length > 0 && (
                 <div>
                   <h4 className="text-[10px] font-bold text-brand-text-muted uppercase tracking-widest mb-2">
-                    Custom Specifications
+                    {isPersonal ? "Custom Fields" : "Custom Specifications"}
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {customFieldEntries.map(([key, rawField]) => {
@@ -288,14 +304,19 @@ export function ComponentQuickViewModal({
                               {field.value}
                             </a>
                           ) : field.type === "image" ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <a href={field.value} target="_blank" rel="noreferrer" title="View full image">
+                            <button
+                              type="button"
+                              onClick={() => setPreviewImage({ url: field.value, title: `${component.name} - ${key}`, subtitle: "Custom Field Image" })}
+                              className="group/img mt-1 relative block cursor-zoom-in text-left"
+                              title="Click to view full image"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img 
                                 src={field.value} 
                                 alt={key} 
-                                className="h-16 w-16 object-cover border border-[#332f2a] rounded mt-1 hover:opacity-80 transition-opacity" 
+                                className="h-16 w-16 object-cover border border-[#332f2a] rounded group-hover/img:border-brand-accent group-hover/img:scale-105 transition-all duration-200" 
                               />
-                            </a>
+                            </button>
                           ) : field.type === "file" ? (
                             <div className="mt-1 flex items-center justify-between p-2 bg-black/40 border border-[#2d2924] rounded">
                               <div className="flex items-center gap-2 min-w-0 pr-2">
@@ -329,48 +350,46 @@ export function ComponentQuickViewModal({
                   Storage Locations ({locations.length})
                 </h4>
                 {locations.length === 0 ? (
-                  <div className="text-xs text-brand-text-muted italic bg-[#121110] p-3 rounded-lg border border-[#2d2924]">
-                    Not currently stored in any recorded physical location.
+                  <div className="p-3 bg-[#121110] border border-[#2d2924] rounded-lg text-xs text-brand-text-muted">
+                    Not currently assigned to any storage locations.
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {locations.map(loc => {
-                      const isCurrent = currentHotspotId === loc.hotspot_id;
+                    {locations.map((loc) => {
+                      const isCurrentLocation = currentHotspotId && loc.hotspot_id === currentHotspotId;
                       return (
                         <div 
                           key={loc.id} 
-                          className={`border rounded-lg p-2.5 flex items-center justify-between transition-colors ${
-                            isCurrent
-                              ? "bg-brand-accent/10 border-brand-accent/40"
-                              : "bg-[#121110] border-[#2d2924]"
+                          className={`p-3 rounded-lg border transition-colors flex items-center justify-between ${
+                            isCurrentLocation 
+                              ? "bg-brand-accent/10 border-brand-accent/50 text-white" 
+                              : "bg-[#121110] border-[#2d2924] text-brand-text"
                           }`}
                         >
-                          <div className="flex items-center gap-2 min-w-0 mr-2">
-                            <MapPin className={`h-3.5 w-3.5 shrink-0 ${isCurrent ? "text-brand-accent" : "text-brand-text-muted"}`} />
+                          <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                            <MapPin className={`h-4 w-4 shrink-0 ${isCurrentLocation ? "text-brand-accent" : "text-brand-text-muted"}`} />
                             <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-white font-medium truncate">
-                                  {loc.hotspot?.label || "Storage Hotspot"}
-                                </span>
-                                {isCurrent && (
-                                  <span className="text-[9px] px-1.5 py-0.2 bg-brand-accent/20 border border-brand-accent/40 text-brand-accent rounded uppercase font-semibold">
-                                    This Location
+                              <div className="text-xs font-semibold truncate">
+                                {loc.hotspot?.label || "Storage Hotspot"}
+                                {isCurrentLocation && (
+                                  <span className="ml-2 text-[9px] px-1.5 py-0.2 bg-brand-accent text-white rounded font-bold uppercase tracking-wider">
+                                    Current
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[10px] text-brand-text-muted uppercase tracking-widest truncate">
+                              <div className="text-[10px] text-brand-text-muted uppercase tracking-wider">
                                 {loc.room?.name || "Room"}
                               </div>
                             </div>
                           </div>
 
                           <div className="text-right shrink-0">
-                            <div className="text-sm font-serif font-bold text-white leading-none">
+                            <span className="text-base font-serif font-bold text-white leading-none">
                               {loc.quantity}
-                            </div>
-                            <div className="text-[9px] text-brand-text-muted uppercase tracking-widest">
+                            </span>
+                            <span className="text-[9px] text-brand-text-muted uppercase tracking-wider ml-1">
                               Qty
-                            </div>
+                            </span>
                           </div>
                         </div>
                       );
@@ -390,7 +409,7 @@ export function ComponentQuickViewModal({
               className="text-xs font-semibold text-brand-accent hover:text-white flex items-center gap-1.5 transition-colors"
               title="Navigate to full component page"
             >
-              <span>Open Component Page</span>
+              <span>{isPersonal ? "Open Personal Item Page" : "Open Component Page"}</span>
               <ExternalLink className="h-3 w-3" />
             </Link>
           ) : (
@@ -406,6 +425,15 @@ export function ComponentQuickViewModal({
           </button>
         </div>
       </div>
+
+      {/* Full Image Preview Modal */}
+      <ImagePreviewModal
+        isOpen={!!previewImage}
+        imageUrl={previewImage?.url || null}
+        title={previewImage?.title}
+        subtitle={previewImage?.subtitle}
+        onClose={() => setPreviewImage(null)}
+      />
     </div>
   );
 }
