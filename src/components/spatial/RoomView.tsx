@@ -203,6 +203,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [roomName, setRoomName] = useState("Workshop");
   const [isEditingPhotoLabel, setIsEditingPhotoLabel] = useState(false);
   const [editingLabel, setEditingLabel] = useState("");
+  const activePhoto = photos.find(p => p.id === activePhotoId);
 
   // Side Drawer State
   const [selectedLeafHotspot, setSelectedLeafHotspot] = useState<SpatialHotspot | null>(null);
@@ -585,15 +586,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   };
 
   const handleReplaceImageFile = async (file: File) => {
-    if (!activePhotoId || !activePhoto) return;
+    const currentActivePhoto = photos.find(p => p.id === activePhotoId) || activePhoto;
+    if (!activePhotoId || !currentActivePhoto) return;
     setReplacingImage(true);
-    const previousImageUrl = activePhoto.image_url;
+    const previousImageUrl = currentActivePhoto.image_url;
     const previousHotspots = JSON.parse(JSON.stringify(hotspots));
     try {
       // 1. Measure dimensions of old and new images to determine if framing is preserved
       let oldDims = { width: 1, height: 1 };
       try {
-        oldDims = await getImageDimensions(activePhoto.image_url);
+        oldDims = await getImageDimensions(currentActivePhoto.image_url);
       } catch (err) {
         console.warn("Could not determine old image dimensions", err);
       }
@@ -651,7 +653,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         id: crypto.randomUUID(),
         timestamp: Date.now(),
         type: 'replace_photo_image',
-        description: `Replace image on "${activePhoto.label || 'View'}"`,
+        description: `Replace image on "${currentActivePhoto.label || 'View'}"`,
         data: {
           photoId: activePhotoId,
           previousImageUrl,
@@ -1108,7 +1110,6 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
   };
 
-  const activePhoto = photos.find(p => p.id === activePhotoId);
   const rootPhotos = photos
     .filter(p => p.parent_hotspot_id === null)
     .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0) || new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime());
@@ -1683,6 +1684,20 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   <ChevronDown className={`h-3.5 w-3.5 ml-1.5 transition-transform duration-200 ${showViewOptionsMenu ? 'rotate-180 text-brand-accent' : 'text-brand-text-muted'}`} />
                 </button>
 
+                {/* Persistent Hidden File Input for Replace Image (always in DOM so onChange fires reliably) */}
+                <input
+                  ref={replaceFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleReplaceImageFile(e.target.files[0]);
+                    }
+                    e.target.value = '';
+                  }}
+                />
+
                 {showViewOptionsMenu && (
                   <>
                     <div 
@@ -1699,8 +1714,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       <button
                         type="button"
                         onClick={() => {
-                          setShowViewOptionsMenu(false);
                           replaceFileInputRef.current?.click();
+                          setShowViewOptionsMenu(false);
                         }}
                         disabled={replacingImage}
                         className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-brand-text hover:text-white hover:bg-white/5 text-left transition-colors group"
@@ -1717,20 +1732,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                         </div>
                       </button>
 
-                      <input
-                        ref={replaceFileInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          if (e.target.files && e.target.files[0]) {
-                            handleReplaceImageFile(e.target.files[0]);
-                            e.target.value = '';
-                          }
-                        }}
-                      />
-
-                      {activePhoto.parent_hotspot_id && (
+                      {activePhoto?.parent_hotspot_id && (
                         <button
                           type="button"
                           onClick={() => {
@@ -1988,10 +1990,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         {/* Main Column */}
         <div className="flex-1 w-full min-w-0 flex flex-col gap-4">
           {/* Main Canvas Area */}
-          <div className="w-full bg-black/40 rounded-lg border border-[#332f2a] overflow-auto">
+          <div className="w-full bg-black/40 rounded-lg border border-[#332f2a] overflow-auto relative">
+            {replacingImage && (
+              <div className="absolute inset-0 z-30 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+                <RefreshCw className="h-8 w-8 text-amber-400 animate-spin" />
+                <span className="text-xs font-bold uppercase tracking-widest text-white">Replacing image & preserving hotspots...</span>
+              </div>
+            )}
             {activePhoto ? (
               <HotspotCanvas 
-                key={activePhoto.id}
+                key={`${activePhoto.id}-${activePhoto.image_url}`}
                 imageUrl={activePhoto.image_url} 
                 hotspots={hotspots}
                 isEditing={isEditing}
