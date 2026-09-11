@@ -1531,18 +1531,18 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       className="fixed inset-0 z-40" 
                       onClick={() => setShowHotspotsList(false)} 
                     />
-                    <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl z-50 overflow-hidden flex flex-col max-h-[28rem] animate-fadeIn">
-                      <div className="flex items-center justify-between p-3.5 border-b border-[#332f2a] bg-black/40">
+                    <div className="absolute right-0 top-full mt-2 w-[22rem] sm:w-[26rem] max-w-[calc(100vw-1.5rem)] bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl z-50 overflow-hidden flex flex-col max-h-[30rem] animate-fadeIn">
+                      <div className="flex items-center justify-between p-3.5 border-b border-[#332f2a] bg-black/40 shrink-0">
                         <div>
                           <div className="text-xs font-bold text-white uppercase tracking-wider">Hotspots on this View</div>
-                          <div className="text-[10px] text-brand-text-muted mt-0.5">Click name to highlight & show • Click Delete to remove</div>
+                          <div className="text-[10px] text-brand-text-muted mt-0.5">Click card to highlight on map • Use actions below</div>
                         </div>
                         <span className="text-[10px] px-2 py-0.5 bg-[#252320] border border-[#332f2a] text-brand-text-muted rounded-full font-mono">
                           {hotspots.length}
                         </span>
                       </div>
 
-                      <div className="p-3 overflow-y-auto space-y-2">
+                      <div className="p-3 overflow-y-auto overflow-x-hidden space-y-2.5">
                         {hotspots.length === 0 ? (
                           <div className="text-xs text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded p-4">
                             No hotspots marked on this view yet. Use the Freehand or Polygon tools on the canvas to trace one.
@@ -1556,36 +1556,42 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                 onClick={() => {
                                   setHighlightedHotspotId(prev => prev === hs.id ? null : hs.id);
                                 }}
-                                className={`flex items-center justify-between p-2.5 border rounded transition-all cursor-pointer group ${
+                                className={`flex flex-col p-2.5 border rounded-lg transition-all cursor-pointer group ${
                                   isHsHighlighted
-                                    ? 'bg-brand-accent/25 border-brand-accent shadow-[0_0_14px_rgba(188,115,83,0.35)] ring-1 ring-brand-accent'
+                                    ? 'bg-brand-accent/20 border-brand-accent shadow-[0_0_14px_rgba(188,115,83,0.35)] ring-1 ring-brand-accent'
                                     : 'bg-black/40 border-[#332f2a] hover:border-[#4a443c] hover:bg-black/60'
                                 }`}
                                 title="Click to highlight and locate on the map"
                               >
-                                <div className="min-w-0 pr-2 flex items-center gap-2.5 flex-1">
-                                  <div className={`p-1.5 rounded shrink-0 transition-colors ${
-                                    isHsHighlighted ? 'bg-brand-accent text-white' : 'bg-[#252320] text-brand-text-muted group-hover:text-white'
-                                  }`}>
-                                    <MapPin className="h-3.5 w-3.5" />
-                                  </div>
-                                  <div className="min-w-0">
-                                    <div className={`text-sm font-bold truncate transition-colors ${
-                                      isHsHighlighted ? 'text-white' : 'text-white/90 group-hover:text-brand-accent'
+                                {/* Top Row: Icon, Label, and Badges */}
+                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <div className={`p-1.5 rounded shrink-0 transition-colors ${
+                                      isHsHighlighted ? 'bg-brand-accent text-white' : 'bg-[#252320] text-brand-text-muted group-hover:text-white'
                                     }`}>
-                                      {hs.label}
+                                      <MapPin className="h-3.5 w-3.5" />
                                     </div>
-                                    <div className="text-[10px] text-brand-text-muted tracking-wider uppercase flex items-center gap-1.5">
-                                      <span>{hs.is_leaf ? "Storage Location" : "Opens into Storage"}</span>
-                                      {isHsHighlighted && (
-                                        <span className="text-[9px] font-bold text-brand-accent font-mono tracking-normal bg-brand-accent/20 px-1.5 py-0.5 rounded">
-                                          HIGHLIGHTED
-                                        </span>
-                                      )}
+                                    <div className="min-w-0 flex-1">
+                                      <div className={`text-xs sm:text-sm font-bold truncate transition-colors ${
+                                        isHsHighlighted ? 'text-white' : 'text-white/90 group-hover:text-brand-accent'
+                                      }`}>
+                                        {hs.label || "Unnamed Hotspot"}
+                                      </div>
+                                      <div className="text-[10px] text-brand-text-muted tracking-wider uppercase flex items-center gap-1.5 mt-0.5">
+                                        <span>{hs.is_leaf ? "Storage Location" : "Opens into Storage"}</span>
+                                      </div>
                                     </div>
                                   </div>
+
+                                  {isHsHighlighted && (
+                                    <span className="text-[9px] font-bold text-brand-accent font-mono tracking-normal bg-brand-accent/20 border border-brand-accent/40 px-1.5 py-0.5 rounded shrink-0">
+                                      HIGHLIGHTED
+                                    </span>
+                                  )}
                                 </div>
-                                <div className="flex items-center gap-1.5 shrink-0">
+
+                                {/* Bottom Row: Action Buttons */}
+                                <div className="mt-2 pt-2 border-t border-[#2a2723] flex items-center gap-1.5 flex-wrap">
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -1593,12 +1599,13 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                       setShowHotspotsList(false);
                                       handleStartMoveHotspot(hs);
                                     }}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded transition-colors"
+                                    className="flex-1 min-w-[65px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded transition-colors"
                                     title={`Move "${hs.label}" and its contents to another view`}
                                   >
-                                    <ArrowRightLeft className="h-3 w-3" />
+                                    <ArrowRightLeft className="h-3 w-3 shrink-0" />
                                     <span>Move</span>
                                   </button>
+
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -1606,12 +1613,13 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                       setShowHotspotsList(false);
                                       handleStartReshape(hs);
                                     }}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded transition-colors"
+                                    className="flex-1 min-w-[70px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded transition-colors"
                                     title={`Redraw boundary shape for "${hs.label}"`}
                                   >
-                                    <Crop className="h-3 w-3" />
+                                    <Crop className="h-3 w-3 shrink-0" />
                                     <span>Redraw</span>
                                   </button>
+
                                   {!hs.is_leaf && hs.child_photo_id && (
                                     <button
                                       type="button"
@@ -1619,13 +1627,14 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                         e.stopPropagation();
                                         handleOpenInsertIntermediate(hs);
                                       }}
-                                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors"
+                                      className="flex-1 min-w-[85px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors"
                                       title={`Insert an intermediate view between "${hs.label}" and its child view`}
                                     >
-                                      <Layers className="h-3 w-3" />
+                                      <Layers className="h-3 w-3 shrink-0" />
                                       <span>Insert Step</span>
                                     </button>
                                   )}
+
                                   {!hs.child_photo_id && (
                                     <button
                                       type="button"
@@ -1633,23 +1642,24 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                         e.stopPropagation();
                                         setEditingHotspot(hs);
                                       }}
-                                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-brand-accent bg-brand-accent/10 hover:bg-brand-accent/20 border border-brand-accent/30 rounded transition-colors"
+                                      className="flex-1 min-w-[60px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-brand-accent bg-brand-accent/10 hover:bg-brand-accent/20 border border-brand-accent/30 rounded transition-colors"
                                       title="Edit hotspot name and storage type"
                                     >
-                                      <Edit2 className="h-3 w-3" />
+                                      <Edit2 className="h-3 w-3 shrink-0" />
                                       <span>Edit</span>
                                     </button>
                                   )}
+
                                   <button
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleDeleteHotspot(hs);
                                     }}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors"
+                                    className="flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors"
                                     title={`Delete hotspot "${hs.label}"`}
                                   >
-                                    <Trash2 className="h-3 w-3" />
+                                    <Trash2 className="h-3 w-3 shrink-0" />
                                     <span>Delete</span>
                                   </button>
                                 </div>
