@@ -15,14 +15,19 @@ function InventoryContent() {
   const [components, setComponents] = useState<ComponentWithTotals[]>([]);
   const [loading, setLoading] = useState(true);
   const { isOnline } = useNetworkState();
-  const [search, setSearch] = useState("");
+  const initialSearch = searchParams.get('q') || searchParams.get('search') || "";
+  const [search, setSearch] = useState(initialSearch);
   const [viewMode, setViewMode] = useState<'components' | 'personal'>(initialView);
   
-  // Sync viewMode if searchParams change
+  // Sync viewMode and search if searchParams change
   useEffect(() => {
     const v = searchParams.get('view');
     if (v === 'personal' || v === 'components') {
       setViewMode(v);
+    }
+    const q = searchParams.get('q') || searchParams.get('search');
+    if (q !== null && q !== undefined) {
+      setSearch(q);
     }
   }, [searchParams]);
 

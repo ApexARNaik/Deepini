@@ -1,12 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { InsertIntermediateModal } from "./InsertIntermediateModal";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw } from "lucide-react";
+import { MoveHotspotModal } from "./MoveHotspotModal";
+import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
+import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -89,7 +92,9 @@ export type UndoAction =
       description: string;
       data: {
         photoId: string;
+        parentHotspotId?: string | null;
         previousLabel: string;
+        previousParentHotspotLabel?: string | null;
       };
     }
   | {
@@ -111,7 +116,42 @@ export type UndoAction =
         deletedHotspot: SpatialHotspot;
         deletedComponentLocations: { component_id: string; quantity: number }[];
       };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'delete_photo';
+      description: string;
+      data: {
+        photoId: string;
+        photoTree: {
+          photos: SpatialPhoto[];
+          hotspots: SpatialHotspot[];
+          component_locations: { hotspot_id: string; component_id: string; quantity: number }[];
+        };
+        parentHotspotId: string | null;
+        previousActivePhotoId: string | null;
+        previousBreadcrumbChain: { id: string; label: string }[];
+      };
+    }
+  | {
+      id: string;
+      timestamp: number;
+      type: 'move_hotspot';
+      description: string;
+      data: {
+        hotspotId: string;
+        sourcePhotoId: string;
+        targetPhotoId: string;
+        previousShapePoints: { x: number; y: number }[];
+        newShapePoints: { x: number; y: number }[];
+        previousBreadcrumbChain: { id: string; label: string }[];
+        targetBreadcrumbChain: { id: string; label: string }[];
+        hotspotLabel: string;
+      };
     };
+
+const MAX_UNDO_STACK_SIZE = 50;
 
 interface Props {
   roomId: string;
@@ -126,6 +166,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showHotspotsList, setShowHotspotsList] = useState(false);
+  const [showViewOptionsMenu, setShowViewOptionsMenu] = useState(false);
+  const [hotspotSearchFilter, setHotspotSearchFilter] = useState("");
   const [editingHotspot, setEditingHotspot] = useState<SpatialHotspot | null>(null);
   const [reshapingHotspot, setReshapingHotspot] = useState<SpatialHotspot | null>(null);
   const [replacingImage, setReplacingImage] = useState(false);
@@ -134,7 +176,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [isUndoing, setIsUndoing] = useState(false);
 
   const pushUndoAction = useCallback((action: UndoAction) => {
-    setUndoStack(prev => [...prev.slice(-29), action]);
+    setUndoStack(prev => [...prev.slice(-(MAX_UNDO_STACK_SIZE - 1)), action]);
   }, []);
 
   const [insertIntermediateTarget, setInsertIntermediateTarget] = useState<{
@@ -142,6 +184,12 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     childPhoto: SpatialPhoto;
   } | null>(null);
   const [isInsertingIntermediate, setIsInsertingIntermediate] = useState(false);
+  const [targetMoveHotspot, setTargetMoveHotspot] = useState<SpatialHotspot | null>(null);
+  const [activeMoveSession, setActiveMoveSession] = useState<{
+    hotspot: SpatialHotspot;
+    sourcePhotoId: string;
+    sourceBreadcrumbChain: { id: string; label: string }[];
+  } | null>(null);
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   
@@ -155,6 +203,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [roomName, setRoomName] = useState("Workshop");
   const [isEditingPhotoLabel, setIsEditingPhotoLabel] = useState(false);
   const [editingLabel, setEditingLabel] = useState("");
+  const activePhoto = photos.find(p => p.id === activePhotoId);
 
   // Side Drawer State
   const [selectedLeafHotspot, setSelectedLeafHotspot] = useState<SpatialHotspot | null>(null);
@@ -162,6 +211,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [allInventory, setAllInventory] = useState<ComponentWithTotals[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddingComponent, setIsAddingComponent] = useState(false);
+  const [quickViewComponentId, setQuickViewComponentId] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
+  const [isExtendedHotspotsView, setIsExtendedHotspotsView] = useState(false);
 
   useEffect(() => {
     getInventory().then(setAllInventory).catch(console.error);
@@ -179,6 +231,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     } else {
       setHotspots([]);
     }
+    setHotspotSearchFilter("");
+    setHighlightedHotspotId(null);
+    setIsExtendedHotspotsView(false);
   }, [activePhotoId]);
 
   const loadRoomData = async () => {
@@ -277,6 +332,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         label: newLabel,
         is_leaf: newIsLeaf
       });
+
+      // Keep child photo label synchronized if this is a drilldown hotspot
+      if (existing?.child_photo_id) {
+        try {
+          await updatePhotoLabel(existing.child_photo_id, newLabel);
+          setPhotos(prev => prev.map(p => p.id === existing.child_photo_id ? { ...p, label: newLabel } : p));
+        } catch (childErr) {
+          console.warn("Failed to sync child photo label:", childErr);
+        }
+      }
       
       if (existing) {
         pushUndoAction({
@@ -374,6 +439,119 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     setReshapingHotspot(null);
   };
 
+  const handleStartMoveHotspot = (hotspot: SpatialHotspot) => {
+    setTargetMoveHotspot(hotspot);
+    setEditingHotspot(null);
+    setShowHotspotsList(false);
+    setSelectedLeafHotspot(null);
+  };
+
+  const handleSelectMoveDestination = async (destinationPhoto: SpatialPhoto) => {
+    if (!targetMoveHotspot) return;
+    const sourcePhotoId = activePhotoId || targetMoveHotspot.photo_id;
+    const sourceBreadcrumbChain = JSON.parse(JSON.stringify(breadcrumbChain));
+
+    setActiveMoveSession({
+      hotspot: targetMoveHotspot,
+      sourcePhotoId,
+      sourceBreadcrumbChain
+    });
+    setTargetMoveHotspot(null);
+
+    // Navigate into destination photo
+    setIsEditing(true);
+    setReshapingHotspot(null);
+    setSelectedLeafHotspot(null);
+    setHighlightedHotspotId(null);
+    setPendingChildUpload(null);
+    setShowHotspotsList(false);
+    setInsertIntermediateTarget(null);
+
+    // Ensure destination photo is in local photos array (supports cross-room or newly loaded views)
+    setPhotos(prev => {
+      if (prev.some(p => p.id === destinationPhoto.id)) return prev;
+      return [...prev, destinationPhoto];
+    });
+
+    setActivePhotoId(destinationPhoto.id);
+
+    if (destinationPhoto.parent_hotspot_id) {
+      try {
+        const path = await getFullHotspotPath(destinationPhoto.parent_hotspot_id);
+        const photoNodes = path.filter(p => p.type === 'photo');
+        setBreadcrumbChain([
+          ...photoNodes.map(p => ({ id: p.id, label: p.label })),
+          { id: destinationPhoto.id, label: destinationPhoto.label || 'View' }
+        ]);
+      } catch {
+        setBreadcrumbChain(prev => [
+          ...prev.slice(0, 1),
+          { id: destinationPhoto.id, label: destinationPhoto.label || 'View' }
+        ]);
+      }
+    } else {
+      setBreadcrumbChain([{ id: destinationPhoto.id, label: destinationPhoto.label || 'Root' }]);
+    }
+  };
+
+  const handleConfirmMoveHotspot = async (hotspotId: string, newPoints: { x: number; y: number }[]) => {
+    if (!activeMoveSession || !activePhotoId) return;
+    const { hotspot, sourcePhotoId, sourceBreadcrumbChain } = activeMoveSession;
+    const targetPhotoId = activePhotoId;
+    const targetBreadcrumbChain = JSON.parse(JSON.stringify(breadcrumbChain));
+
+    try {
+      await moveSpatialHotspot({
+        hotspotId,
+        newPhotoId: targetPhotoId,
+        newShapePoints: newPoints
+      });
+
+      // 1. Record undo action
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'move_hotspot',
+        description: `Move hotspot "${hotspot.label}"`,
+        data: {
+          hotspotId,
+          sourcePhotoId,
+          targetPhotoId,
+          previousShapePoints: hotspot.shape_points || [],
+          newShapePoints: newPoints,
+          previousBreadcrumbChain: sourceBreadcrumbChain,
+          targetBreadcrumbChain,
+          hotspotLabel: hotspot.label
+        }
+      });
+
+      // 2. Add moved hotspot to active photo's local hotspots
+      const movedHotspot: SpatialHotspot = {
+        ...hotspot,
+        photo_id: targetPhotoId,
+        shape_points: newPoints
+      };
+      setHotspots(prev => [...prev.filter(h => h.id !== hotspotId), movedHotspot]);
+
+      // 3. Clear active move session
+      setActiveMoveSession(null);
+
+      setReplaceImageNotice(`Moved "${hotspot.label}" to this view! All child views and components preserved.`);
+      setTimeout(() => setReplaceImageNotice(null), 6000);
+    } catch (err: any) {
+      console.error("Failed to move hotspot:", err);
+      alert(err.message || "Failed to move hotspot");
+    }
+  };
+
+  const handleCancelMoveHotspot = () => {
+    if (!activeMoveSession) return;
+    const { sourcePhotoId, sourceBreadcrumbChain } = activeMoveSession;
+    setActivePhotoId(sourcePhotoId);
+    setBreadcrumbChain(sourceBreadcrumbChain);
+    setActiveMoveSession(null);
+  };
+
   const handleBatchUpdateHotspots = async (updates: { id: string; shape_points: { x: number; y: number }[] }[]) => {
     const previousHotspots = updates.map(u => {
       const existing = hotspots.find(h => h.id === u.id);
@@ -408,15 +586,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   };
 
   const handleReplaceImageFile = async (file: File) => {
-    if (!activePhotoId || !activePhoto) return;
+    const currentActivePhoto = photos.find(p => p.id === activePhotoId) || activePhoto;
+    if (!activePhotoId || !currentActivePhoto) return;
     setReplacingImage(true);
-    const previousImageUrl = activePhoto.image_url;
+    const previousImageUrl = currentActivePhoto.image_url;
     const previousHotspots = JSON.parse(JSON.stringify(hotspots));
     try {
       // 1. Measure dimensions of old and new images to determine if framing is preserved
       let oldDims = { width: 1, height: 1 };
       try {
-        oldDims = await getImageDimensions(activePhoto.image_url);
+        oldDims = await getImageDimensions(currentActivePhoto.image_url);
       } catch (err) {
         console.warn("Could not determine old image dimensions", err);
       }
@@ -474,7 +653,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         id: crypto.randomUUID(),
         timestamp: Date.now(),
         type: 'replace_photo_image',
-        description: `Replace image on "${activePhoto.label || 'View'}"`,
+        description: `Replace image on "${currentActivePhoto.label || 'View'}"`,
         data: {
           photoId: activePhotoId,
           previousImageUrl,
@@ -504,7 +683,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     if (!pendingChildUpload) return;
     setUploading(true);
     try {
-      const newPhoto = await uploadPhotoAndCreate(file, roomId, pendingChildUpload.id, `Inside ${pendingChildUpload.label}`);
+      const newPhoto = await uploadPhotoAndCreate(file, roomId, pendingChildUpload.id, pendingChildUpload.label);
       setPhotos(prev => [...prev, newPhoto]);
       
       // Update local hotspot child_photo_id
@@ -724,6 +903,10 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             label: previousHotspot.label,
             is_leaf: previousHotspot.is_leaf
           });
+          if (previousHotspot.child_photo_id) {
+            await updatePhotoLabel(previousHotspot.child_photo_id, previousHotspot.label);
+            setPhotos(prev => prev.map(p => p.id === previousHotspot.child_photo_id ? { ...p, label: previousHotspot.label } : p));
+          }
           setHotspots(prev =>
             prev.map(h =>
               h.id === hotspotId
@@ -740,8 +923,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         }
 
         case 'update_photo_label': {
-          const { photoId, previousLabel } = action.data;
+          const { photoId, parentHotspotId, previousLabel, previousParentHotspotLabel } = action.data;
           await updatePhotoLabel(photoId, previousLabel);
+          if (parentHotspotId && previousParentHotspotLabel) {
+            try {
+              await updateHotspot(parentHotspotId, { label: previousParentHotspotLabel });
+              setHotspots(prev => prev.map(h => h.id === parentHotspotId ? { ...h, label: previousParentHotspotLabel } : h));
+            } catch (pErr) {
+              console.warn("Failed to revert parent hotspot label:", pErr);
+            }
+          }
           setPhotos(prev => prev.map(p => (p.id === photoId ? { ...p, label: previousLabel } : p)));
           setBreadcrumbChain(prev => {
             const newChain = [...prev];
@@ -769,6 +960,46 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           setHotspots(prev => [...prev, deletedHotspot]);
           break;
         }
+
+        case 'delete_photo': {
+          const { photoTree, parentHotspotId, previousActivePhotoId, previousBreadcrumbChain } = action.data;
+          await restoreDeletedSpatialPhotoTree(photoTree, parentHotspotId);
+
+          const refreshedPhotos = await getPhotosForRoom(roomId);
+          setPhotos(refreshedPhotos);
+
+          if (parentHotspotId) {
+            setHotspots(prev => prev.map(h => h.id === parentHotspotId ? { ...h, child_photo_id: action.data.photoId } : h));
+          }
+
+          if (previousActivePhotoId) {
+            setActivePhotoId(previousActivePhotoId);
+            setBreadcrumbChain(previousBreadcrumbChain);
+            await loadHotspots(previousActivePhotoId);
+          }
+          break;
+        }
+
+        case 'move_hotspot': {
+          const { hotspotId, sourcePhotoId, targetPhotoId, previousShapePoints, previousBreadcrumbChain } = action.data;
+          await moveSpatialHotspot({
+            hotspotId,
+            newPhotoId: sourcePhotoId,
+            newShapePoints: previousShapePoints
+          });
+
+          if (activePhotoId === targetPhotoId) {
+            setHotspots(prev => prev.filter(h => h.id !== hotspotId));
+          }
+
+          const currentRoomPhotos = await getPhotosForRoom(roomId);
+          setPhotos(currentRoomPhotos);
+
+          setActivePhotoId(sourcePhotoId);
+          setBreadcrumbChain(previousBreadcrumbChain);
+          await loadHotspots(sourcePhotoId);
+          break;
+        }
       }
 
       setUndoStack(prev => prev.slice(0, -1));
@@ -776,11 +1007,14 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       setTimeout(() => setReplaceImageNotice(null), 5000);
     } catch (err: any) {
       console.error("Undo failed:", err);
-      alert(err.message || "Failed to undo action");
+      // Ensure the undo stack is never permanently stuck on an unexecutable or invalidated action
+      setUndoStack(prev => prev.slice(0, -1));
+      setReplaceImageNotice(`Could not undo "${action.description}" (target may have been deleted or modified). Action skipped.`);
+      setTimeout(() => setReplaceImageNotice(null), 6000);
     } finally {
       setIsUndoing(false);
     }
-  }, [undoStack, isUndoing, activePhotoId, selectedLeafHotspot]);
+  }, [undoStack, isUndoing, activePhotoId, selectedLeafHotspot, roomId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -820,7 +1054,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   };
 
   const navigateToDrilldown = (hotspot: SpatialHotspot, childPhotoId: string) => {
-    setBreadcrumbChain(prev => [...prev, { id: childPhotoId, label: hotspot.label }]);
+    const childPhoto = photos.find(p => p.id === childPhotoId);
+    const targetLabel = childPhoto?.label || hotspot.label;
+    setBreadcrumbChain(prev => [...prev, { id: childPhotoId, label: targetLabel }]);
     setActivePhotoId(childPhotoId);
     resetViewInteractionState();
   };
@@ -874,7 +1110,6 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
   };
 
-  const activePhoto = photos.find(p => p.id === activePhotoId);
   const rootPhotos = photos
     .filter(p => p.parent_hotspot_id === null)
     .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0) || new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime());
@@ -1024,6 +1259,22 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     }
     try {
       await updatePhotoLabel(activePhotoId, newLabel);
+
+      // Keep parent hotspot label synchronized if this is a child view
+      let previousParentHotspotLabel: string | null = null;
+      if (activePhoto?.parent_hotspot_id) {
+        try {
+          const parentHs = hotspots.find(h => h.id === activePhoto.parent_hotspot_id) || await getHotspotById(activePhoto.parent_hotspot_id);
+          if (parentHs) {
+            previousParentHotspotLabel = parentHs.label;
+            await updateHotspot(activePhoto.parent_hotspot_id, { label: newLabel });
+            setHotspots(prev => prev.map(h => h.id === activePhoto.parent_hotspot_id ? { ...h, label: newLabel } : h));
+          }
+        } catch (hsErr) {
+          console.warn("Could not sync parent hotspot label:", hsErr);
+        }
+      }
+
       pushUndoAction({
         id: crypto.randomUUID(),
         timestamp: Date.now(),
@@ -1031,7 +1282,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         description: `Rename view to "${newLabel}"`,
         data: {
           photoId: activePhotoId,
-          previousLabel
+          parentHotspotId: activePhoto?.parent_hotspot_id || null,
+          previousLabel,
+          previousParentHotspotLabel
         }
       });
       
@@ -1087,8 +1340,33 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     if (!activePhotoId) return;
     if (!confirm("Are you sure you want to delete this view? This will recursively delete all child views, hotspots, and remove components stored within them.")) return;
     try {
+      const targetPhoto = photos.find(p => p.id === activePhotoId);
+      const parentHotspotId = targetPhoto?.parent_hotspot_id || null;
+      const prevActiveId = activePhotoId;
+      const prevBreadcrumbs = JSON.parse(JSON.stringify(breadcrumbChain));
+
+      // 1. Serialize entire sub-tree before deleting to allow full atomic restoration
+      const photoTree = await serializeSpatialPhotoTree(activePhotoId);
+
+      // 2. Perform deletion
       await deleteSpatialPhoto(activePhotoId);
-      // Reset active photo to root or clear it, loadRoomData does this well.
+
+      // 3. Push to undo stack
+      pushUndoAction({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        type: 'delete_photo',
+        description: `Delete view "${targetPhoto?.label || 'View'}"`,
+        data: {
+          photoId: activePhotoId,
+          photoTree,
+          parentHotspotId,
+          previousActivePhotoId: prevActiveId,
+          previousBreadcrumbChain: prevBreadcrumbs,
+        }
+      });
+
+      // 4. Reset active photo to root or clear it, loadRoomData does this well.
       setActivePhotoId(null);
       setBreadcrumbChain([]);
       loadRoomData();
@@ -1253,18 +1531,18 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       className="fixed inset-0 z-40" 
                       onClick={() => setShowHotspotsList(false)} 
                     />
-                    <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl z-50 overflow-hidden flex flex-col max-h-[28rem] animate-fadeIn">
-                      <div className="flex items-center justify-between p-3.5 border-b border-[#332f2a] bg-black/40">
+                    <div className="absolute right-0 top-full mt-2 w-[22rem] sm:w-[26rem] max-w-[calc(100vw-1.5rem)] bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl z-50 overflow-hidden flex flex-col max-h-[30rem] animate-fadeIn">
+                      <div className="flex items-center justify-between p-3.5 border-b border-[#332f2a] bg-black/40 shrink-0">
                         <div>
                           <div className="text-xs font-bold text-white uppercase tracking-wider">Hotspots on this View</div>
-                          <div className="text-[10px] text-brand-text-muted mt-0.5">Click name to highlight & show • Click Delete to remove</div>
+                          <div className="text-[10px] text-brand-text-muted mt-0.5">Click card to highlight on map • Use actions below</div>
                         </div>
                         <span className="text-[10px] px-2 py-0.5 bg-[#252320] border border-[#332f2a] text-brand-text-muted rounded-full font-mono">
                           {hotspots.length}
                         </span>
                       </div>
 
-                      <div className="p-3 overflow-y-auto space-y-2">
+                      <div className="p-3 overflow-y-auto overflow-x-hidden space-y-2.5">
                         {hotspots.length === 0 ? (
                           <div className="text-xs text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded p-4">
                             No hotspots marked on this view yet. Use the Freehand or Polygon tools on the canvas to trace one.
@@ -1278,36 +1556,56 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                 onClick={() => {
                                   setHighlightedHotspotId(prev => prev === hs.id ? null : hs.id);
                                 }}
-                                className={`flex items-center justify-between p-2.5 border rounded transition-all cursor-pointer group ${
+                                className={`flex flex-col p-2.5 border rounded-lg transition-all cursor-pointer group ${
                                   isHsHighlighted
-                                    ? 'bg-brand-accent/25 border-brand-accent shadow-[0_0_14px_rgba(188,115,83,0.35)] ring-1 ring-brand-accent'
+                                    ? 'bg-brand-accent/20 border-brand-accent shadow-[0_0_14px_rgba(188,115,83,0.35)] ring-1 ring-brand-accent'
                                     : 'bg-black/40 border-[#332f2a] hover:border-[#4a443c] hover:bg-black/60'
                                 }`}
                                 title="Click to highlight and locate on the map"
                               >
-                                <div className="min-w-0 pr-2 flex items-center gap-2.5 flex-1">
-                                  <div className={`p-1.5 rounded shrink-0 transition-colors ${
-                                    isHsHighlighted ? 'bg-brand-accent text-white' : 'bg-[#252320] text-brand-text-muted group-hover:text-white'
-                                  }`}>
-                                    <MapPin className="h-3.5 w-3.5" />
-                                  </div>
-                                  <div className="min-w-0">
-                                    <div className={`text-sm font-bold truncate transition-colors ${
-                                      isHsHighlighted ? 'text-white' : 'text-white/90 group-hover:text-brand-accent'
+                                {/* Top Row: Icon, Label, and Badges */}
+                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <div className={`p-1.5 rounded shrink-0 transition-colors ${
+                                      isHsHighlighted ? 'bg-brand-accent text-white' : 'bg-[#252320] text-brand-text-muted group-hover:text-white'
                                     }`}>
-                                      {hs.label}
+                                      <MapPin className="h-3.5 w-3.5" />
                                     </div>
-                                    <div className="text-[10px] text-brand-text-muted tracking-wider uppercase flex items-center gap-1.5">
-                                      <span>{hs.is_leaf ? "Storage Location" : "Opens into Storage"}</span>
-                                      {isHsHighlighted && (
-                                        <span className="text-[9px] font-bold text-brand-accent font-mono tracking-normal bg-brand-accent/20 px-1.5 py-0.5 rounded">
-                                          HIGHLIGHTED
-                                        </span>
-                                      )}
+                                    <div className="min-w-0 flex-1">
+                                      <div className={`text-xs sm:text-sm font-bold truncate transition-colors ${
+                                        isHsHighlighted ? 'text-white' : 'text-white/90 group-hover:text-brand-accent'
+                                      }`}>
+                                        {hs.label || "Unnamed Hotspot"}
+                                      </div>
+                                      <div className="text-[10px] text-brand-text-muted tracking-wider uppercase flex items-center gap-1.5 mt-0.5">
+                                        <span>{hs.is_leaf ? "Storage Location" : "Opens into Storage"}</span>
+                                      </div>
                                     </div>
                                   </div>
+
+                                  {isHsHighlighted && (
+                                    <span className="text-[9px] font-bold text-brand-accent font-mono tracking-normal bg-brand-accent/20 border border-brand-accent/40 px-1.5 py-0.5 rounded shrink-0">
+                                      HIGHLIGHTED
+                                    </span>
+                                  )}
                                 </div>
-                                <div className="flex items-center gap-1.5 shrink-0">
+
+                                {/* Bottom Row: Action Buttons */}
+                                <div className="mt-2 pt-2 border-t border-[#2a2723] flex items-center gap-1.5 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setShowHotspotsList(false);
+                                      handleStartMoveHotspot(hs);
+                                    }}
+                                    className="flex-1 min-w-[65px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded transition-colors"
+                                    title={`Move "${hs.label}" and its contents to another view`}
+                                  >
+                                    <ArrowRightLeft className="h-3 w-3 shrink-0" />
+                                    <span>Move</span>
+                                  </button>
+
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -1315,12 +1613,13 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                       setShowHotspotsList(false);
                                       handleStartReshape(hs);
                                     }}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded transition-colors"
+                                    className="flex-1 min-w-[70px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded transition-colors"
                                     title={`Redraw boundary shape for "${hs.label}"`}
                                   >
-                                    <Crop className="h-3 w-3" />
+                                    <Crop className="h-3 w-3 shrink-0" />
                                     <span>Redraw</span>
                                   </button>
+
                                   {!hs.is_leaf && hs.child_photo_id && (
                                     <button
                                       type="button"
@@ -1328,13 +1627,14 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                         e.stopPropagation();
                                         handleOpenInsertIntermediate(hs);
                                       }}
-                                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors"
+                                      className="flex-1 min-w-[85px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors"
                                       title={`Insert an intermediate view between "${hs.label}" and its child view`}
                                     >
-                                      <Layers className="h-3 w-3" />
+                                      <Layers className="h-3 w-3 shrink-0" />
                                       <span>Insert Step</span>
                                     </button>
                                   )}
+
                                   {!hs.child_photo_id && (
                                     <button
                                       type="button"
@@ -1342,23 +1642,24 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                         e.stopPropagation();
                                         setEditingHotspot(hs);
                                       }}
-                                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-brand-accent bg-brand-accent/10 hover:bg-brand-accent/20 border border-brand-accent/30 rounded transition-colors"
+                                      className="flex-1 min-w-[60px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-brand-accent bg-brand-accent/10 hover:bg-brand-accent/20 border border-brand-accent/30 rounded transition-colors"
                                       title="Edit hotspot name and storage type"
                                     >
-                                      <Edit2 className="h-3 w-3" />
+                                      <Edit2 className="h-3 w-3 shrink-0" />
                                       <span>Edit</span>
                                     </button>
                                   )}
+
                                   <button
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleDeleteHotspot(hs);
                                     }}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors"
+                                    className="flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors"
                                     title={`Delete hotspot "${hs.label}"`}
                                   >
-                                    <Trash2 className="h-3 w-3" />
+                                    <Trash2 className="h-3 w-3 shrink-0" />
                                     <span>Delete</span>
                                   </button>
                                 </div>
@@ -1374,38 +1675,26 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             )}
 
             {isEditing && isOnline && (
-              <>
-                {activePhoto.parent_hotspot_id && (
-                  <button
-                    type="button"
-                    onClick={handleOpenInsertIntermediateFromChild}
-                    disabled={replacingImage}
-                    className="flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest border border-amber-500/50 text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
-                    title="Insert an intermediate view above this view"
-                  >
-                    <Layers className="h-3 w-3 mr-1.5" />
-                    <span>Insert View Above</span>
-                  </button>
-                )}
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => replaceFileInputRef.current?.click()}
-                  disabled={replacingImage}
-                  className="flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest border border-amber-500/50 text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
-                  title="Replace this view's background image (preserves all hotspots & items)"
+                  onClick={() => {
+                    setShowViewOptionsMenu(!showViewOptionsMenu);
+                    setShowHotspotsList(false);
+                  }}
+                  className={`flex items-center px-3 py-2 text-xs font-bold uppercase tracking-widest border transition-all ${
+                    showViewOptionsMenu
+                      ? 'bg-brand-accent/20 border-brand-accent text-brand-accent'
+                      : 'bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c] hover:text-white'
+                  }`}
+                  title="View options and management actions"
                 >
-                  {replacingImage ? (
-                    <>
-                      <RefreshCw className="h-3 w-3 mr-1.5 animate-spin" />
-                      <span>Replacing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <ImageIcon className="h-3 w-3 mr-1.5" />
-                      <span>Replace Image</span>
-                    </>
-                  )}
+                  <SlidersHorizontal className="h-3.5 w-3.5 mr-1.5 text-brand-accent" />
+                  <span>View Options</span>
+                  <ChevronDown className={`h-3.5 w-3.5 ml-1.5 transition-transform duration-200 ${showViewOptionsMenu ? 'rotate-180 text-brand-accent' : 'text-brand-text-muted'}`} />
                 </button>
+
+                {/* Persistent Hidden File Input for Replace Image (always in DOM so onChange fires reliably) */}
                 <input
                   ref={replaceFileInputRef}
                   type="file"
@@ -1414,18 +1703,85 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
                       handleReplaceImageFile(e.target.files[0]);
-                      e.target.value = '';
                     }
+                    e.target.value = '';
                   }}
                 />
-                <button
-                  onClick={handleDeletePhoto}
-                  className="flex items-center px-4 py-2 text-xs font-bold uppercase tracking-widest border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors"
-                  title="Delete View"
-                >
-                  <Trash2 className="h-3 w-3 mr-2" /> Delete View
-                </button>
-              </>
+
+                {showViewOptionsMenu && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setShowViewOptionsMenu(false)} 
+                    />
+                    <div className="absolute right-0 top-full mt-2 w-64 bg-[#1a1816] border border-[#332f2a] rounded-lg shadow-2xl z-50 overflow-hidden py-1 animate-fadeIn">
+                      <div className="px-3.5 py-2 border-b border-[#332f2a] bg-black/40">
+                        <div className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider">
+                          View Settings & Actions
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          replaceFileInputRef.current?.click();
+                          setShowViewOptionsMenu(false);
+                        }}
+                        disabled={replacingImage}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-brand-text hover:text-white hover:bg-white/5 text-left transition-colors group"
+                        title="Replace this view's background image (preserves all hotspots & items)"
+                      >
+                        {replacingImage ? (
+                          <RefreshCw className="h-4 w-4 text-amber-400 animate-spin shrink-0" />
+                        ) : (
+                          <ImageIcon className="h-4 w-4 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
+                        )}
+                        <div className="min-w-0">
+                          <div className="font-semibold text-white/90 group-hover:text-white">Replace Image</div>
+                          <div className="text-[10px] text-brand-text-muted truncate">Preserves hotspots & items</div>
+                        </div>
+                      </button>
+
+                      {activePhoto?.parent_hotspot_id && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowViewOptionsMenu(false);
+                            handleOpenInsertIntermediateFromChild();
+                          }}
+                          disabled={replacingImage}
+                          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-brand-text hover:text-white hover:bg-white/5 text-left transition-colors group"
+                          title="Insert an intermediate view above this view"
+                        >
+                          <Layers className="h-4 w-4 text-amber-300 shrink-0 group-hover:scale-110 transition-transform" />
+                          <div className="min-w-0">
+                            <div className="font-semibold text-white/90 group-hover:text-white">Insert View Above</div>
+                            <div className="text-[10px] text-brand-text-muted truncate">Add step between parent & view</div>
+                          </div>
+                        </button>
+                      )}
+
+                      <div className="h-px bg-[#332f2a] my-1" />
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowViewOptionsMenu(false);
+                          handleDeletePhoto();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 text-left transition-colors group"
+                        title="Delete View"
+                      >
+                        <Trash2 className="h-4 w-4 text-red-400 shrink-0 group-hover:scale-110 transition-transform" />
+                        <div className="min-w-0">
+                          <div className="font-semibold">Delete View</div>
+                          <div className="text-[10px] text-red-400/70 truncate">Delete view and sub-views</div>
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
             {/* Undo Button */}
             <button
@@ -1454,6 +1810,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   setSelectedLeafHotspot(null);
                 } else {
                   setShowHotspotsList(false);
+                  setShowViewOptionsMenu(false);
                   setReshapingHotspot(null);
                 }
                 setIsEditing(!isEditing);
@@ -1640,38 +1997,291 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           )}
         </div>
 
-        {/* Main Canvas Area */}
-        <div className="flex-1 w-full bg-black/40 rounded-lg border border-[#332f2a] overflow-auto">
-          {activePhoto ? (
-            <HotspotCanvas 
-              key={activePhoto.id}
-              imageUrl={activePhoto.image_url} 
-              hotspots={hotspots}
-              isEditing={isEditing}
-              highlightedHotspotId={highlightedHotspotId}
-              reshapingHotspot={reshapingHotspot}
-              onCancelEdit={() => {
-                setIsEditing(false);
-                setReshapingHotspot(null);
-              }}
-              onHotspotCreated={handleHotspotCreated}
-              onHotspotClick={handleHotspotClick}
-              onHotspotDelete={handleDeleteHotspot}
-              onHotspotEdit={setEditingHotspot}
-              onConfirmReshape={handleConfirmReshape}
-              onCancelReshape={handleCancelReshape}
-              onBatchUpdateHotspots={handleBatchUpdateHotspots}
-              onUndo={handleUndo}
-              canUndo={undoStack.length > 0 && !isUndoing}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-brand-text-muted flex-col">
-              <p className="mb-4 text-center">No views uploaded for this room yet.</p>
-              {!uploading && (
-                <div className="w-72">
-                  <ImageUploadDropzone onUpload={handleUploadRootPhoto} isUploading={uploading} label="Upload First Photo" />
+        {/* Main Column */}
+        <div className="flex-1 w-full min-w-0 flex flex-col gap-4">
+          {/* Main Canvas Area */}
+          <div className="w-full bg-black/40 rounded-lg border border-[#332f2a] overflow-auto relative">
+            {replacingImage && (
+              <div className="absolute inset-0 z-30 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+                <RefreshCw className="h-8 w-8 text-amber-400 animate-spin" />
+                <span className="text-xs font-bold uppercase tracking-widest text-white">Replacing image & preserving hotspots...</span>
+              </div>
+            )}
+            {activePhoto ? (
+              <HotspotCanvas 
+                key={`${activePhoto.id}-${activePhoto.image_url}`}
+                imageUrl={activePhoto.image_url} 
+                hotspots={hotspots}
+                isEditing={isEditing}
+                highlightedHotspotId={highlightedHotspotId}
+                reshapingHotspot={reshapingHotspot}
+                movingHotspot={activeMoveSession ? { hotspot: activeMoveSession.hotspot, sourcePhotoId: activeMoveSession.sourcePhotoId } : null}
+                onCancelEdit={() => {
+                  setIsEditing(false);
+                  setReshapingHotspot(null);
+                  setActiveMoveSession(null);
+                }}
+                onHotspotCreated={handleHotspotCreated}
+                onHotspotClick={handleHotspotClick}
+                onHotspotDelete={handleDeleteHotspot}
+                onHotspotEdit={setEditingHotspot}
+                onConfirmReshape={handleConfirmReshape}
+                onCancelReshape={handleCancelReshape}
+                onConfirmMoveHotspot={handleConfirmMoveHotspot}
+                onCancelMoveHotspot={handleCancelMoveHotspot}
+                onBatchUpdateHotspots={handleBatchUpdateHotspots}
+                onUndo={handleUndo}
+                canUndo={undoStack.length > 0 && !isUndoing}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-brand-text-muted flex-col p-8">
+                <p className="mb-4 text-center">No views uploaded for this room yet.</p>
+                {!uploading && (
+                  <div className="w-72">
+                    <ImageUploadDropzone onUpload={handleUploadRootPhoto} isUploading={uploading} label="Upload First Photo" />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Available Hotspots on this Selected View */}
+          {activePhoto && (
+            <div className="w-full bg-[#161412] rounded-lg border border-[#332f2a] p-4 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-3 border-b border-[#2d2924]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded bg-brand-accent/15 text-brand-accent border border-brand-accent/25">
+                    <MapPin className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-serif text-base font-bold text-white tracking-wide flex items-center gap-2">
+                      <span>Hotspots on {breadcrumbChain[breadcrumbChain.length - 1]?.label || activePhoto.label || 'View'}</span>
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#252320] border border-[#332f2a] text-brand-text-muted">
+                        {hotspots.length}
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-brand-text-muted">
+                      Click any hotspot name to locate and inspect its contents
+                    </p>
+                  </div>
                 </div>
-              )}
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  {hotspots.filter(h => !hotspotSearchFilter || h.label.toLowerCase().includes(hotspotSearchFilter.toLowerCase())).length > 8 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsExtendedHotspotsView(prev => !prev)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded border transition-all shrink-0 ${
+                        isExtendedHotspotsView
+                          ? 'bg-brand-accent/20 border-brand-accent text-brand-accent shadow-sm'
+                          : 'bg-[#141311] border-[#332f2a] hover:border-[#4a443c] text-brand-text hover:text-white'
+                      }`}
+                      title={isExtendedHotspotsView ? "Collapse to 8 hotspots" : "Extend view to 16 hotspots (scrollable)"}
+                    >
+                      {isExtendedHotspotsView ? (
+                        <>
+                          <ChevronUp className="h-3.5 w-3.5 text-brand-accent" />
+                          <span>Show 8</span>
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="h-3.5 w-3.5 text-brand-accent" />
+                          <span>Extend to 16</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {hotspots.length > 3 && (
+                    <div className="relative w-full sm:w-52">
+                      <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-brand-text-muted" />
+                      <input
+                        type="text"
+                        value={hotspotSearchFilter}
+                        onChange={(e) => setHotspotSearchFilter(e.target.value)}
+                        placeholder="Filter hotspots..."
+                        className="w-full bg-[#0d0c0b] border border-[#332f2a] rounded pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {(() => {
+                // 1. Filter and Alphanumeric Sort (natural numeric ordering first)
+                const filteredSortedHotspots = [...hotspots]
+                  .filter(h => !hotspotSearchFilter || h.label.toLowerCase().includes(hotspotSearchFilter.toLowerCase()))
+                  .sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, { numeric: true, sensitivity: 'base' }));
+
+                if (filteredSortedHotspots.length === 0) {
+                  return (
+                    <div className="text-center py-6 text-xs text-brand-text-muted border border-dashed border-[#2d2924] rounded-md p-4 bg-black/20">
+                      {hotspots.length === 0 ? (
+                        <>
+                          <MapPin className="h-5 w-5 mx-auto mb-1.5 text-brand-text-muted/60" />
+                          <span>No hotspots created on this view yet.</span>
+                          {isEditing && (
+                            <span className="block mt-1 text-brand-accent/80">Use Polygon, Rectangle, or Freehand above to trace a storage region.</span>
+                          )}
+                        </>
+                      ) : (
+                        <span>No hotspots match &quot;{hotspotSearchFilter}&quot;</span>
+                      )}
+                    </div>
+                  );
+                }
+
+                // 2. Limit display to 8 items by default, or 16 when extended
+                const displayLimit = isExtendedHotspotsView ? 16 : 8;
+                const displayedHotspots = filteredSortedHotspots.slice(0, displayLimit);
+
+                return (
+                  <div className="space-y-3">
+                    <div 
+                      onMouseLeave={() => setHighlightedHotspotId(null)}
+                      className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2.5 ${
+                        isExtendedHotspotsView ? 'max-h-[300px] overflow-y-auto pr-1.5' : ''
+                      }`}
+                    >
+                      {displayedHotspots.map((hs) => {
+                        const isHovered = highlightedHotspotId === hs.id;
+                        const isSelectedLeaf = selectedLeafHotspot?.id === hs.id;
+
+                        return (
+                          <div
+                            key={hs.id}
+                            onClick={() => {
+                              setHighlightedHotspotId(hs.id);
+                              handleHotspotClick(hs);
+                            }}
+                            onMouseEnter={() => setHighlightedHotspotId(hs.id)}
+                            onMouseLeave={() => setHighlightedHotspotId(null)}
+                            className={`p-3 rounded border transition-all cursor-pointer group flex flex-col justify-between ${
+                              isHovered
+                                ? 'bg-brand-accent/20 border-brand-accent shadow-[0_0_12px_rgba(188,115,83,0.3)] ring-1 ring-brand-accent'
+                                : isSelectedLeaf
+                                  ? 'bg-[#1f1d1a] border-[#4a443c] ring-1 ring-white/10'
+                                  : 'bg-[#1a1816]/70 border-[#2d2924] hover:border-[#4a443c] hover:bg-[#1a1816]'
+                            }`}
+                            title={hs.is_leaf ? `Open contents for "${hs.label}"` : `Drill down into "${hs.label}"`}
+                          >
+                            <div className="flex items-start justify-between gap-2 min-w-0">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className={`p-1.5 rounded shrink-0 transition-colors ${
+                                  isHovered 
+                                    ? 'bg-brand-accent text-white' 
+                                    : isSelectedLeaf
+                                      ? 'bg-brand-accent/25 text-brand-accent'
+                                      : 'bg-[#252320] text-brand-text-muted group-hover:text-brand-accent'
+                                }`}>
+                                  {hs.is_leaf ? <Archive className="h-3.5 w-3.5" /> : <Layers className="h-3.5 w-3.5" />}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className={`text-sm font-bold truncate transition-colors ${
+                                    isHovered 
+                                      ? 'text-white' 
+                                      : isSelectedLeaf 
+                                        ? 'text-white' 
+                                        : 'text-white/90 group-hover:text-brand-accent'
+                                  }`}>
+                                    {hs.label}
+                                  </div>
+                                  <div className="text-[10px] text-brand-text-muted tracking-wider uppercase font-mono mt-0.5 flex items-center gap-1.5">
+                                    <span>{hs.is_leaf ? "Storage Location" : "Opens Sub-View"}</span>
+                                    {isSelectedLeaf && (
+                                      <span className="text-[9px] text-brand-accent font-semibold px-1 py-0.2 rounded bg-brand-accent/15 border border-brand-accent/30 lowercase">
+                                        open
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${
+                                isHovered ? 'text-brand-accent translate-x-0.5' : 'text-brand-text-muted group-hover:text-white'
+                              }`} />
+                            </div>
+
+                            {isEditing && isOnline && (
+                              <div className="mt-2.5 pt-2 border-t border-[#262320] flex items-center justify-end gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStartMoveHotspot(hs);
+                                  }}
+                                  className="p-1 rounded text-brand-text-muted hover:text-purple-400 hover:bg-purple-500/10 transition-colors"
+                                  title={`Move "${hs.label}" to another view`}
+                                >
+                                  <ArrowRightLeft className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStartReshape(hs);
+                                  }}
+                                  className="p-1 rounded text-brand-text-muted hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
+                                  title={`Redraw boundary for "${hs.label}"`}
+                                >
+                                  <Crop className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingHotspot(hs);
+                                  }}
+                                  className="p-1 rounded text-brand-text-muted hover:text-brand-accent hover:bg-brand-accent/10 transition-colors"
+                                  title={`Edit "${hs.label}"`}
+                                >
+                                  <Edit2 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteHotspot(hs);
+                                  }}
+                                  className="p-1 rounded text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                  title={`Delete "${hs.label}"`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {filteredSortedHotspots.length > 8 && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#262320] text-xs text-brand-text-muted">
+                        <span>
+                          Showing {displayedHotspots.length} of {filteredSortedHotspots.length} hotspots
+                          {filteredSortedHotspots.length > 16 && isExtendedHotspotsView && " (capped at 16, scrollable)"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsExtendedHotspotsView(prev => !prev)}
+                          className="text-xs text-brand-accent hover:underline flex items-center gap-1 font-semibold transition-colors"
+                        >
+                          {isExtendedHotspotsView ? (
+                            <>
+                              <ChevronUp className="h-3.5 w-3.5" />
+                              <span>Collapse to 8 hotspots</span>
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="h-3.5 w-3.5" />
+                              <span>Extend to 16 hotspots (scrollable)</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -1684,6 +2294,13 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               <div className="flex items-center gap-1 shrink-0">
                 {isOnline && (
                   <>
+                    <button 
+                      onClick={() => handleStartMoveHotspot(selectedLeafHotspot)}
+                      className="p-1.5 text-brand-text-muted hover:text-purple-400 hover:bg-purple-500/10 rounded transition-colors"
+                      title={`Move "${selectedLeafHotspot.label}" to another view`}
+                    >
+                      <ArrowRightLeft className="h-4 w-4" />
+                    </button>
                     <button 
                       onClick={() => handleStartReshape(selectedLeafHotspot)}
                       className="p-1.5 text-brand-text-muted hover:text-sky-400 hover:bg-sky-500/10 rounded transition-colors"
@@ -1759,20 +2376,48 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 <div className="flex flex-col gap-2">
                   {leafComponents.map(lc => (
                     <div key={lc.component_id} className="flex items-center justify-between bg-black/40 border border-[#332f2a] p-2.5 rounded group hover:border-[#4a443c] transition-colors">
-                      <div className="flex flex-col flex-1 min-w-0 mr-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-sm text-white font-medium truncate">{lc.components?.name || "Unknown Item"}</span>
-                          {isPersonalItem(lc.components) && (
-                            <span className="text-[9px] px-1.5 py-0.5 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
-                              Personal
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0 mr-2">
+                        {lc.components?.photo_url && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPreviewImage({
+                                url: lc.components!.photo_url!,
+                                title: lc.components?.name || "Item",
+                                subtitle: isPersonalItem(lc.components) ? "Personal Item Photo" : "Component Image"
+                              });
+                            }}
+                            className="h-10 w-10 rounded border border-[#332f2a] hover:border-brand-accent overflow-hidden shrink-0 cursor-zoom-in group/thumb block bg-black/40"
+                            title="Click to view full image"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={lc.components.photo_url} alt={lc.components?.name} className="h-full w-full object-cover group-hover/thumb:scale-110 transition-transform duration-200" />
+                          </button>
+                        )}
+                        <div 
+                          onClick={() => setQuickViewComponentId(lc.component_id)}
+                          className="flex flex-col flex-1 min-w-0 cursor-pointer group/item"
+                          title="Click to view item details"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm text-white font-medium truncate group-hover/item:text-brand-accent transition-colors">
+                              {lc.components?.name || "Unknown Item"}
+                            </span>
+                            {isPersonalItem(lc.components) && (
+                              <span className="text-[9px] px-1.5 py-0.5 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
+                                Personal
+                              </span>
+                            )}
+                          </div>
+                          {lc.components?.notes && (
+                            <span className="text-[10px] text-brand-text-muted truncate group-hover/item:text-brand-text transition-colors">
+                              {lc.components.notes}
                             </span>
                           )}
                         </div>
-                        {lc.components?.notes && (
-                          <span className="text-[10px] text-brand-text-muted truncate">{lc.components.notes}</span>
-                        )}
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
                         {/* Quantity Stepper */}
                         <div className="flex items-center border border-[#332f2a] rounded overflow-hidden bg-[#141311]">
                           <button
@@ -1882,9 +2527,22 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                             Total: {c.totals?.total_owned_qty ?? 0} | In storage: {c.totals?.in_storage_qty ?? 0}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1 text-xs text-brand-accent font-bold px-2 py-1 bg-brand-accent/10 rounded group-hover:bg-brand-accent group-hover:text-white transition-colors shrink-0">
-                          <Plus className="h-3.5 w-3.5" />
-                          <span>Add</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span
+                            role="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQuickViewComponentId(c.id);
+                            }}
+                            className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#332f2a] rounded transition-colors"
+                            title="Preview item details"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </span>
+                          <div className="flex items-center gap-1 text-xs text-brand-accent font-bold px-2 py-1 bg-brand-accent/10 rounded group-hover:bg-brand-accent group-hover:text-white transition-colors">
+                            <Plus className="h-3.5 w-3.5" />
+                            <span>Add</span>
+                          </div>
                         </div>
                       </button>
                     ))}
@@ -1913,6 +2571,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             handleUpdateHotspotDetails(editingHotspot.id, label, isLeaf);
           }}
           onRedrawShape={() => handleStartReshape(editingHotspot)}
+          onMoveHotspot={() => handleStartMoveHotspot(editingHotspot)}
           onInsertIntermediate={
             !editingHotspot.is_leaf && editingHotspot.child_photo_id
               ? () => handleOpenInsertIntermediate(editingHotspot)
@@ -1930,6 +2589,34 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           onSubmit={handleExecuteInsertIntermediate}
         />
       )}
+
+      {targetMoveHotspot && (
+        <MoveHotspotModal
+          hotspot={targetMoveHotspot}
+          currentPhotoId={activePhotoId || targetMoveHotspot.photo_id}
+          photos={photos}
+          allHotspots={hotspots}
+          onClose={() => setTargetMoveHotspot(null)}
+          onSelectDestination={handleSelectMoveDestination}
+        />
+      )}
+
+      {/* Component Quick View Modal */}
+      <ComponentQuickViewModal
+        componentId={quickViewComponentId}
+        isOpen={!!quickViewComponentId}
+        onClose={() => setQuickViewComponentId(null)}
+        currentHotspotId={selectedLeafHotspot?.id}
+      />
+
+      {/* Full Image Preview Modal */}
+      <ImagePreviewModal
+        isOpen={!!previewImage}
+        imageUrl={previewImage?.url || null}
+        title={previewImage?.title}
+        subtitle={previewImage?.subtitle}
+        onClose={() => setPreviewImage(null)}
+      />
     </div>
   );
 }

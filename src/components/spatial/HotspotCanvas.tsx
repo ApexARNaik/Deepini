@@ -4,7 +4,7 @@ import { useRef, useState, useEffect } from "react";
 import { SpatialHotspot } from "@/lib/api";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { useNetworkState } from "@/hooks/useNetworkState";
-import { Trash2, MapPin, Check, RotateCcw, Edit2, Sliders, Crop, Move } from "lucide-react";
+import { Trash2, MapPin, Check, RotateCcw, Edit2, Sliders, Crop, Move, ArrowRightLeft } from "lucide-react";
 
 interface Props {
   imageUrl: string;
@@ -12,21 +12,26 @@ interface Props {
   isEditing: boolean;
   highlightedHotspotId?: string | null;
   reshapingHotspot?: SpatialHotspot | null;
+  movingHotspot?: { hotspot: SpatialHotspot; sourcePhotoId: string } | null;
   onHotspotCreated: (shapePoints: { x: number; y: number }[], label: string, isLeaf: boolean) => void;
   onHotspotClick: (hotspot: SpatialHotspot) => void;
   onHotspotDelete?: (hotspot: SpatialHotspot) => void;
   onHotspotEdit?: (hotspot: SpatialHotspot) => void;
   onConfirmReshape?: (hotspotId: string, newPoints: { x: number; y: number }[]) => void;
   onCancelReshape?: () => void;
+  onConfirmMoveHotspot?: (hotspotId: string, newPoints: { x: number; y: number }[]) => void;
+  onCancelMoveHotspot?: () => void;
   onBatchUpdateHotspots?: (updates: { id: string; shape_points: { x: number; y: number }[] }[]) => void;
   onUndo?: () => void;
   canUndo?: boolean;
   onCancelEdit: () => void;
 }
 
-type DrawMode = 'freehand' | 'polygon' | 'rectangle' | 'delete' | 'edit' | 'adjust';
+type DrawMode = 'freehand' | 'polygon' | 'rectangle' | 'arrow' | 'delete' | 'edit' | 'adjust';
 type RectStage = 'idle' | 'drawing' | 'resizing';
 type ResizeHandle = 'top' | 'bottom' | 'left' | 'right' | 'tl' | 'tr' | 'bl' | 'br' | 'move';
+type ArrowStage = 'idle' | 'drawing' | 'adjusting';
+type ArrowHandle = 'tail' | 'tip' | 'body';
 
 export function HotspotCanvas({ 
   imageUrl, 
@@ -34,12 +39,15 @@ export function HotspotCanvas({
   isEditing, 
   highlightedHotspotId, 
   reshapingHotspot,
+  movingHotspot,
   onHotspotCreated, 
   onHotspotClick, 
   onHotspotDelete,
   onHotspotEdit,
   onConfirmReshape,
   onCancelReshape,
+  onConfirmMoveHotspot,
+  onCancelMoveHotspot,
   onBatchUpdateHotspots,
   onUndo,
   canUndo = false,
@@ -68,6 +76,19 @@ export function HotspotCanvas({
     origBounds: { minX: number; minY: number; maxX: number; maxY: number };
   } | null>(null);
   const lastPolygonClickRef = useRef<number>(0);
+
+  // Arrow Mode States
+  const [arrowStage, setArrowStage] = useState<ArrowStage>('idle');
+  const [arrowStart, setArrowStart] = useState<{ x: number; y: number } | null>(null);
+  const [arrowEnd, setArrowEnd] = useState<{ x: number; y: number } | null>(null);
+  const [activeArrowHandle, setActiveArrowHandle] = useState<ArrowHandle | null>(null);
+  const [arrowDragInfo, setArrowDragInfo] = useState<{
+    startX: number;
+    startY: number;
+    origStart: { x: number; y: number };
+    origEnd: { x: number; y: number };
+  } | null>(null);
+  const lastFreehandClickRef = useRef<number>(0);
 
   // Adjust Mode States
   const [adjustBounds, setAdjustBounds] = useState<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
@@ -101,6 +122,51 @@ export function HotspotCanvas({
     setDragStartInfo(null);
   };
 
+  const resetArrowState = () => {
+    setArrowStage('idle');
+    setArrowStart(null);
+    setArrowEnd(null);
+    setActiveArrowHandle(null);
+    setArrowDragInfo(null);
+  };
+
+  const computeArrowPoints = (
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ): { x: number; y: number }[] => {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 0.005) return [];
+
+    const ux = dx / length;
+    const uy = dy / length;
+    const nx = -uy;
+    const ny = ux;
+
+    const headLength = Math.min(length * 0.38, Math.max(0.025, length * 0.25));
+    const headHalfWidth = Math.min(headLength * 0.55, 0.045);
+    const shaftHalfWidth = Math.max(0.005, headHalfWidth * 0.42);
+
+    const bx = end.x - ux * headLength;
+    const by = end.y - uy * headLength;
+
+    const clampPt = (pt: { x: number; y: number }) => ({
+      x: Math.max(0.002, Math.min(0.998, pt.x)),
+      y: Math.max(0.002, Math.min(0.998, pt.y))
+    });
+
+    return [
+      clampPt({ x: start.x - nx * shaftHalfWidth, y: start.y - ny * shaftHalfWidth }),
+      clampPt({ x: bx - nx * shaftHalfWidth, y: by - ny * shaftHalfWidth }),
+      clampPt({ x: bx - nx * headHalfWidth, y: by - ny * headHalfWidth }),
+      clampPt({ x: end.x, y: end.y }),
+      clampPt({ x: bx + nx * headHalfWidth, y: by + ny * headHalfWidth }),
+      clampPt({ x: bx + nx * shaftHalfWidth, y: by + ny * shaftHalfWidth }),
+      clampPt({ x: start.x + nx * shaftHalfWidth, y: start.y + ny * shaftHalfWidth })
+    ];
+  };
+
   // Reset mode when exiting edit
   useEffect(() => {
     if (!isEditing) {
@@ -109,6 +175,7 @@ export function HotspotCanvas({
       setIsDrawing(false);
       setPolygonMousePos(null);
       resetRectangleState();
+      resetArrowState();
       setAdjustBounds(null);
       setAdjustedHotspots([]);
     }
@@ -121,10 +188,24 @@ export function HotspotCanvas({
       setCurrentPoints([]);
       setIsDrawing(false);
       resetRectangleState();
+      resetArrowState();
       setAdjustBounds(null);
       setAdjustedHotspots([]);
     }
   }, [reshapingHotspot]);
+
+  // When moving a specific hotspot to this canvas, reset drawing points & adjust bounds
+  useEffect(() => {
+    if (movingHotspot) {
+      setDrawMode('polygon');
+      setCurrentPoints([]);
+      setIsDrawing(false);
+      resetRectangleState();
+      resetArrowState();
+      setAdjustBounds(null);
+      setAdjustedHotspots([]);
+    }
+  }, [movingHotspot]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -134,6 +215,9 @@ export function HotspotCanvas({
           setIsDrawing(false);
           if (reshapingHotspot) {
             onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+            setCurrentPoints([]);
+          } else if (movingHotspot) {
+            onConfirmMoveHotspot?.(movingHotspot.hotspot.id, currentPoints);
             setCurrentPoints([]);
           } else {
             setShowConfig(true);
@@ -145,6 +229,8 @@ export function HotspotCanvas({
           setPolygonMousePos(null);
           if (reshapingHotspot) {
             onCancelReshape?.();
+          } else if (movingHotspot) {
+            onCancelMoveHotspot?.();
           }
         }
       } else if (drawMode === 'rectangle') {
@@ -161,6 +247,10 @@ export function HotspotCanvas({
             onConfirmReshape?.(reshapingHotspot.id, pts);
             resetRectangleState();
             setCurrentPoints([]);
+          } else if (movingHotspot) {
+            onConfirmMoveHotspot?.(movingHotspot.hotspot.id, pts);
+            resetRectangleState();
+            setCurrentPoints([]);
           } else {
             setShowConfig(true);
           }
@@ -171,6 +261,33 @@ export function HotspotCanvas({
           setIsDrawing(false);
           if (reshapingHotspot) {
             onCancelReshape?.();
+          } else if (movingHotspot) {
+            onCancelMoveHotspot?.();
+          }
+        }
+      } else if (drawMode === 'arrow') {
+        if (e.key === 'Enter' && arrowStage === 'adjusting' && currentPoints.length > 0) {
+          e.preventDefault();
+          if (reshapingHotspot) {
+            onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+            resetArrowState();
+            setCurrentPoints([]);
+          } else if (movingHotspot) {
+            onConfirmMoveHotspot?.(movingHotspot.hotspot.id, currentPoints);
+            resetArrowState();
+            setCurrentPoints([]);
+          } else {
+            setShowConfig(true);
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          resetArrowState();
+          setCurrentPoints([]);
+          setIsDrawing(false);
+          if (reshapingHotspot) {
+            onCancelReshape?.();
+          } else if (movingHotspot) {
+            onCancelMoveHotspot?.();
           }
         }
       } else if (drawMode === 'adjust') {
@@ -183,7 +300,7 @@ export function HotspotCanvas({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isEditing, isOnline, drawMode, currentPoints, rectStage, rectBounds, reshapingHotspot, onConfirmReshape, onCancelReshape]);
+  }, [isEditing, isOnline, drawMode, currentPoints, rectStage, rectBounds, arrowStage, reshapingHotspot, movingHotspot, onConfirmReshape, onCancelReshape, onConfirmMoveHotspot, onCancelMoveHotspot]);
 
   const getNormalizedPoint = (e: React.PointerEvent) => {
     if (!containerRef.current) return { x: 0, y: 0 };
@@ -233,6 +350,112 @@ export function HotspotCanvas({
     setIsDrawing(false);
     setPolygonMousePos(null);
     resetRectangleState();
+    resetArrowState();
+  };
+
+  // Freehand button click handlers supporting double-click toggle for Arrow mode
+  const handleFreehandButtonClick = () => {
+    const now = Date.now();
+    const diff = now - lastFreehandClickRef.current;
+    lastFreehandClickRef.current = now;
+
+    if (diff < 400) {
+      // Double click detected -> toggle Arrow mode
+      setDrawMode(drawMode === 'arrow' ? 'freehand' : 'arrow');
+      setCurrentPoints([]);
+      setIsDrawing(false);
+      setPolygonMousePos(null);
+      resetRectangleState();
+      resetArrowState();
+      return;
+    }
+
+    // Single click
+    if (drawMode === 'arrow') {
+      setDrawMode('freehand');
+    } else {
+      setDrawMode('freehand');
+    }
+    setCurrentPoints([]);
+    setIsDrawing(false);
+    setPolygonMousePos(null);
+    resetRectangleState();
+    resetArrowState();
+  };
+
+  const handleFreehandButtonDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDrawMode('arrow');
+    setCurrentPoints([]);
+    setIsDrawing(false);
+    setPolygonMousePos(null);
+    resetRectangleState();
+    resetArrowState();
+  };
+
+  // Arrow resize and drag handlers
+  const handleArrowResizeStart = (e: React.PointerEvent, handle: ArrowHandle) => {
+    if (drawMode !== 'arrow' || arrowStage !== 'adjusting' || !arrowStart || !arrowEnd) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    setActiveArrowHandle(handle);
+    const pt = getNormalizedPoint(e);
+    setArrowDragInfo({
+      startX: pt.x,
+      startY: pt.y,
+      origStart: { ...arrowStart },
+      origEnd: { ...arrowEnd }
+    });
+  };
+
+  const handleArrowResizeMove = (e: React.PointerEvent) => {
+    if (!activeArrowHandle || !arrowDragInfo || !arrowStart || !arrowEnd) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const pt = getNormalizedPoint(e);
+    const dx = pt.x - arrowDragInfo.startX;
+    const dy = pt.y - arrowDragInfo.startY;
+
+    let newStart = { ...arrowDragInfo.origStart };
+    let newEnd = { ...arrowDragInfo.origEnd };
+
+    if (activeArrowHandle === 'tip') {
+      newEnd = {
+        x: Math.max(0.002, Math.min(0.998, pt.x)),
+        y: Math.max(0.002, Math.min(0.998, pt.y))
+      };
+    } else if (activeArrowHandle === 'tail') {
+      newStart = {
+        x: Math.max(0.002, Math.min(0.998, pt.x)),
+        y: Math.max(0.002, Math.min(0.998, pt.y))
+      };
+    } else if (activeArrowHandle === 'body') {
+      const clampDx = Math.max(-arrowDragInfo.origStart.x + 0.01, Math.min(0.99 - arrowDragInfo.origEnd.x, dx));
+      const clampDy = Math.max(-arrowDragInfo.origStart.y + 0.01, Math.min(0.99 - arrowDragInfo.origEnd.y, dy));
+      newStart = { x: arrowDragInfo.origStart.x + clampDx, y: arrowDragInfo.origStart.y + clampDy };
+      newEnd = { x: arrowDragInfo.origEnd.x + clampDx, y: arrowDragInfo.origEnd.y + clampDy };
+    }
+
+    setArrowStart(newStart);
+    setArrowEnd(newEnd);
+    const pts = computeArrowPoints(newStart, newEnd);
+    if (pts.length > 0) {
+      setCurrentPoints(pts);
+    }
+  };
+
+  const handleArrowResizeEnd = (e: React.PointerEvent) => {
+    if (!activeArrowHandle) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+    } catch {}
+    setActiveArrowHandle(null);
+    setArrowDragInfo(null);
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -258,6 +481,9 @@ export function HotspotCanvas({
           if (reshapingHotspot) {
             onConfirmReshape?.(reshapingHotspot.id, currentPoints);
             setCurrentPoints([]);
+          } else if (movingHotspot) {
+            onConfirmMoveHotspot?.(movingHotspot.hotspot.id, currentPoints);
+            setCurrentPoints([]);
           } else {
             setShowConfig(true);
           }
@@ -278,6 +504,17 @@ export function HotspotCanvas({
         setIsDrawing(true);
         setCurrentPoints([]);
         setRectBounds(null);
+      }
+    } else if (drawMode === 'arrow') {
+      if (arrowStage === 'idle') {
+        e.preventDefault();
+        const pt = getNormalizedPoint(e);
+        containerRef.current?.setPointerCapture(e.pointerId);
+        setArrowStart(pt);
+        setArrowEnd(pt);
+        setArrowStage('drawing');
+        setIsDrawing(true);
+        setCurrentPoints([]);
       }
     }
   };
@@ -305,6 +542,18 @@ export function HotspotCanvas({
       } else if (rectStage === 'resizing' && activeResizeHandle) {
         handleResizeMove(e);
       }
+    } else if (drawMode === 'arrow') {
+      if (arrowStage === 'drawing' && isDrawing && arrowStart) {
+        e.preventDefault();
+        const pt = getNormalizedPoint(e);
+        setArrowEnd(pt);
+        const pts = computeArrowPoints(arrowStart, pt);
+        if (pts.length > 0) {
+          setCurrentPoints(pts);
+        }
+      } else if (arrowStage === 'adjusting' && activeArrowHandle) {
+        handleArrowResizeMove(e);
+      }
     }
   };
 
@@ -325,6 +574,9 @@ export function HotspotCanvas({
       if (currentPoints.length > 3) {
         if (reshapingHotspot) {
           onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+          setCurrentPoints([]);
+        } else if (movingHotspot) {
+          onConfirmMoveHotspot?.(movingHotspot.hotspot.id, currentPoints);
           setCurrentPoints([]);
         } else {
           setShowConfig(true);
@@ -358,6 +610,29 @@ export function HotspotCanvas({
           setRectStage('resizing');
         } else {
           resetRectangleState();
+          setCurrentPoints([]);
+        }
+      }
+    } else if (drawMode === 'arrow') {
+      if (arrowStage === 'drawing' && isDrawing && arrowStart && arrowEnd) {
+        e.preventDefault();
+        try {
+          containerRef.current?.releasePointerCapture(e.pointerId);
+        } catch {}
+        setIsDrawing(false);
+
+        const dist = Math.hypot(arrowEnd.x - arrowStart.x, arrowEnd.y - arrowStart.y);
+        if (dist > 0.02) {
+          const pts = computeArrowPoints(arrowStart, arrowEnd);
+          if (pts.length > 0) {
+            setCurrentPoints(pts);
+            setArrowStage('adjusting');
+          } else {
+            resetArrowState();
+            setCurrentPoints([]);
+          }
+        } else {
+          resetArrowState();
           setCurrentPoints([]);
         }
       }
@@ -707,107 +982,28 @@ export function HotspotCanvas({
             </button>
             <button 
               type="button"
-              onClick={() => { 
-                setDrawMode('freehand'); 
-                setCurrentPoints([]); 
-                setIsDrawing(false); 
-                setPolygonMousePos(null);
-                resetRectangleState();
-              }}
-              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                drawMode === 'freehand' 
-                  ? 'bg-brand-accent text-white shadow-sm' 
-                  : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
+              onClick={handleFreehandButtonClick}
+              onDoubleClick={handleFreehandButtonDoubleClick}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-all ${
+                drawMode === 'arrow' 
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md ring-1 ring-purple-400/50' 
+                  : drawMode === 'freehand' 
+                    ? 'bg-brand-accent text-white shadow-sm' 
+                    : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
               }`}
+              title={
+                drawMode === 'arrow'
+                  ? "Arrow Mode Active (Click to switch to Freehand, or double-click to toggle)"
+                  : "Freehand Tool (Double-click to activate Arrow mode)"
+              }
             >
-              Freehand
+              <span>Freehand</span>
+              {drawMode === 'arrow' && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/40 text-purple-200 border border-purple-400/40">
+                  Arrow ➔
+                </span>
+              )}
             </button>
-            
-            <div className="h-4 w-px bg-[#332f2a] mx-1" />
-
-            <button 
-              type="button"
-              onClick={() => { 
-                if (drawMode === 'adjust') {
-                  setDrawMode('polygon');
-                  setAdjustBounds(null);
-                  setAdjustedHotspots([]);
-                } else {
-                  setDrawMode('adjust');
-                  setCurrentPoints([]);
-                  setIsDrawing(false);
-                  setPolygonMousePos(null);
-                  resetRectangleState();
-                  initAdjustMode();
-                }
-              }}
-              disabled={hotspots.length === 0}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
-                drawMode === 'adjust' 
-                  ? 'bg-sky-600 text-white shadow-md' 
-                  : 'text-sky-400/90 hover:text-sky-300 hover:bg-sky-500/10 disabled:opacity-40 disabled:pointer-events-none'
-              }`}
-              title="Adjust, scale, or move all hotspots collectively (Fit / Adjust Hotspots)"
-            >
-              <Sliders className="h-3.5 w-3.5" />
-              <span>Adjust Hotspots</span>
-            </button>
-
-            <button 
-              type="button"
-              onClick={() => { 
-                setDrawMode('edit'); 
-                setCurrentPoints([]); 
-                setIsDrawing(false); 
-                setPolygonMousePos(null);
-                resetRectangleState();
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
-                drawMode === 'edit' 
-                  ? 'bg-amber-600 text-white shadow-md' 
-                  : 'text-amber-400/90 hover:text-amber-300 hover:bg-amber-500/10'
-              }`}
-              title="Click to select and edit unsaved image hotspots (name and storage type)"
-            >
-              <Edit2 className="h-3.5 w-3.5" />
-              <span>Edit Hotspot</span>
-            </button>
-
-            <button 
-              type="button"
-              onClick={() => { 
-                setDrawMode('delete'); 
-                setCurrentPoints([]); 
-                setIsDrawing(false); 
-                setPolygonMousePos(null);
-                resetRectangleState();
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors ${
-                drawMode === 'delete' 
-                  ? 'bg-red-600 text-white shadow-md' 
-                  : 'text-red-400/90 hover:text-red-300 hover:bg-red-500/10'
-              }`}
-              title="Click to select and delete hotspots"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span>Delete Hotspot</span>
-            </button>
-
-            {onUndo && (
-              <>
-                <div className="h-4 w-px bg-[#332f2a] mx-1" />
-                <button
-                  type="button"
-                  onClick={onUndo}
-                  disabled={!canUndo}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded transition-colors text-brand-text-muted hover:text-white hover:bg-[#252320] disabled:opacity-30 disabled:pointer-events-none"
-                  title="Undo recent action (Ctrl+Z)"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  <span>Undo</span>
-                </button>
-              </>
-            )}
           </div>
 
           {/* Right: Contextual Status, Guidance & Quick Action Buttons */}
@@ -816,7 +1012,7 @@ export function HotspotCanvas({
               <div className="bg-sky-950/90 text-sky-200 border border-sky-600/70 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-sm animate-pulse">
                 <Crop className="h-3.5 w-3.5 text-sky-400 shrink-0" />
                 <span>
-                  Redrawing shape for <strong>&quot;{reshapingHotspot.label}&quot;</strong> — draw new outline with Polygon, Rect, or Freehand.
+                  Redrawing shape for <strong>&quot;{reshapingHotspot.label}&quot;</strong> — draw new outline with Polygon, Rect, Arrow, or Freehand.
                 </span>
                 <button
                   type="button"
@@ -824,11 +1020,34 @@ export function HotspotCanvas({
                     setCurrentPoints([]);
                     setIsDrawing(false);
                     resetRectangleState();
+                    resetArrowState();
                     onCancelReshape?.();
                   }}
                   className="ml-2 px-2 py-0.5 bg-[#252320] hover:bg-[#332f2a] text-white text-[11px] rounded border border-sky-400/40"
                 >
                   Cancel Redraw
+                </button>
+              </div>
+            )}
+
+            {movingHotspot && (
+              <div className="bg-purple-950/90 text-purple-200 border border-purple-600/70 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-sm animate-pulse">
+                <ArrowRightLeft className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                <span>
+                  Moving <strong>&quot;{movingHotspot.hotspot.label}&quot;</strong> to this view — Draw new boundary outline with Polygon, Rect, Arrow, or Freehand.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentPoints([]);
+                    setIsDrawing(false);
+                    resetRectangleState();
+                    resetArrowState();
+                    onCancelMoveHotspot?.();
+                  }}
+                  className="ml-2 px-2 py-0.5 bg-[#252320] hover:bg-[#332f2a] text-white text-[11px] rounded border border-purple-400/40"
+                >
+                  Cancel Move
                 </button>
               </div>
             )}
@@ -929,6 +1148,10 @@ export function HotspotCanvas({
                           onConfirmReshape?.(reshapingHotspot.id, pts);
                           resetRectangleState();
                           setCurrentPoints([]);
+                        } else if (movingHotspot) {
+                          onConfirmMoveHotspot?.(movingHotspot.hotspot.id, pts);
+                          resetRectangleState();
+                          setCurrentPoints([]);
                         } else {
                           setCurrentPoints(pts);
                           setShowConfig(true);
@@ -960,6 +1183,64 @@ export function HotspotCanvas({
               </div>
             )}
 
+            {drawMode === 'arrow' && (
+              <div className="flex items-center gap-2">
+                <div className="bg-purple-950/80 text-purple-200 border border-purple-600/60 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+                  <span>
+                    {arrowStage === 'idle'
+                      ? "Click & drag on image to draw arrow"
+                      : arrowStage === 'drawing'
+                        ? "Release pointer to set arrow"
+                        : "Drag tip or tail to adjust. Press Enter or Confirm to save."}
+                  </span>
+                </div>
+
+                {arrowStage === 'adjusting' && currentPoints.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (reshapingHotspot) {
+                          onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+                          resetArrowState();
+                          setCurrentPoints([]);
+                        } else if (movingHotspot) {
+                          onConfirmMoveHotspot?.(movingHotspot.hotspot.id, currentPoints);
+                          resetArrowState();
+                          setCurrentPoints([]);
+                        } else {
+                          setShowConfig(true);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
+                      title="Confirm arrow hotspot (Enter)"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      <span>Confirm Hotspot</span>
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        resetArrowState();
+                        setCurrentPoints([]);
+                        setIsDrawing(false);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
+                      title="Cancel and redraw (Esc)"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span>Redraw</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {drawMode === 'polygon' && (
               <div className="text-xs text-brand-text-muted hidden sm:flex items-center gap-1.5 font-medium">
                 <span>Click to place vertices. Click start point or press <kbd className="bg-[#252320] px-1.5 py-0.5 rounded border border-[#332f2a] text-[10px] text-white font-mono">Enter</kbd> to close.</span>
@@ -971,6 +1252,78 @@ export function HotspotCanvas({
                 <span>Click & drag on image to trace boundary.</span>
               </div>
             )}
+          </div>
+
+          {/* Right Corner: Minimized Action Icons */}
+          <div className="flex items-center gap-1 shrink-0 ml-auto">
+            <div className="h-4 w-px bg-[#332f2a] mx-1 hidden sm:block" />
+            <button 
+              type="button"
+              onClick={() => { 
+                if (drawMode === 'adjust') {
+                  setDrawMode('polygon');
+                  setAdjustBounds(null);
+                  setAdjustedHotspots([]);
+                } else {
+                  setDrawMode('adjust');
+                  setCurrentPoints([]);
+                  setIsDrawing(false);
+                  setPolygonMousePos(null);
+                  resetRectangleState();
+                  initAdjustMode();
+                }
+              }}
+              disabled={hotspots.length === 0}
+              className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition-colors ${
+                drawMode === 'adjust' 
+                  ? 'bg-sky-600 text-white shadow-md' 
+                  : 'text-sky-400 hover:text-sky-300 hover:bg-sky-500/15 disabled:opacity-30 disabled:pointer-events-none'
+              }`}
+              title="Adjust Hotspots"
+              aria-label="Adjust Hotspots"
+            >
+              <Sliders className="h-4 w-4" />
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => { 
+                setDrawMode(drawMode === 'edit' ? 'polygon' : 'edit'); 
+                setCurrentPoints([]); 
+                setIsDrawing(false); 
+                setPolygonMousePos(null);
+                resetRectangleState();
+              }}
+              className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition-colors ${
+                drawMode === 'edit' 
+                  ? 'bg-amber-600 text-white shadow-md' 
+                  : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/15'
+              }`}
+              title="Edit Hotspot"
+              aria-label="Edit Hotspot"
+            >
+              <Edit2 className="h-4 w-4" />
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => { 
+                setDrawMode(drawMode === 'delete' ? 'polygon' : 'delete'); 
+                setCurrentPoints([]); 
+                setIsDrawing(false); 
+                setPolygonMousePos(null);
+                resetRectangleState();
+              }}
+              className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition-colors ${
+                drawMode === 'delete' 
+                  ? 'bg-red-600 text-white shadow-md' 
+                  : 'text-red-400 hover:text-red-300 hover:bg-red-500/15'
+              }`}
+              title="Delete Hotspot"
+              aria-label="Delete Hotspot"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           </div>
         </div>
       )}
@@ -1256,7 +1609,7 @@ export function HotspotCanvas({
           })}
 
           {/* Current Polygon or Freehand Drawing */}
-          {drawMode !== 'rectangle' && isDrawing && currentPoints.length > 0 && (
+          {drawMode !== 'rectangle' && drawMode !== 'arrow' && isDrawing && currentPoints.length > 0 && (
             <polyline 
               points={toPolygonString(drawMode === 'polygon' && polygonMousePos ? [...currentPoints, polygonMousePos] : currentPoints)} 
               className="fill-transparent stroke-brand-accent stroke-[0.3] border-dashed"
@@ -1264,11 +1617,76 @@ export function HotspotCanvas({
           )}
 
           {/* Closed shape preview when finished drawing but modal is open (Polygon & Freehand) */}
-          {drawMode !== 'rectangle' && !isDrawing && currentPoints.length > 0 && (
+          {drawMode !== 'rectangle' && drawMode !== 'arrow' && !isDrawing && currentPoints.length > 0 && (
             <polygon 
               points={toPolygonString(currentPoints)} 
               className="fill-brand-accent/20 stroke-brand-accent stroke-[0.3]"
             />
+          )}
+
+          {/* Dynamic Arrow Preview during drawing */}
+          {drawMode === 'arrow' && arrowStage === 'drawing' && arrowStart && arrowEnd && currentPoints.length > 0 && (
+            <g className="arrow-preview-group pointer-events-none">
+              <polygon
+                points={toPolygonString(currentPoints)}
+                className="fill-purple-500/30 stroke-purple-400 stroke-[0.5]"
+                strokeDasharray="2,2"
+              />
+              <line
+                x1={arrowStart.x * 100}
+                y1={arrowStart.y * 100}
+                x2={arrowEnd.x * 100}
+                y2={arrowEnd.y * 100}
+                stroke="#c084fc"
+                strokeWidth="0.4"
+                strokeDasharray="1.5,1.5"
+              />
+            </g>
+          )}
+
+          {/* Arrow in Adjusting Stage: Draggable Body + Tail/Tip Handles */}
+          {drawMode === 'arrow' && arrowStage === 'adjusting' && arrowStart && arrowEnd && currentPoints.length > 0 && (
+            <g className="arrow-editor-group pointer-events-auto">
+              {/* Draggable body for moving the whole arrow */}
+              <polygon
+                points={toPolygonString(currentPoints)}
+                className="fill-purple-500/30 stroke-purple-400 stroke-[0.6] cursor-move pointer-events-auto"
+                onPointerDown={(e) => handleArrowResizeStart(e, 'body')}
+                onPointerMove={handleArrowResizeMove}
+                onPointerUp={handleArrowResizeEnd}
+              />
+              {/* Direction line from tail to tip */}
+              <line
+                x1={arrowStart.x * 100}
+                y1={arrowStart.y * 100}
+                x2={arrowEnd.x * 100}
+                y2={arrowEnd.y * 100}
+                stroke="#c084fc"
+                strokeWidth="0.4"
+                strokeDasharray="1,1"
+                className="pointer-events-none"
+              />
+              {/* Tail handle */}
+              <circle
+                cx={arrowStart.x * 100}
+                cy={arrowStart.y * 100}
+                r={1.8}
+                className="fill-purple-300 stroke-purple-900 stroke-[0.4] cursor-grab pointer-events-auto hover:scale-125 transition-transform"
+                onPointerDown={(e) => handleArrowResizeStart(e, 'tail')}
+                onPointerMove={handleArrowResizeMove}
+                onPointerUp={handleArrowResizeEnd}
+              />
+              {/* Tip handle */}
+              <circle
+                cx={arrowEnd.x * 100}
+                cy={arrowEnd.y * 100}
+                r={2.2}
+                className="fill-amber-300 stroke-amber-900 stroke-[0.4] cursor-grab pointer-events-auto hover:scale-125 transition-transform"
+                onPointerDown={(e) => handleArrowResizeStart(e, 'tip')}
+                onPointerMove={handleArrowResizeMove}
+                onPointerUp={handleArrowResizeEnd}
+              />
+            </g>
           )}
 
           {/* Dynamic Rectangle Preview during drawing */}
@@ -1496,6 +1914,71 @@ export function HotspotCanvas({
           );
         })()}
 
+        {/* Floating Confirm / Redraw Action Bar for Arrow Mode */}
+        {drawMode === 'arrow' && arrowStage === 'adjusting' && arrowEnd && currentPoints.length > 0 && (() => {
+          const centerX = ((arrowStart ? (arrowStart.x + arrowEnd.x) / 2 : arrowEnd.x)) * 100;
+          const minY = Math.min(arrowStart?.y ?? arrowEnd.y, arrowEnd.y) * 100;
+          const isNearTop = minY < 12;
+          const posY = isNearTop ? Math.max(arrowStart?.y ?? arrowEnd.y, arrowEnd.y) * 100 : minY;
+
+          return (
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerMove={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                left: `${Math.max(12, Math.min(88, centerX))}%`,
+                top: `${Math.max(4, Math.min(96, posY))}%`
+              }}
+              className={`absolute -translate-x-1/2 z-30 flex items-center gap-2 bg-[#1a1816]/95 border border-[#4a443c] px-2 py-1.5 rounded-lg shadow-2xl backdrop-blur-md animate-fadeIn select-none ${
+                isNearTop ? "mt-3" : "-translate-y-full -mt-3"
+              }`}
+            >
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (currentPoints.length > 0) {
+                    if (reshapingHotspot) {
+                      onConfirmReshape?.(reshapingHotspot.id, currentPoints);
+                      resetArrowState();
+                      setCurrentPoints([]);
+                    } else if (movingHotspot) {
+                      onConfirmMoveHotspot?.(movingHotspot.hotspot.id, currentPoints);
+                      resetArrowState();
+                      setCurrentPoints([]);
+                    } else {
+                      setShowConfig(true);
+                    }
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
+                title="Confirm arrow hotspot (Enter)"
+              >
+                <Check className="h-3.5 w-3.5" />
+                <span>Confirm Arrow</span>
+              </button>
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resetArrowState();
+                  setCurrentPoints([]);
+                  setIsDrawing(false);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
+                title="Cancel and redraw (Esc)"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Redraw</span>
+              </button>
+            </div>
+          );
+        })()}
+
         {/* Floating Pin & Label for Highlighted Hotspot */}
         {hotspots.map((hs) => {
           if (hs.id !== highlightedHotspotId || !hs.shape_points || hs.shape_points.length === 0) return null;
@@ -1598,6 +2081,7 @@ export function HotspotCanvas({
             setShowConfig(false);
             setCurrentPoints([]);
             resetRectangleState();
+            resetArrowState();
           }}
           onSubmit={(label, isLeaf) => {
             const finalPoints = (currentPoints.length >= 3)
@@ -1614,6 +2098,7 @@ export function HotspotCanvas({
             setShowConfig(false);
             setCurrentPoints([]);
             resetRectangleState();
+            resetArrowState();
           }}
         />
       )}

@@ -5,6 +5,7 @@ import { ComponentWithTotals, deleteComponent, getComponentLocationAssignments }
 import { formatCurrency } from "@/lib/utils";
 import { ChevronRight, Trash2, AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { ImagePreviewModal } from "./ImagePreviewModal";
 
 interface Props {
   components: ComponentWithTotals[];
@@ -21,6 +22,7 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
     locations: { id: string; quantity: number; hotspot_id: string; label?: string }[];
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
   if (components.length === 0) {
     return (
@@ -106,8 +108,18 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
                 >
                   <td className="px-6 py-4">
                     {c.photo_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={c.photo_url} alt={c.name} className="h-10 w-10 object-cover rounded border border-[#332f2a]" />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPreviewImage({ url: c.photo_url!, title: c.name });
+                        }}
+                        className="h-10 w-10 relative group/img rounded overflow-hidden border border-[#332f2a] hover:border-brand-accent transition-all cursor-zoom-in block"
+                        title={`Click to view full image of ${c.name}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={c.photo_url} alt={c.name} className="h-full w-full object-cover group-hover/img:scale-110 transition-transform duration-200" />
+                      </button>
                     ) : (
                       <div className="h-10 w-10 bg-[#222] rounded flex items-center justify-center text-[#555] text-xs">
                         No Img
@@ -297,6 +309,15 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
           </div>
         </div>
       )}
+
+      {/* Image Preview Popup Modal */}
+      <ImagePreviewModal
+        isOpen={!!previewImage}
+        imageUrl={previewImage?.url || null}
+        title={previewImage?.title}
+        subtitle={isPersonal ? "Personal Item Photo" : "Component Image"}
+        onClose={() => setPreviewImage(null)}
+      />
     </>
   );
 }

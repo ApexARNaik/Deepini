@@ -5,13 +5,15 @@ import { getComponentDetails, ComponentWithTotals, ComponentLocation, isPersonal
 import { formatCurrency } from "@/lib/utils";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Edit2, MapPin, ExternalLink, ArrowLeft, FileText } from "lucide-react";
+import { Edit2, MapPin, ExternalLink, ArrowLeft, FileText, Maximize2 } from "lucide-react";
+import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 
 export default function ComponentDetailPage() {
   const { componentId } = useParams();
   const router = useRouter();
   const [data, setData] = useState<{ component: ComponentWithTotals, locations: ComponentLocation[] } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
 
   useEffect(() => {
     if (typeof componentId !== 'string') return;
@@ -44,8 +46,18 @@ export default function ComponentDetailPage() {
           <div className="flex gap-6">
             <div className="h-24 w-24 bg-[#1a1816] border border-[#332f2a] rounded shrink-0 overflow-hidden">
               {component.photo_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={component.photo_url} alt={component.name} className="w-full h-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setPreviewImage({ url: component.photo_url!, title: component.name, subtitle: isPersonal ? "Personal Item Photo" : "Component Image" })}
+                  className="w-full h-full relative group/photo cursor-zoom-in block"
+                  title="Click to view full image"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={component.photo_url} alt={component.name} className="w-full h-full object-cover group-hover/photo:scale-105 transition-transform duration-200" />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/photo:opacity-100 transition-opacity flex items-center justify-center text-white">
+                    <Maximize2 className="h-4 w-4" />
+                  </div>
+                </button>
               ) : (
                 <div className="h-full w-full flex items-center justify-center text-[10px] text-[#555] uppercase tracking-widest">No Img</div>
               )}
@@ -164,52 +176,60 @@ export default function ComponentDetailPage() {
                   </div>
                 </section>
               )}
-
-              {customFieldEntries.length > 0 && (
-                <section>
-                  <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Custom Specs</h2>
-                  <div className="grid grid-cols-2 gap-4">
-                    {customFieldEntries.map(([key, rawField]) => {
-                      const field = typeof rawField === 'object' && rawField !== null
-                        ? rawField
-                        : { type: 'text', value: String(rawField) };
-                      return (
-                        <div key={key} className="bg-[#1a1816] p-3 border border-[#332f2a] rounded">
-                          <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">{key}</div>
-                          {field.type === 'link' ? (
-                            <a href={field.value} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline text-sm truncate block">{field.value}</a>
-                          ) : field.type === 'image' ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <a href={field.value} target="_blank" rel="noreferrer" title="View full image">
-                              <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#332f2a] rounded mt-1 hover:opacity-80 transition-opacity" />
-                            </a>
-                          ) : field.type === 'file' ? (
-                            <div className="mt-1 flex items-center justify-between p-2.5 bg-black/30 border border-[#332f2a] rounded">
-                              <div className="flex items-center gap-2 min-w-0 pr-2">
-                                <FileText className="h-4 w-4 text-brand-accent shrink-0" />
-                                <span className="text-xs text-white truncate" title={field.fileName || field.value}>
-                                  {field.fileName || (typeof field.value === 'string' ? field.value.split('/').pop()?.split('_').slice(2).join('_') || field.value.split('/').pop() : 'Document')}
-                                </span>
-                              </div>
-                              <a 
-                                href={typeof field.value === 'string' ? field.value : field.value?.url} 
-                                target="_blank" 
-                                rel="noreferrer" 
-                                className="text-xs font-bold text-brand-accent hover:underline shrink-0 flex items-center gap-1"
-                              >
-                                Open <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </div>
-                          ) : (
-                            <div className="text-white text-sm">{field.value}</div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              )}
             </>
+          )}
+
+          {/* Custom Fields (Shared across both Component and Personal Items) */}
+          {customFieldEntries.length > 0 && (
+            <section>
+              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">
+                {isPersonal ? "Custom Fields" : "Custom Specs"}
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {customFieldEntries.map(([key, rawField]) => {
+                  const field = typeof rawField === 'object' && rawField !== null
+                    ? rawField
+                    : { type: 'text', value: String(rawField) };
+                  return (
+                    <div key={key} className="bg-[#1a1816] p-3 border border-[#332f2a] rounded">
+                      <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">{key}</div>
+                      {field.type === 'link' ? (
+                        <a href={field.value} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline text-sm truncate block">{field.value}</a>
+                      ) : field.type === 'image' ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewImage({ url: field.value, title: `${component.name} - ${key}`, subtitle: "Custom Field Image" })}
+                          className="group/img mt-1 relative block cursor-zoom-in text-left"
+                          title="Click to view full image"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#332f2a] rounded group-hover/img:border-brand-accent group-hover/img:scale-105 transition-all duration-200" />
+                        </button>
+                      ) : field.type === 'file' ? (
+                        <div className="mt-1 flex items-center justify-between p-2.5 bg-black/30 border border-[#332f2a] rounded">
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <FileText className="h-4 w-4 text-brand-accent shrink-0" />
+                            <span className="text-xs text-white truncate" title={field.fileName || field.value}>
+                              {field.fileName || (typeof field.value === 'string' ? field.value.split('/').pop()?.split('_').slice(2).join('_') || field.value.split('/').pop() : 'Document')}
+                            </span>
+                          </div>
+                          <a 
+                            href={typeof field.value === 'string' ? field.value : field.value?.url} 
+                            target="_blank" 
+                            rel="noreferrer" 
+                            className="text-xs font-bold text-brand-accent hover:underline shrink-0 flex items-center gap-1"
+                          >
+                            Open <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="text-white text-sm">{field.value}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
           )}
 
         </div>
@@ -252,6 +272,15 @@ export default function ComponentDetailPage() {
           </section>
         </div>
       </div>
+
+      {/* Full Image Preview Modal */}
+      <ImagePreviewModal
+        isOpen={!!previewImage}
+        imageUrl={previewImage?.url || null}
+        title={previewImage?.title}
+        subtitle={previewImage?.subtitle}
+        onClose={() => setPreviewImage(null)}
+      />
     </div>
   );
 }
