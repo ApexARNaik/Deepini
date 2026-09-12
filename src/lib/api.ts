@@ -70,9 +70,20 @@ export interface ComponentTotals {
   total_owned_qty: number;
 }
 
+export interface ComponentLocationSummary {
+  id: string;
+  hotspot_id: string;
+  quantity: number;
+  label?: string;
+  fullLabel?: string;
+  room_id?: string;
+  room_name?: string;
+}
+
 export interface ComponentWithTotals extends Component {
   totals: ComponentTotals;
   tags: Tag[];
+  locations?: ComponentLocationSummary[];
 }
 
 export interface ComponentLocation {
@@ -156,16 +167,84 @@ export async function getHotspotById(hotspotId: string): Promise<SpatialHotspot 
   return data as SpatialHotspot | null;
 }
 
+export function buildComponentLocationsMap(
+  compLocs: any[],
+  allHotspots: any[],
+  allPhotos: any[],
+  allRooms: any[]
+): Map<string, ComponentLocationSummary[]> {
+  const hsMap = new Map<string, any>(allHotspots.map(h => [h.id, h]));
+  const phMap = new Map<string, any>(allPhotos.map(p => [p.id, p]));
+  const rmMap = new Map<string, any>(allRooms.map(r => [r.id, r]));
+
+  const map = new Map<string, ComponentLocationSummary[]>();
+
+  for (const cl of compLocs) {
+    let curHsId = cl.hotspot_id;
+    let roomId: string | undefined;
+    let roomName: string | undefined;
+    const chain: string[] = [];
+    let depth = 0;
+    const targetHs = hsMap.get(cl.hotspot_id);
+
+    while (curHsId && depth < 25) {
+      depth++;
+      const hs = hsMap.get(curHsId);
+      if (!hs) break;
+      if (hs.label) chain.unshift(hs.label);
+
+      if (!hs.photo_id) break;
+      const ph = phMap.get(hs.photo_id);
+      if (!ph) break;
+      if (ph.label) chain.unshift(ph.label);
+
+      if (ph.parent_hotspot_id) {
+        curHsId = ph.parent_hotspot_id;
+      } else if (ph.room_id) {
+        roomId = ph.room_id;
+        roomName = rmMap.get(ph.room_id)?.name;
+        if (roomName) chain.unshift(roomName);
+        break;
+      } else {
+        break;
+      }
+    }
+
+    const summary: ComponentLocationSummary = {
+      id: cl.id,
+      hotspot_id: cl.hotspot_id,
+      quantity: cl.quantity,
+      label: targetHs?.label || 'Storage Bin',
+      fullLabel: chain.length > 0 ? chain.join(' → ') : (targetHs?.label || 'Storage Bin'),
+      room_id: roomId,
+      room_name: roomName
+    };
+
+    const list = map.get(cl.component_id) || [];
+    list.push(summary);
+    map.set(cl.component_id, list);
+  }
+
+  return map;
+}
+
 // Phase 4 Functions
 export async function getInventory(search: string = ""): Promise<ComponentWithTotals[]> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
-    const allComps = await db.components.toArray();
-    const allTotals = await db.component_totals.toArray();
-    const allTags = await db.tags.toArray();
-    const allCompTags = await db.component_tags.toArray();
+    const [allComps, allTotals, allTags, allCompTags, allCompLocs, allHotspots, allPhotos, allRooms] = await Promise.all([
+      db.components.toArray(),
+      db.component_totals.toArray(),
+      db.tags.toArray(),
+      db.component_tags.toArray(),
+      db.component_locations.toArray(),
+      db.spatial_hotspots.toArray(),
+      db.spatial_photos.toArray(),
+      db.rooms.toArray()
+    ]);
 
     const totalsMap = new Map(allTotals.map(t => [t.component_id, t]));
     const tagMap = new Map(allTags.map(t => [t.id, t]));
+    const locationsMap = buildComponentLocationsMap(allCompLocs, allHotspots, allPhotos, allRooms);
 
     let results = allComps.filter(c => !c.pending_delete);
     
@@ -174,8 +253,9 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
       return {
         ...c,
         tags: cTags,
-        totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 }
-      }
+        totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 },
+        locations: locationsMap.get(c.id) || []
+      };
     }).filter(c => {
       if (!search) return true;
       const s = search.toLowerCase();
@@ -185,23 +265,34 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
     }).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  let query = supabase.from("components").select(`
-    *,
-    component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))
-  `).eq("pending_delete", false).order("name");
+  const [compDataRes, totalsDataRes, compLocsRes, hsRes, phRes, rmRes] = await Promise.all([
+    supabase.from("components").select(`
+      *,
+      component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))
+    `).eq("pending_delete", false).order("name"),
+    supabase.from("component_totals").select("*"),
+    supabase.from("component_locations").select("*"),
+    supabase.from("spatial_hotspots").select("id, label, photo_id"),
+    supabase.from("spatial_photos").select("id, label, parent_hotspot_id, room_id"),
+    supabase.from("rooms").select("id, name")
+  ]);
 
-  const { data: compData, error: compErr } = await query;
-  if (compErr) throw compErr;
+  if (compDataRes.error) throw compDataRes.error;
+  if (totalsDataRes.error) throw totalsDataRes.error;
 
-  const { data: totalsData, error: totErr } = await supabase.from("component_totals").select("*");
-  if (totErr) throw totErr;
+  const totalsMap = new Map((totalsDataRes.data || []).map(t => [t.component_id, t]));
+  const locationsMap = buildComponentLocationsMap(
+    compLocsRes.data || [],
+    hsRes.data || [],
+    phRes.data || [],
+    rmRes.data || []
+  );
 
-  const totalsMap = new Map(totalsData.map(t => [t.component_id, t]));
-
-  let results = compData.map(c => ({
+  let results = (compDataRes.data || []).map(c => ({
     ...c,
     tags: c.component_tags.map((ct: any) => ct.tags).filter(Boolean),
-    totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 }
+    totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 },
+    locations: locationsMap.get(c.id) || []
   }));
 
   if (search) {
@@ -369,36 +460,93 @@ export async function getFullHotspotPath(hotspotId: string) {
   return chain;
 }
 
-export async function getAllLeafHotspots() {
-  let data: any[] = [];
-  if (typeof window !== 'undefined' && !navigator.onLine) {
-    const allHotspots = await db.spatial_hotspots.toArray();
-    data = allHotspots.filter(h => h.is_leaf);
-  } else {
-    const { data: dbData, error } = await supabase
-      .from('spatial_hotspots')
-      .select('*')
-      .eq('is_leaf', true)
-      .order('created_at', { ascending: false });
-    if (error) throw new Error(error.message || "Failed to fetch leaf hotspots");
-    data = dbData || [];
-  }
-  
-  const hotspotsWithPaths = await Promise.all(data.map(async (hs) => {
-    const path = await getFullHotspotPath(hs.id);
-    const label = path.map(p => p.label).join(' → ');
-    return { ...hs, fullLabel: label };
-  }));
-  
-  // Arrange in the order of recently added (newest first)
-  return hotspotsWithPaths.sort((a, b) => {
+export function buildLeafHotspotsHierarchy(
+  allHotspots: any[],
+  allPhotos: any[],
+  allRooms: any[]
+) {
+  const hotspotMap = new Map<string, any>();
+  allHotspots.forEach(h => hotspotMap.set(h.id, h));
+
+  const photoMap = new Map<string, any>();
+  allPhotos.forEach(p => photoMap.set(p.id, p));
+
+  const roomMap = new Map<string, any>();
+  allRooms.forEach(r => roomMap.set(r.id, r));
+
+  const leafHotspots = allHotspots.filter(h => h.is_leaf);
+
+  const results = leafHotspots.map(hs => {
+    const chain: { type: 'hotspot' | 'photo'; id: string; label: string }[] = [];
+    let currentHotspotId: string | null = hs.id;
+    let depth = 0;
+
+    while (currentHotspotId && depth < 30) {
+      depth++;
+      const curHs = hotspotMap.get(currentHotspotId);
+      if (!curHs) break;
+      chain.unshift({ type: 'hotspot', id: curHs.id, label: curHs.label || 'Hotspot' });
+
+      if (!curHs.photo_id) break;
+      const photo = photoMap.get(curHs.photo_id);
+      if (!photo) break;
+      chain.unshift({ type: 'photo', id: photo.id, label: photo.label || 'View' });
+
+      if (photo.parent_hotspot_id) {
+        currentHotspotId = photo.parent_hotspot_id;
+      } else if (photo.room_id) {
+        const room = roomMap.get(photo.room_id);
+        if (room?.name) {
+          chain.unshift({ type: 'photo', id: photo.room_id, label: room.name });
+        }
+        break;
+      } else {
+        break;
+      }
+    }
+
+    const fullLabel = chain.map(c => c.label).filter(Boolean).join(' → ');
+    return {
+      ...hs,
+      fullLabel: fullLabel || hs.label || 'Unknown Location'
+    };
+  });
+
+  return results.sort((a, b) => {
     const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
     const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
     if (timeB !== timeA) {
       return timeB - timeA;
     }
-    return a.fullLabel.localeCompare(b.fullLabel);
+    return (a.fullLabel || '').localeCompare(b.fullLabel || '');
   });
+}
+
+export async function getAllLeafHotspots() {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const [allHotspots, allPhotos, allRooms] = await Promise.all([
+      db.spatial_hotspots.toArray(),
+      db.spatial_photos.toArray(),
+      db.rooms.toArray()
+    ]);
+    return buildLeafHotspotsHierarchy(allHotspots, allPhotos, allRooms);
+  }
+
+  const [hotspotsRes, photosRes, roomsRes] = await Promise.all([
+    supabase.from('spatial_hotspots').select('*'),
+    supabase.from('spatial_photos').select('*'),
+    supabase.from('rooms').select('id, name')
+  ]);
+
+  if (hotspotsRes.error) throw new Error(hotspotsRes.error.message || "Failed to fetch hotspots");
+  if (photosRes.error) throw new Error(photosRes.error.message || "Failed to fetch photos");
+  if (roomsRes.error) throw new Error(roomsRes.error.message || "Failed to fetch rooms");
+
+  return buildLeafHotspotsHierarchy(
+    hotspotsRes.data || [],
+    photosRes.data || [],
+    roomsRes.data || []
+  );
 }
 
 export async function getHotspotComponents(hotspotId: string) {

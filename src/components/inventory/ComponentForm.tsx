@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, isPersonalItem } from "@/lib/api";
-import { X, Plus, UploadCloud, FileText, Maximize2 } from "lucide-react";
+import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, getFullHotspotPath, isPersonalItem } from "@/lib/api";
+import { X, Plus, UploadCloud, FileText, Maximize2, Tag as TagIcon, ChevronDown } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import { ImagePreviewModal } from "./ImagePreviewModal";
 
@@ -36,6 +36,57 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [tags, setTags] = useState<Tag[]>(initialTags || []);
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [tagInput, setTagInput] = useState("");
+  const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
+  const [highlightedTagIndex, setHighlightedTagIndex] = useState(-1);
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+
+  // Filter available tags that have not yet been assigned
+  const unselectedTags = availableTags.filter(
+    at => !tags.some(t => t.id === at.id || t.name.toLowerCase() === at.name.toLowerCase())
+  );
+
+  const trimmedTagInput = tagInput.trim();
+  const matchingTags = unselectedTags.filter(t =>
+    !trimmedTagInput || t.name.toLowerCase().includes(trimmedTagInput.toLowerCase())
+  );
+
+  const exactAvailableMatch = availableTags.find(
+    t => t.name.toLowerCase() === trimmedTagInput.toLowerCase()
+  );
+  const isTagAlreadyAdded = tags.some(
+    t => t.name.toLowerCase() === trimmedTagInput.toLowerCase()
+  );
+
+  const canCreateTag = trimmedTagInput.length > 0 && !exactAvailableMatch && !isTagAlreadyAdded;
+
+  type TagOption = 
+    | { type: 'create'; name: string }
+    | { type: 'existing'; tag: Tag };
+
+  const tagOptions: TagOption[] = [
+    ...(canCreateTag ? [{ type: 'create' as const, name: trimmedTagInput }] : []),
+    ...matchingTags.map(tag => ({ type: 'existing' as const, tag }))
+  ];
+
+  // Click outside to close dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(event.target as Node)) {
+        setIsTagDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightedTagIndex >= 0) {
+      const el = document.getElementById(`tag-opt-${highlightedTagIndex}`);
+      el?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedTagIndex]);
   
   // Locations
   const [locations, setLocations] = useState<{ hotspot_id: string, quantity: number, label?: string }[]>(
@@ -66,6 +117,24 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   
   const [loading, setLoading] = useState(false);
+
+  // Fast path: if creating a new item with locationIdParam, pre-assign and fetch breadcrumb immediately
+  useEffect(() => {
+    if (!initialData && locationIdParam) {
+      setSelectedHotspot(locationIdParam);
+      getFullHotspotPath(locationIdParam).then((path) => {
+        const fullLabel = path.map(p => p.label).filter(Boolean).join(' → ');
+        if (fullLabel) {
+          setLocations(prev => {
+            if (prev.length === 0 || (prev.length === 1 && prev[0].hotspot_id === locationIdParam)) {
+              return [{ hotspot_id: locationIdParam, quantity: 1, label: fullLabel }];
+            }
+            return prev;
+          });
+        }
+      }).catch(console.error);
+    }
+  }, [initialData, locationIdParam]);
 
   useEffect(() => {
     getTags().then(setAvailableTags).catch(console.error);
@@ -105,17 +174,101 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     }).catch(console.error);
   }, [initialData, locationIdParam]);
 
+  const handleSelectTagOption = async (option: TagOption) => {
+    if (option.type === 'existing') {
+      if (!tags.some(t => t.id === option.tag.id)) {
+        setTags([...tags, option.tag]);
+      }
+      setTagInput("");
+      setHighlightedTagIndex(-1);
+      setIsTagDropdownOpen(false);
+      tagInputRef.current?.focus();
+    } else {
+      try {
+        const newTag = await upsertTag(option.name);
+        if (!tags.some(t => t.id === newTag.id)) {
+          setTags([...tags, newTag]);
+        }
+        if (!availableTags.some(t => t.id === newTag.id)) {
+          setAvailableTags(prev => [newTag, ...prev]);
+        }
+        setTagInput("");
+        setHighlightedTagIndex(-1);
+        setIsTagDropdownOpen(false);
+        tagInputRef.current?.focus();
+      } catch (err) {
+        console.error("Failed to create tag:", err);
+      }
+    }
+  };
+
   const handleAddTag = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!tagInput.trim()) return;
+    const trimmed = tagInput.trim();
+    if (!trimmed) return;
+
+    const existing = availableTags.find(
+      t => t.name.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (existing) {
+      if (!tags.some(t => t.id === existing.id)) {
+        setTags([...tags, existing]);
+      }
+      setTagInput("");
+      setHighlightedTagIndex(-1);
+      setIsTagDropdownOpen(false);
+      return;
+    }
+
+    if (tags.some(t => t.name.toLowerCase() === trimmed.toLowerCase())) {
+      setTagInput("");
+      setHighlightedTagIndex(-1);
+      setIsTagDropdownOpen(false);
+      return;
+    }
+
     try {
-      const tag = await upsertTag(tagInput.trim());
+      const tag = await upsertTag(trimmed);
       if (!tags.find(t => t.id === tag.id)) {
         setTags([...tags, tag]);
       }
+      if (!availableTags.find(t => t.id === tag.id)) {
+        setAvailableTags(prev => [tag, ...prev]);
+      }
       setTagInput("");
+      setHighlightedTagIndex(-1);
+      setIsTagDropdownOpen(false);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleTagInputKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!isTagDropdownOpen) {
+        setIsTagDropdownOpen(true);
+        setHighlightedTagIndex(0);
+      } else if (tagOptions.length > 0) {
+        setHighlightedTagIndex(prev => (prev + 1) % tagOptions.length);
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!isTagDropdownOpen) {
+        setIsTagDropdownOpen(true);
+        setHighlightedTagIndex(tagOptions.length - 1);
+      } else if (tagOptions.length > 0) {
+        setHighlightedTagIndex(prev => (prev - 1 + tagOptions.length) % tagOptions.length);
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (isTagDropdownOpen && highlightedTagIndex >= 0 && highlightedTagIndex < tagOptions.length) {
+        handleSelectTagOption(tagOptions[highlightedTagIndex]);
+      } else if (tagInput.trim()) {
+        handleAddTag();
+      }
+    } else if (e.key === 'Escape') {
+      setIsTagDropdownOpen(false);
     }
   };
 
@@ -512,30 +665,129 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         </label>
         <div className="flex flex-wrap gap-2 mb-3">
           {tags.map(t => (
-            <span key={t.id} className="inline-flex items-center gap-1 px-3 py-1 bg-[#1a1816] border border-[#332f2a] rounded text-xs text-brand-text">
-              {t.name}
-              <button type="button" onClick={() => handleRemoveTag(t.id)} className="text-brand-text-muted hover:text-white">
+            <span key={t.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#1a1816] border border-[#332f2a] rounded text-xs text-brand-text group hover:border-[#443e37] transition-colors">
+              <TagIcon className="w-3 h-3 text-brand-gold/80" />
+              <span>{t.name}</span>
+              <button type="button" onClick={() => handleRemoveTag(t.id)} className="text-brand-text-muted hover:text-white transition-colors ml-0.5" title={`Remove ${t.name}`}>
                 <X className="h-3 w-3" />
               </button>
             </span>
           ))}
         </div>
-        <div className="flex gap-2 max-w-sm">
-          <input
-            type="text"
-            value={tagInput}
-            onChange={e => setTagInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAddTag(e)}
-            placeholder="Add new or existing tag..."
-            className="flex-1 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
-            list="available-tags"
-          />
-          <datalist id="available-tags">
-            {availableTags.map(t => <option key={t.id} value={t.name} />)}
-          </datalist>
-          <button type="button" onClick={handleAddTag} className="px-3 bg-[#1a1816] border border-[#332f2a] text-brand-text hover:bg-[#222]">
-            Add
-          </button>
+
+        <div className="relative max-w-sm" ref={tagDropdownRef}>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                ref={tagInputRef}
+                type="text"
+                value={tagInput}
+                onChange={e => {
+                  setTagInput(e.target.value);
+                  setIsTagDropdownOpen(true);
+                  setHighlightedTagIndex(0);
+                }}
+                onFocus={() => {
+                  setIsTagDropdownOpen(true);
+                  setHighlightedTagIndex(-1);
+                }}
+                onKeyDown={handleTagInputKeyDown}
+                placeholder="Add or search tags..."
+                className="w-full bg-brand-bg border border-[#332f2a] p-2 pr-8 text-sm text-white focus:border-brand-accent focus:outline-none transition-colors rounded-sm"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setIsTagDropdownOpen(prev => !prev)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-brand-text-muted hover:text-white transition-colors p-0.5"
+                title="Toggle tags list"
+              >
+                <ChevronDown className={`w-4 h-4 transition-transform duration-150 ${isTagDropdownOpen ? 'rotate-180 text-brand-accent' : ''}`} />
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddTag}
+              disabled={!tagInput.trim()}
+              className="px-3 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text hover:bg-[#25221e] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors rounded-sm"
+            >
+              Add
+            </button>
+          </div>
+
+          {/* Proper Custom Dropdown */}
+          {isTagDropdownOpen && (
+            <div className="absolute left-0 top-full mt-1.5 w-full z-50 bg-[#191715] border border-[#3a352e] rounded-md shadow-2xl shadow-black/90 overflow-hidden ring-1 ring-black/50">
+              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-text-muted bg-[#12110f] border-b border-[#2e2a25] flex justify-between items-center select-none">
+                <span>{trimmedTagInput ? "Matching Tags" : "Available Tags"}</span>
+                <span className="text-[9px] text-[#807a70]">{matchingTags.length} available</span>
+              </div>
+
+              <div className="max-h-56 overflow-y-auto divide-y divide-[#26231f]/60 py-1">
+                {tagOptions.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-brand-text-muted">
+                    {isTagAlreadyAdded ? (
+                      <span>Tag <strong>"{trimmedTagInput}"</strong> is already added</span>
+                    ) : unselectedTags.length === 0 ? (
+                      <span>All existing tags are added</span>
+                    ) : (
+                      <span>No tags match "{trimmedTagInput}"</span>
+                    )}
+                  </div>
+                ) : (
+                  tagOptions.map((opt, idx) => {
+                    const isHighlighted = idx === highlightedTagIndex;
+                    if (opt.type === 'create') {
+                      return (
+                        <button
+                          key="create-option"
+                          id={`tag-opt-${idx}`}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleSelectTagOption(opt);
+                          }}
+                          onMouseEnter={() => setHighlightedTagIndex(idx)}
+                          className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors ${
+                            isHighlighted ? 'bg-brand-accent/20 text-brand-accent font-medium' : 'text-brand-accent hover:bg-brand-accent/10'
+                          }`}
+                        >
+                          <Plus className="w-3.5 h-3.5 shrink-0" />
+                          <span>Create tag <strong className="font-semibold text-white underline decoration-brand-accent">"{opt.name}"</strong></span>
+                        </button>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={opt.tag.id}
+                        id={`tag-opt-${idx}`}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleSelectTagOption(opt);
+                        }}
+                        onMouseEnter={() => setHighlightedTagIndex(idx)}
+                        className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${
+                          isHighlighted ? 'bg-[#2a2622] text-white' : 'text-brand-text hover:bg-[#201d1a] hover:text-white'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 truncate">
+                          <TagIcon className={`w-3.5 h-3.5 shrink-0 ${isHighlighted ? 'text-brand-accent' : 'text-brand-gold/70'}`} />
+                          <span className="truncate">{opt.tag.name}</span>
+                        </span>
+                        {opt.tag.usage_count ? (
+                          <span className="text-[10px] text-brand-text-muted shrink-0 ml-2">
+                            {opt.tag.usage_count} uses
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
