@@ -1651,7 +1651,7 @@ export function HotspotCanvas({
                           ? (isArrow ? "rgba(250, 204, 21, 0.65)" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.45)" : "rgba(100, 100, 100, 0.25)")
                           : (isArrow ? "rgba(234, 179, 8, 0.40)" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.22)" : "rgba(255, 255, 255, 0.15)"))
                       : isHovered 
-                        ? (isArrow ? "rgba(250, 204, 21, 0.70)" : "rgba(224, 242, 254, 0.25)") 
+                        ? (isArrow ? "rgba(250, 204, 21, 0.70)" : "rgba(56, 189, 248, 0.35)") 
                         : isHighlighted 
                           ? (isArrow ? "rgba(234, 179, 8, 0.65)" : "rgba(239, 68, 68, 0.2)") 
                           : (isArrow ? "rgba(234, 179, 8, 0.45)" : "rgba(255, 255, 255, 0.25)")
@@ -1666,19 +1666,19 @@ export function HotspotCanvas({
                       : isHighlighted 
                         ? (isArrow ? "#facc15" : "#ef4444")
                         : isHovered
-                          ? (isArrow ? "#facc15" : "#bae6fd")
-                          : (isArrow ? "#eab308" : "rgba(224, 242, 254, 0.85)")
+                          ? (isArrow ? "#facc15" : "#38bdf8")
+                          : (isArrow ? "#eab308" : "#7dd3fc")
                 }
                 strokeWidth={
                   isArrow 
                     ? (isHovered || isHighlighted ? "0.8" : "0.5") 
-                    : (isDeleteMode || isEditMode ? (isHovered ? "0.8" : "0.5") : (isHovered || isHighlighted ? "0.55" : "0.38"))
+                    : (isDeleteMode || isEditMode ? (isHovered ? "0.8" : "0.5") : (isHovered || isHighlighted ? "0.5" : "0.3"))
                 }
                 strokeDasharray={isDeleteMode ? (isHovered ? "none" : "2,2") : isEditMode ? (isHovered ? "none" : "3,3") : "none"}
                 style={
                   isArrow 
                     ? { filter: isHovered ? 'drop-shadow(0 0 6px rgba(234,179,8,0.75))' : 'drop-shadow(0 0 3px rgba(234,179,8,0.35))' } 
-                    : { filter: isHovered ? 'drop-shadow(0 0 4px rgba(186,230,253,0.5))' : 'drop-shadow(0 0 1.5px rgba(224,242,254,0.3))' }
+                    : { filter: isHovered ? 'drop-shadow(0 0 6px rgba(56,189,248,0.75))' : 'drop-shadow(0 0 1.5px rgba(125,211,252,0.4))' }
                 }
                 className={`transition-all duration-200 ${isHighlighted ? 'animate-pulse' : ''} ${
                   isClickable ? "cursor-pointer pointer-events-auto" : "pointer-events-none"
