@@ -455,8 +455,18 @@ loans
   - Tabbed filtering for Active Loans vs Full Loan History.
   - Filter pills for All, Components, Projects, and Due Soon/Overdue.
   - Global Quick Lend modal and 1-click Return modals.
-- **Integration with Safe Deletion**:
-  - `delete_component_safe` and client fallbacks check both active project checkouts and active loans before deleting. If active loans exist, deletion is deferred with `pending_delete = true`.
+### 5.9 Automated Monthly Backups & Disaster Recovery
+
+- **GitHub Actions Cron Automation (`.github/workflows/monthly-backup.yml`)**:
+  - Automatically triggers at `00:00 UTC` on the 1st day of every month (`0 0 1 * *`), with full support for on-demand manual execution (`workflow_dispatch`).
+  - Connects to Supabase PostgreSQL using repository secret `SUPABASE_DB_URL`.
+  - Executes `pg_dump` with clean restore flags (`--clean --if-exists --no-owner --no-privileges --encoding=UTF8`) and compresses output with `gzip` to generate compact `.sql.gz` snapshots.
+- **Dual Retention Storage**:
+  - **Permanent GitHub Releases**: Tags each monthly backup with `backup-YYYY-MM-DD` and permanently attaches the compressed SQL dump along with metadata (timestamp, file size, restore instructions) so backups never expire.
+  - **Workflow Artifacts**: Saves the backup file as an Actions artifact with 90-day retention for immediate download from the GitHub Actions execution summary.
+- **Disaster Recovery**:
+  - Full point-in-time database restoration achievable with a single command:
+    `gunzip -c deepini-backup-*.sql.gz | psql "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres"`.
 
 ---
 
