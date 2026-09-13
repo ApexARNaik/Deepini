@@ -21,7 +21,8 @@ import {
   MapPin,
   Eye,
   ArrowRight,
-  ExternalLink
+  ExternalLink,
+  Lock
 } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { getInventory, getRooms, ComponentWithTotals, Room, isPersonalItem } from "@/lib/api";
@@ -227,18 +228,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   className="fixed inset-0 z-40"
                   onClick={() => setIsDropdownOpen(false)}
                 />
-                <div className="absolute bottom-full left-0 mb-2 w-48 rounded-sm shadow-lg bg-brand-bg ring-1 ring-black ring-opacity-5 border border-brand-border z-50">
+                <div className="absolute bottom-full left-0 mb-2 w-48 rounded-md shadow-2xl shadow-black/90 bg-[#191715] ring-1 ring-black/50 border border-[#3a352e] z-50 overflow-hidden">
+                  <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-text-muted bg-[#12110f] border-b border-[#2e2a25]">
+                    Workspace
+                  </div>
                   <div className="py-1 flex flex-col" role="menu" aria-orientation="vertical">
-
                     <button
                       onClick={() => {
                         sessionStorage.removeItem("unlocked");
                         window.location.reload();
                       }}
-                      className="w-full text-left px-4 py-3 text-xs tracking-wider uppercase font-semibold text-brand-text hover:bg-brand-border/30 hover:text-brand-error-text transition-colors"
+                      className="w-full text-left px-3.5 py-2.5 text-xs font-medium text-brand-text hover:bg-[#201d1a] hover:text-brand-error-text flex items-center gap-2 transition-colors"
                       role="menuitem"
                     >
-                      Lock Workspace
+                      <Lock className="h-3.5 w-3.5 text-brand-text-muted" />
+                      <span>Lock Workspace</span>
                     </button>
                   </div>
                 </div>
@@ -317,7 +321,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </span>
                 </div>
 
-                <div className="overflow-y-auto divide-y divide-[#26231f]">
+                <div className="overflow-y-auto themed-scrollbar divide-y divide-[#26231f]">
                   {/* Rooms Section */}
                   {searchResults.rooms.length > 0 && (
                     <div className="p-2 bg-[#141210]">
@@ -516,18 +520,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     className="fixed inset-0 z-40"
                     onClick={() => setIsDropdownOpen(false)}
                   />
-                  <div className="absolute top-full right-0 mt-2 w-48 rounded-sm shadow-lg bg-brand-bg ring-1 ring-black ring-opacity-5 border border-brand-border z-50">
+                  <div className="absolute top-full right-0 mt-2 w-48 rounded-md shadow-2xl shadow-black/90 bg-[#191715] ring-1 ring-black/50 border border-[#3a352e] z-50 overflow-hidden">
+                    <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-text-muted bg-[#12110f] border-b border-[#2e2a25]">
+                      Workspace
+                    </div>
                     <div className="py-1 flex flex-col" role="menu" aria-orientation="vertical">
-
                       <button
                         onClick={() => {
                           sessionStorage.removeItem("unlocked");
                           window.location.reload();
                         }}
-                        className="w-full text-left px-4 py-3 text-xs tracking-wider uppercase font-semibold text-brand-text hover:bg-brand-border/30 hover:text-brand-error-text transition-colors"
+                        className="w-full text-left px-3.5 py-2.5 text-xs font-medium text-brand-text hover:bg-[#201d1a] hover:text-brand-error-text flex items-center gap-2 transition-colors"
                         role="menuitem"
                       >
-                        Lock Workspace
+                        <Lock className="h-3.5 w-3.5 text-brand-text-muted" />
+                        <span>Lock Workspace</span>
                       </button>
                     </div>
                   </div>

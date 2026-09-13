@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, getFullHotspotPath, isPersonalItem } from "@/lib/api";
-import { X, Plus, UploadCloud, FileText, Maximize2, Tag as TagIcon, ChevronDown } from "lucide-react";
+import { X, Plus, UploadCloud, FileText, Maximize2, Tag as TagIcon, ChevronDown, MapPin, Search, Check, Type, Hash, ExternalLink, Image as ImageIcon, Paperclip } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import { ImagePreviewModal } from "./ImagePreviewModal";
 
@@ -69,11 +69,17 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     ...matchingTags.map(tag => ({ type: 'existing' as const, tag }))
   ];
 
-  // Click outside to close dropdown
+  // Click outside to close dropdowns
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (tagDropdownRef.current && !tagDropdownRef.current.contains(event.target as Node)) {
         setIsTagDropdownOpen(false);
+      }
+      if (locationDropdownRef.current && !locationDropdownRef.current.contains(event.target as Node)) {
+        setIsLocationDropdownOpen(false);
+      }
+      if (fieldTypeDropdownRef.current && !fieldTypeDropdownRef.current.contains(event.target as Node)) {
+        setIsFieldTypeDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -104,6 +110,55 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [availableHotspots, setAvailableHotspots] = useState<any[]>([]);
   const [selectedHotspot, setSelectedHotspot] = useState("");
   const [locationQuantity, setLocationQuantity] = useState("1");
+  const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
+  const [locationSearch, setLocationSearch] = useState("");
+  const [highlightedLocIndex, setHighlightedLocIndex] = useState(-1);
+  const locationDropdownRef = useRef<HTMLDivElement>(null);
+  const locationSearchInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus search input when location dropdown opens
+  useEffect(() => {
+    if (isLocationDropdownOpen) {
+      setTimeout(() => {
+        locationSearchInputRef.current?.focus();
+      }, 50);
+    } else {
+      setLocationSearch("");
+      setHighlightedLocIndex(-1);
+    }
+  }, [isLocationDropdownOpen]);
+
+  // Scroll highlighted location into view
+  useEffect(() => {
+    if (highlightedLocIndex >= 0) {
+      const el = document.getElementById(`loc-opt-${highlightedLocIndex}`);
+      el?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedLocIndex]);
+
+  const filteredHotspots = availableHotspots.filter(hs => {
+    if (!locationSearch.trim()) return true;
+    const query = locationSearch.toLowerCase().trim();
+    const full = (hs.fullLabel || "").toLowerCase();
+    const label = (hs.label || "").toLowerCase();
+    const room = (hs.roomName || "").toLowerCase();
+    return full.includes(query) || label.includes(query) || room.includes(query);
+  });
+
+  const selectedHotspotObj = availableHotspots.find(h => h.id === selectedHotspot);
+
+  const getHotspotDisplay = (hs: any) => {
+    if (!hs) return { destination: "", trail: "" };
+    const label = hs.fullLabel || hs.label || "";
+    if (label.includes('→')) {
+      const parts = label.split('→').map((s: string) => s.trim());
+      return {
+        destination: parts[parts.length - 1],
+        trail: parts.slice(0, parts.length - 1).join(' → ')
+      };
+    }
+    return { destination: label, trail: hs.roomName || "" };
+  };
   
   // Custom Fields
   const [customFields, setCustomFields] = useState<Record<string, { type: 'text' | 'number' | 'link' | 'image' | 'file'; value: any; fileName?: string; fileSize?: number }>>(() => {
@@ -113,6 +168,8 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   });
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState<'text' | 'number' | 'link' | 'image' | 'file'>('text');
+  const [isFieldTypeDropdownOpen, setIsFieldTypeDropdownOpen] = useState(false);
+  const fieldTypeDropdownRef = useRef<HTMLDivElement>(null);
   const [uploadingFieldKey, setUploadingFieldKey] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   
@@ -629,17 +686,163 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
           </div>
         )}
         <div className="flex gap-2 items-end">
-          <div className="flex-1">
-            <select
-              value={selectedHotspot}
-              onChange={e => setSelectedHotspot(e.target.value)}
-              className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+          <div className="flex-1 relative" ref={locationDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsLocationDropdownOpen(prev => !prev)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setIsLocationDropdownOpen(true);
+                }
+              }}
+              className={`w-full bg-[#191715] border ${
+                isLocationDropdownOpen ? 'border-brand-accent ring-1 ring-brand-accent/50' : 'border-[#3a352e] hover:border-[#4a443c]'
+              } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none focus:border-brand-accent`}
             >
-              <option value="">Select a location on the map...</option>
-              {availableHotspots.map(hs => (
-                <option key={hs.id} value={hs.id}>{hs.fullLabel}</option>
-              ))}
-            </select>
+              <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                <MapPin className={`h-4 w-4 shrink-0 ${selectedHotspotObj ? 'text-brand-accent' : 'text-brand-text-muted'}`} />
+                {selectedHotspotObj ? (
+                  <div className="flex items-baseline gap-2 min-w-0 truncate">
+                    <span className="text-white font-medium truncate">
+                      {getHotspotDisplay(selectedHotspotObj).destination}
+                    </span>
+                    {getHotspotDisplay(selectedHotspotObj).trail && (
+                      <span className="text-[11px] text-brand-text-muted truncate hidden sm:inline">
+                        ({getHotspotDisplay(selectedHotspotObj).trail})
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-brand-text-muted">Select a location on the map...</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {selectedHotspot && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedHotspot("");
+                    }}
+                    title="Clear selection"
+                    className="p-1 text-brand-text-muted hover:text-white rounded transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </span>
+                )}
+                <ChevronDown className={`h-4 w-4 text-brand-text-muted transition-transform duration-200 ${isLocationDropdownOpen ? 'rotate-180 text-brand-accent' : ''}`} />
+              </div>
+            </button>
+
+            {/* Custom Location Dropdown Popover */}
+            {isLocationDropdownOpen && (
+              <div className="absolute left-0 top-full mt-1.5 w-full sm:w-[32rem] max-w-[calc(100vw-2rem)] z-50 bg-[#191715] border border-[#3a352e] rounded-md shadow-2xl shadow-black/95 ring-1 ring-black/50 overflow-hidden flex flex-col">
+                {/* Search Bar */}
+                <div className="p-2.5 bg-[#141210] border-b border-[#2e2a25] shrink-0">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-brand-text-muted" />
+                    <input
+                      ref={locationSearchInputRef}
+                      type="text"
+                      value={locationSearch}
+                      onChange={(e) => {
+                        setLocationSearch(e.target.value);
+                        setHighlightedLocIndex(0);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setHighlightedLocIndex(prev => (prev + 1) % Math.max(1, filteredHotspots.length));
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setHighlightedLocIndex(prev => (prev - 1 + filteredHotspots.length) % Math.max(1, filteredHotspots.length));
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (filteredHotspots[highlightedLocIndex]) {
+                            setSelectedHotspot(filteredHotspots[highlightedLocIndex].id);
+                            setIsLocationDropdownOpen(false);
+                          }
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setIsLocationDropdownOpen(false);
+                        }
+                      }}
+                      placeholder="Search compartment or room path..."
+                      className="w-full bg-[#1e1b18] border border-[#3a352e] rounded pl-8 pr-7 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none"
+                    />
+                    {locationSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setLocationSearch("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-brand-text-muted hover:text-white"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex justify-between items-center px-1 mt-2 text-[10px] uppercase tracking-wider text-brand-text-muted font-medium select-none">
+                    <span>Available Storage Locations</span>
+                    <span className="text-brand-gold/80">{filteredHotspots.length} locations</span>
+                  </div>
+                </div>
+
+                {/* Locations List */}
+                <div className="max-h-64 overflow-y-auto themed-scrollbar divide-y divide-[#26231f]/60 py-1">
+                  {filteredHotspots.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-brand-text-muted">
+                      No locations match &quot;{locationSearch}&quot;
+                    </div>
+                  ) : (
+                    filteredHotspots.map((hs, idx) => {
+                      const isSelected = selectedHotspot === hs.id;
+                      const isHighlighted = idx === highlightedLocIndex;
+                      const isAlreadyAssigned = locations.some(l => l.hotspot_id === hs.id);
+                      const display = getHotspotDisplay(hs);
+
+                      return (
+                        <button
+                          key={hs.id}
+                          id={`loc-opt-${idx}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedHotspot(hs.id);
+                            setIsLocationDropdownOpen(false);
+                          }}
+                          onMouseEnter={() => setHighlightedLocIndex(idx)}
+                          className={`w-full text-left px-3.5 py-2.5 text-xs flex items-start justify-between gap-3 transition-colors ${
+                            isSelected
+                              ? 'bg-brand-accent/20 border-l-2 border-brand-accent text-white font-medium'
+                              : isHighlighted
+                              ? 'bg-[#25221e] text-white'
+                              : 'text-brand-text hover:bg-[#1f1c19] hover:text-white'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <MapPin className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-brand-accent' : 'text-brand-gold/70'}`} />
+                              <span className="font-semibold text-white truncate">{display.destination}</span>
+                              {isAlreadyAssigned && (
+                                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                                  Added ({locations.find(l => l.hotspot_id === hs.id)?.quantity})
+                                </span>
+                              )}
+                            </div>
+                            {display.trail && (
+                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5">
+                                {display.trail}
+                              </div>
+                            )}
+                          </div>
+                          {isSelected && (
+                            <Check className="h-4 w-4 text-brand-accent shrink-0 mt-0.5" />
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           <div className="w-24">
             <input
@@ -723,7 +926,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                 <span className="text-[9px] text-[#807a70]">{matchingTags.length} available</span>
               </div>
 
-              <div className="max-h-56 overflow-y-auto divide-y divide-[#26231f]/60 py-1">
+              <div className="max-h-56 overflow-y-auto themed-scrollbar divide-y divide-[#26231f]/60 py-1">
                 {tagOptions.length === 0 ? (
                   <div className="px-3 py-4 text-center text-xs text-brand-text-muted">
                     {isTagAlreadyAdded ? (
@@ -958,17 +1161,62 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
             onChange={e => setNewFieldName(e.target.value)}
             className="flex-1 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
           />
-          <select 
-            value={newFieldType}
-            onChange={e => setNewFieldType(e.target.value as any)}
-            className="w-36 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:outline-none"
-          >
-            <option value="text">Text</option>
-            <option value="number">Number</option>
-            <option value="link">Link</option>
-            <option value="image">Image</option>
-            <option value="file">File (PDF, PPT...)</option>
-          </select>
+          <div className="relative" ref={fieldTypeDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsFieldTypeDropdownOpen(prev => !prev)}
+              className={`w-44 bg-brand-bg border ${
+                isFieldTypeDropdownOpen ? 'border-brand-accent ring-1 ring-brand-accent/50' : 'border-[#332f2a] hover:border-[#4a443c]'
+              } p-2 text-sm text-white rounded flex items-center justify-between transition-colors focus:outline-none focus:border-brand-accent`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {newFieldType === 'text' && <Type className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                {newFieldType === 'number' && <Hash className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                {newFieldType === 'link' && <ExternalLink className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                {newFieldType === 'image' && <ImageIcon className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                {newFieldType === 'file' && <Paperclip className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                <span className="truncate capitalize">{newFieldType === 'file' ? 'File (PDF...)' : newFieldType}</span>
+              </div>
+              <ChevronDown className={`h-3.5 w-3.5 text-brand-text-muted transition-transform duration-150 ${isFieldTypeDropdownOpen ? 'rotate-180 text-brand-accent' : ''}`} />
+            </button>
+
+            {isFieldTypeDropdownOpen && (
+              <div className="absolute right-0 bottom-full mb-1.5 w-48 z-40 bg-[#191715] border border-[#3a352e] rounded-md shadow-2xl shadow-black/90 ring-1 ring-black/50 py-1 overflow-hidden">
+                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-text-muted bg-[#12110f] border-b border-[#2e2a25]">
+                  Select Field Type
+                </div>
+                {[
+                  { value: 'text' as const, label: 'Text', icon: Type },
+                  { value: 'number' as const, label: 'Number', icon: Hash },
+                  { value: 'link' as const, label: 'Link', icon: ExternalLink },
+                  { value: 'image' as const, label: 'Image', icon: ImageIcon },
+                  { value: 'file' as const, label: 'File (PDF, PPT...)', icon: Paperclip },
+                ].map((ft) => {
+                  const Icon = ft.icon;
+                  const isSelected = newFieldType === ft.value;
+                  return (
+                    <button
+                      key={ft.value}
+                      type="button"
+                      onClick={() => {
+                        setNewFieldType(ft.value);
+                        setIsFieldTypeDropdownOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${
+                        isSelected ? 'bg-brand-accent/20 text-white font-medium' : 'text-brand-text hover:bg-[#201d1a] hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Icon className={`h-3.5 w-3.5 ${isSelected ? 'text-brand-accent' : 'text-brand-gold/70'}`} />
+                        <span>{ft.label}</span>
+                      </div>
+                      {isSelected && <Check className="h-3.5 w-3.5 text-brand-accent" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <button type="button" onClick={handleAddCustomField} className="px-3 py-2 bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30 rounded text-sm flex items-center">
             <Plus className="h-4 w-4 mr-1" /> Add
           </button>

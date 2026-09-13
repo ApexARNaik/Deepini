@@ -1,13 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getProjectDetails, updateProjectStatus, Project, ProjectComponent } from "@/lib/api";
 import { CheckOutModal } from "@/components/projects/CheckOutModal";
 import { CheckInModal } from "@/components/projects/CheckInModal";
-import { ArrowLeft, CheckCircle2, Clock, MapPin, PackagePlus } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock, MapPin, PackagePlus, ChevronDown, Check } from "lucide-react";
 import Link from "next/link";
 import { useNetworkState } from "@/hooks/useNetworkState";
+
+const STATUS_OPTIONS: {
+  value: 'planning' | 'active' | 'completed' | 'archived';
+  label: string;
+  dotColor: string;
+}[] = [
+  { value: 'planning', label: 'Planning', dotColor: 'bg-amber-400' },
+  { value: 'active', label: 'Active', dotColor: 'bg-emerald-400' },
+  { value: 'completed', label: 'Completed', dotColor: 'bg-sky-400' },
+  { value: 'archived', label: 'Archived', dotColor: 'bg-zinc-400' },
+];
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams();
@@ -20,6 +31,18 @@ export default function ProjectDetailPage() {
   
   const [showCheckOut, setShowCheckOut] = useState(false);
   const [checkInItem, setCheckInItem] = useState<ProjectComponent | null>(null);
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+  const statusDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (statusDropdownRef.current && !statusDropdownRef.current.contains(event.target as Node)) {
+        setIsStatusDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (typeof projectId !== 'string') return;
@@ -40,7 +63,7 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const handleStatusChange = async (status: 'planning' | 'active' | 'completed') => {
+  const handleStatusChange = async (status: 'planning' | 'active' | 'completed' | 'archived') => {
     if (!project) return;
     try {
       const updated = await updateProjectStatus(project.id, status);
@@ -53,6 +76,8 @@ export default function ProjectDetailPage() {
 
   if (loading) return <div className="p-6 text-brand-text-muted">Loading project...</div>;
   if (!project) return <div className="p-6 text-brand-text-muted">Project not found.</div>;
+
+  const currentStatus = STATUS_OPTIONS.find(s => s.value === project.status) || STATUS_OPTIONS[0];
 
   const activeItems = items.filter(i => !i.returned_at);
   const historyItems = items.filter(i => !!i.returned_at);
@@ -70,16 +95,49 @@ export default function ProjectDetailPage() {
           </div>
           {isOnline && (
             <div className="flex items-center gap-4">
-              <select 
-                value={project.status} 
-                onChange={e => handleStatusChange(e.target.value as any)}
-                className="bg-[#222] border border-[#332f2a] text-brand-text-muted text-xs font-bold uppercase tracking-widest p-2 rounded focus:outline-none focus:border-brand-accent"
-              >
-                <option value="planning">Planning</option>
-                <option value="active">Active</option>
-                <option value="completed">Completed</option>
-                <option value="archived">Archived</option>
-              </select>
+              <div className="relative" ref={statusDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsStatusDropdownOpen(prev => !prev)}
+                  className={`bg-[#191715] border ${
+                    isStatusDropdownOpen ? 'border-brand-accent ring-1 ring-brand-accent/50' : 'border-[#332f2a] hover:border-[#4a443c]'
+                  } text-white text-xs font-bold uppercase tracking-wider px-3 py-2 rounded flex items-center gap-2.5 transition-all focus:outline-none focus:border-brand-accent`}
+                >
+                  <span className={`h-2 w-2 rounded-full ${currentStatus.dotColor} shrink-0`} />
+                  <span>{currentStatus.label}</span>
+                  <ChevronDown className={`h-3.5 w-3.5 text-brand-text-muted transition-transform duration-150 ${isStatusDropdownOpen ? 'rotate-180 text-brand-accent' : ''}`} />
+                </button>
+
+                {isStatusDropdownOpen && (
+                  <div className="absolute left-0 top-full mt-1.5 w-44 z-40 bg-[#191715] border border-[#3a352e] rounded-md shadow-2xl shadow-black/90 ring-1 ring-black/50 py-1 overflow-hidden">
+                    <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-text-muted bg-[#12110f] border-b border-[#2e2a25]">
+                      Project Status
+                    </div>
+                    {STATUS_OPTIONS.map((opt) => {
+                      const isSelected = project.status === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            handleStatusChange(opt.value);
+                            setIsStatusDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${
+                            isSelected ? 'bg-brand-accent/20 text-white font-medium' : 'text-brand-text hover:bg-[#201d1a] hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${opt.dotColor} shrink-0`} />
+                            <span className="uppercase tracking-wider text-[11px] font-medium">{opt.label}</span>
+                          </div>
+                          {isSelected && <Check className="h-3.5 w-3.5 text-brand-accent" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               <button 
                 onClick={() => setShowCheckOut(true)}
                 className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors"
@@ -91,7 +149,7 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-12">
+      <div className="flex-1 overflow-y-auto themed-scrollbar p-6 space-y-12">
         
         {/* Active Checkouts */}
         <section>

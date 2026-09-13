@@ -1586,7 +1586,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                         </span>
                       </div>
 
-                      <div className="p-3 overflow-y-auto overflow-x-hidden space-y-2.5">
+                      <div className="p-3 overflow-y-auto themed-scrollbar overflow-x-hidden space-y-2.5">
                         {hotspots.length === 0 ? (
                           <div className="text-xs text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded p-4">
                             No hotspots marked on this view yet. Use the Freehand or Polygon tools on the canvas to trace one.
@@ -2543,7 +2543,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     />
                   </div>
                   
-                  <div className="flex flex-col gap-1.5 max-h-60 overflow-y-auto pr-1">
+                  <div className="flex flex-col gap-1.5 max-h-60 overflow-y-auto themed-scrollbar pr-1">
                     {allInventory
                       .filter(c => !leafComponents.some(lc => lc.component_id === c.id))
                       .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.tags?.some(t => t.name.toLowerCase().includes(searchQuery.toLowerCase())))
