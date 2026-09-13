@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
@@ -9,6 +9,7 @@ import { InsertIntermediateModal } from "./InsertIntermediateModal";
 import { MoveHotspotModal } from "./MoveHotspotModal";
 import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
+import { ThemedNumberInput } from "@/components/ThemedNumberInput";
 import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
@@ -220,6 +221,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   }, []);
   // We'll highlight the specific hotspot if locating
   const [highlightedHotspotId, setHighlightedHotspotId] = useState<string | null>(null);
+  const isLocatingRef = useRef<string | null>(null);
+  const activeHighlightedHotspotId = highlightedHotspotId || selectedLeafHotspot?.id || null;
 
   useEffect(() => {
     loadRoomData();
@@ -232,7 +235,11 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       setHotspots([]);
     }
     setHotspotSearchFilter("");
-    setHighlightedHotspotId(null);
+    if (isLocatingRef.current) {
+      isLocatingRef.current = null;
+    } else {
+      setHighlightedHotspotId(null);
+    }
     setIsExtendedHotspotsView(false);
   }, [activePhotoId]);
 
@@ -246,17 +253,54 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       setPhotos(allPhotos);
       
       if (locateHotspotId) {
-        // Compute path and set state
+        isLocatingRef.current = locateHotspotId;
+
+        // 1. Fetch the target hotspot
+        const targetHs = await getHotspotById(locateHotspotId);
+
+        // 2. Compute path of photos to target hotspot
         const path = await getFullHotspotPath(locateHotspotId);
-        if (path.length > 0) {
-          // The last element is the leaf hotspot.
-          // The elements before it are photos and drill hotspots.
-          // The breadcrumb chain tracks PHOTOS. 
-          const photoNodes = path.filter(p => p.type === 'photo');
-          if (photoNodes.length > 0) {
-            setBreadcrumbChain(photoNodes.map(p => ({ id: p.id, label: p.label })));
-            setActivePhotoId(photoNodes[photoNodes.length - 1].id);
-            setHighlightedHotspotId(locateHotspotId);
+        const photoNodes = path.filter(p => p.type === 'photo');
+
+        let targetPhotoId = targetHs?.photo_id || (photoNodes.length > 0 ? photoNodes[photoNodes.length - 1].id : null);
+
+        if (photoNodes.length > 0) {
+          setBreadcrumbChain(photoNodes.map(p => ({ id: p.id, label: p.label })));
+          if (targetPhotoId) setActivePhotoId(targetPhotoId);
+        } else if (targetPhotoId) {
+          const ph = allPhotos.find(p => p.id === targetPhotoId);
+          if (ph) {
+            setBreadcrumbChain([{ id: ph.id, label: ph.label || 'View' }]);
+            setActivePhotoId(ph.id);
+          }
+        }
+
+        // 3. Load hotspots for this photo immediately
+        if (targetPhotoId) {
+          const photoHotspots = await getHotspotsForPhoto(targetPhotoId);
+          setHotspots(photoHotspots);
+        }
+
+        // 4. Highlight the target hotspot
+        setHighlightedHotspotId(locateHotspotId);
+
+        // 5. If it's a leaf hotspot (compartment), open the compartment drawer and fetch its components
+        if (targetHs && targetHs.is_leaf) {
+          setSelectedLeafHotspot(targetHs);
+          setIsAddingComponent(false);
+          setSearchQuery("");
+          try {
+            const [comps, inv] = await Promise.all([
+              getHotspotComponents(targetHs.id),
+              getInventory()
+            ]);
+            setLeafComponents(comps);
+            setAllInventory(inv);
+            if (comps.length === 0) {
+              setIsAddingComponent(true);
+            }
+          } catch (err) {
+            console.error("Failed to load components for located hotspot:", err);
           }
         }
       } else {
@@ -1064,6 +1108,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const handleHotspotClick = async (hotspot: SpatialHotspot) => {
     if (hotspot.is_leaf) {
       setSelectedLeafHotspot(hotspot);
+      setHighlightedHotspotId(hotspot.id);
       setIsAddingComponent(false);
       setSearchQuery("");
       try {
@@ -1445,15 +1490,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               />
             ) : (
               <>
-                <Link href="/rooms" className="hover:text-brand-accent transition-colors" title="Back to Spatial Map">
+                <Link href="/rooms" className="hover:text-brand-accent transition-colors" data-tooltip="Back to Spatial Map">
                   {roomName.length > 20 ? roomName.slice(0, 20) + '...' : roomName}
                 </Link>
                 {isOnline && (
                   <div className="opacity-0 group-hover/room:opacity-100 flex items-center transition-opacity ml-2 gap-1">
-                    <button onClick={() => { setEditingRoomName(roomName); setIsEditingRoomName(true); }} className="hover:text-white" title="Rename Room">
+                    <button onClick={() => { setEditingRoomName(roomName); setIsEditingRoomName(true); }} className="hover:text-white" data-tooltip="Rename Room">
                       <Edit2 className="h-3 w-3" />
                     </button>
-                    <button onClick={handleDeleteRoomAction} className="text-red-500/50 hover:text-red-500" title="Delete Room">
+                    <button onClick={handleDeleteRoomAction} className="text-red-500/50 hover:text-red-500" data-tooltip="Delete Room" data-tooltip-variant="danger">
                       <Trash2 className="h-3 w-3" />
                     </button>
                   </div>
@@ -1468,7 +1513,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   type="button"
                   onClick={() => handleBreadcrumbClick(idx)}
                   className={`hover:text-brand-accent transition-colors ${idx === breadcrumbChain.length - 1 ? 'text-brand-accent font-bold' : 'text-brand-text'}`}
-                  title={`Jump to ${bc.label}`}
+                  data-tooltip={`Jump to ${bc.label}`}
                 >
                   {bc.label}
                 </button>
@@ -1493,7 +1538,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   <button onClick={() => {
                     setEditingLabel(breadcrumbChain[breadcrumbChain.length - 1]?.label || 'View');
                     setIsEditingPhotoLabel(true);
-                  }} className="ml-3 opacity-0 group-hover:opacity-100 text-brand-text-muted hover:text-white transition-opacity" title="Rename view">
+                  }} className="ml-3 opacity-0 group-hover:opacity-100 text-brand-text-muted hover:text-white transition-opacity" data-tooltip="Rename view">
                     <Edit2 className="h-4 w-4" />
                   </button>
                 )}
@@ -1518,7 +1563,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       ? 'bg-brand-accent/20 border-brand-accent text-brand-accent'
                       : 'bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c] hover:text-white'
                   }`}
-                  title="View and manage hotspots on this view"
+                  data-tooltip="View and manage hotspots on this view"
                 >
                   <MapPin className="h-3.5 w-3.5 mr-1.5 text-brand-accent" />
                   <span>Hotspots ({hotspots.length})</span>
@@ -1542,7 +1587,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                         </span>
                       </div>
 
-                      <div className="p-3 overflow-y-auto overflow-x-hidden space-y-2.5">
+                      <div className="p-3 overflow-y-auto themed-scrollbar overflow-x-hidden space-y-2.5">
                         {hotspots.length === 0 ? (
                           <div className="text-xs text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded p-4">
                             No hotspots marked on this view yet. Use the Freehand or Polygon tools on the canvas to trace one.
@@ -1561,7 +1606,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                     ? 'bg-brand-accent/20 border-brand-accent shadow-[0_0_14px_rgba(188,115,83,0.35)] ring-1 ring-brand-accent'
                                     : 'bg-black/40 border-[#332f2a] hover:border-[#4a443c] hover:bg-black/60'
                                 }`}
-                                title="Click to highlight and locate on the map"
+                                data-tooltip="Click to highlight and locate on the map"
                               >
                                 {/* Top Row: Icon, Label, and Badges */}
                                 <div className="flex items-center justify-between gap-2 min-w-0">
@@ -1600,7 +1645,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                       handleStartMoveHotspot(hs);
                                     }}
                                     className="flex-1 min-w-[65px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded transition-colors"
-                                    title={`Move "${hs.label}" and its contents to another view`}
+                                    data-tooltip={`Move "${hs.label}" and its contents to another view`}
                                   >
                                     <ArrowRightLeft className="h-3 w-3 shrink-0" />
                                     <span>Move</span>
@@ -1614,7 +1659,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                       handleStartReshape(hs);
                                     }}
                                     className="flex-1 min-w-[70px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded transition-colors"
-                                    title={`Redraw boundary shape for "${hs.label}"`}
+                                    data-tooltip={`Redraw boundary shape for "${hs.label}"`}
                                   >
                                     <Crop className="h-3 w-3 shrink-0" />
                                     <span>Redraw</span>
@@ -1628,7 +1673,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                         handleOpenInsertIntermediate(hs);
                                       }}
                                       className="flex-1 min-w-[85px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors"
-                                      title={`Insert an intermediate view between "${hs.label}" and its child view`}
+                                      data-tooltip={`Insert an intermediate view between "${hs.label}" and its child view`}
                                     >
                                       <Layers className="h-3 w-3 shrink-0" />
                                       <span>Insert Step</span>
@@ -1643,7 +1688,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                         setEditingHotspot(hs);
                                       }}
                                       className="flex-1 min-w-[60px] flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-brand-accent bg-brand-accent/10 hover:bg-brand-accent/20 border border-brand-accent/30 rounded transition-colors"
-                                      title="Edit hotspot name and storage type"
+                                      data-tooltip="Edit hotspot name and storage type"
                                     >
                                       <Edit2 className="h-3 w-3 shrink-0" />
                                       <span>Edit</span>
@@ -1657,7 +1702,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                       handleDeleteHotspot(hs);
                                     }}
                                     className="flex items-center justify-center gap-1 px-2 py-1 text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded transition-colors"
-                                    title={`Delete hotspot "${hs.label}"`}
+                                    data-tooltip={`Delete hotspot "${hs.label}"`}
+                                    data-tooltip-variant="danger"
                                   >
                                     <Trash2 className="h-3 w-3 shrink-0" />
                                     <span>Delete</span>
@@ -1687,7 +1733,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       ? 'bg-brand-accent/20 border-brand-accent text-brand-accent'
                       : 'bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c] hover:text-white'
                   }`}
-                  title="View options and management actions"
+                  data-tooltip="View options and management actions"
                 >
                   <SlidersHorizontal className="h-3.5 w-3.5 mr-1.5 text-brand-accent" />
                   <span>View Options</span>
@@ -1729,7 +1775,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                         }}
                         disabled={replacingImage}
                         className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-brand-text hover:text-white hover:bg-white/5 text-left transition-colors group"
-                        title="Replace this view's background image (preserves all hotspots & items)"
+                        data-tooltip="Replace this view's background image (preserves all hotspots & items)"
                       >
                         {replacingImage ? (
                           <RefreshCw className="h-4 w-4 text-amber-400 animate-spin shrink-0" />
@@ -1751,7 +1797,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                           }}
                           disabled={replacingImage}
                           className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-brand-text hover:text-white hover:bg-white/5 text-left transition-colors group"
-                          title="Insert an intermediate view above this view"
+                          data-tooltip="Insert an intermediate view above this view"
                         >
                           <Layers className="h-4 w-4 text-amber-300 shrink-0 group-hover:scale-110 transition-transform" />
                           <div className="min-w-0">
@@ -1770,7 +1816,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                           handleDeletePhoto();
                         }}
                         className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 text-left transition-colors group"
-                        title="Delete View"
+                        data-tooltip="Delete View"
+                        data-tooltip-variant="danger"
                       >
                         <Trash2 className="h-4 w-4 text-red-400 shrink-0 group-hover:scale-110 transition-transform" />
                         <div className="min-w-0">
@@ -1789,7 +1836,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               onClick={handleUndo}
               disabled={undoStack.length === 0 || isUndoing}
               className="flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest border transition-all bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c] hover:text-white disabled:opacity-30 disabled:pointer-events-none"
-              title={
+              data-tooltip={
                 undoStack.length > 0
                   ? `Undo: ${undoStack[undoStack.length - 1].description} (Ctrl+Z)`
                   : "Nothing to undo (Ctrl+Z)"
@@ -1862,7 +1909,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
               type="button"
               onClick={() => setEditingHotspot(pendingChildUpload)}
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-[#1a1816] hover:bg-[#252320] text-brand-accent hover:text-white border border-[#332f2a] rounded transition-colors"
-              title="Edit hotspot name and storage type"
+              data-tooltip="Edit hotspot name and storage type"
             >
               <Edit2 className="h-3.5 w-3.5" />
               <span>Edit Hotspot</span>
@@ -1923,7 +1970,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     resetViewInteractionState();
                   }}
                   className="w-full h-full text-left relative focus:outline-none"
-                  title={`View: ${p.label || 'View'} (Drag to reorder)`}
+                  data-tooltip={`View: ${p.label || 'View'} (Drag to reorder)`}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={p.image_url} alt={p.label || ''} className="w-full h-full object-cover pointer-events-none" />
@@ -1938,7 +1985,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 {/* Drag Grip Handle */}
                 <div 
                   className="absolute top-1.5 left-1.5 p-1 bg-black/60 backdrop-blur-xs rounded text-white/60 hover:text-white pointer-events-none transition-opacity opacity-70 group-hover:opacity-100" 
-                  title="Drag to reorder"
+                  data-tooltip="Drag to reorder"
                 >
                   <GripVertical className="h-3.5 w-3.5" />
                 </div>
@@ -1953,7 +2000,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                         handleMoveView(p.id, -1);
                       }}
                       className="p-1 bg-black/75 hover:bg-brand-accent rounded text-white/80 hover:text-white transition-colors"
-                      title="Move view backward / up"
+                      data-tooltip="Move view backward / up"
                     >
                       <ChevronUp className="h-3 w-3 hidden lg:block" />
                       <ChevronLeft className="h-3 w-3 lg:hidden" />
@@ -1967,7 +2014,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                         handleMoveView(p.id, 1);
                       }}
                       className="p-1 bg-black/75 hover:bg-brand-accent rounded text-white/80 hover:text-white transition-colors"
-                      title="Move view forward / down"
+                      data-tooltip="Move view forward / down"
                     >
                       <ChevronDown className="h-3 w-3 hidden lg:block" />
                       <ChevronRight className="h-3 w-3 lg:hidden" />
@@ -2013,7 +2060,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 imageUrl={activePhoto.image_url} 
                 hotspots={hotspots}
                 isEditing={isEditing}
-                highlightedHotspotId={highlightedHotspotId}
+                highlightedHotspotId={activeHighlightedHotspotId}
                 reshapingHotspot={reshapingHotspot}
                 movingHotspot={activeMoveSession ? { hotspot: activeMoveSession.hotspot, sourcePhotoId: activeMoveSession.sourcePhotoId } : null}
                 onCancelEdit={() => {
@@ -2076,7 +2123,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                           ? 'bg-brand-accent/20 border-brand-accent text-brand-accent shadow-sm'
                           : 'bg-[#141311] border-[#332f2a] hover:border-[#4a443c] text-brand-text hover:text-white'
                       }`}
-                      title={isExtendedHotspotsView ? "Collapse to 8 hotspots" : "Extend view to 16 hotspots (scrollable)"}
+                      data-tooltip={isExtendedHotspotsView ? "Collapse to 8 hotspots" : "Extend view to 16 hotspots (scrollable)"}
                     >
                       {isExtendedHotspotsView ? (
                         <>
@@ -2163,7 +2210,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                   ? 'bg-[#1f1d1a] border-[#4a443c] ring-1 ring-white/10'
                                   : 'bg-[#1a1816]/70 border-[#2d2924] hover:border-[#4a443c] hover:bg-[#1a1816]'
                             }`}
-                            title={hs.is_leaf ? `Open contents for "${hs.label}"` : `Drill down into "${hs.label}"`}
+                            data-tooltip={hs.is_leaf ? `Open contents for "${hs.label}"` : `Drill down into "${hs.label}"`}
                           >
                             <div className="flex items-start justify-between gap-2 min-w-0">
                               <div className="flex items-center gap-2 min-w-0">
@@ -2210,7 +2257,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                     handleStartMoveHotspot(hs);
                                   }}
                                   className="p-1 rounded text-brand-text-muted hover:text-purple-400 hover:bg-purple-500/10 transition-colors"
-                                  title={`Move "${hs.label}" to another view`}
+                                  data-tooltip={`Move "${hs.label}" to another view`}
                                 >
                                   <ArrowRightLeft className="h-3.5 w-3.5" />
                                 </button>
@@ -2221,7 +2268,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                     handleStartReshape(hs);
                                   }}
                                   className="p-1 rounded text-brand-text-muted hover:text-sky-400 hover:bg-sky-500/10 transition-colors"
-                                  title={`Redraw boundary for "${hs.label}"`}
+                                  data-tooltip={`Redraw boundary for "${hs.label}"`}
                                 >
                                   <Crop className="h-3.5 w-3.5" />
                                 </button>
@@ -2232,7 +2279,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                     setEditingHotspot(hs);
                                   }}
                                   className="p-1 rounded text-brand-text-muted hover:text-brand-accent hover:bg-brand-accent/10 transition-colors"
-                                  title={`Edit "${hs.label}"`}
+                                  data-tooltip={`Edit "${hs.label}"`}
                                 >
                                   <Edit2 className="h-3.5 w-3.5" />
                                 </button>
@@ -2243,7 +2290,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                     handleDeleteHotspot(hs);
                                   }}
                                   className="p-1 rounded text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                                  title={`Delete "${hs.label}"`}
+                                  data-tooltip={`Delete "${hs.label}"`}
+                                  data-tooltip-variant="danger"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
@@ -2297,34 +2345,35 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     <button 
                       onClick={() => handleStartMoveHotspot(selectedLeafHotspot)}
                       className="p-1.5 text-brand-text-muted hover:text-purple-400 hover:bg-purple-500/10 rounded transition-colors"
-                      title={`Move "${selectedLeafHotspot.label}" to another view`}
+                      data-tooltip={`Move "${selectedLeafHotspot.label}" to another view`}
                     >
                       <ArrowRightLeft className="h-4 w-4" />
                     </button>
                     <button 
                       onClick={() => handleStartReshape(selectedLeafHotspot)}
                       className="p-1.5 text-brand-text-muted hover:text-sky-400 hover:bg-sky-500/10 rounded transition-colors"
-                      title={`Redraw boundary for "${selectedLeafHotspot.label}"`}
+                      data-tooltip={`Redraw boundary for "${selectedLeafHotspot.label}"`}
                     >
                       <Crop className="h-4 w-4" />
                     </button>
                     <button 
                       onClick={() => setEditingHotspot(selectedLeafHotspot)}
                       className="p-1.5 text-brand-text-muted hover:text-brand-accent hover:bg-brand-accent/10 rounded transition-colors"
-                      title={`Edit hotspot "${selectedLeafHotspot.label}"`}
+                      data-tooltip={`Edit hotspot "${selectedLeafHotspot.label}"`}
                     >
                       <Edit2 className="h-4 w-4" />
                     </button>
                     <button 
                       onClick={() => handleDeleteHotspot(selectedLeafHotspot)}
                       className="p-1.5 text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                      title={`Delete hotspot "${selectedLeafHotspot.label}"`}
+                      data-tooltip={`Delete hotspot "${selectedLeafHotspot.label}"`}
+                      data-tooltip-variant="danger"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </>
                 )}
-                <button onClick={() => setSelectedLeafHotspot(null)} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
+                <button onClick={() => { setSelectedLeafHotspot(null); setHighlightedHotspotId(null); }} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -2341,7 +2390,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       ? 'bg-brand-accent border-brand-accent text-white'
                       : 'bg-brand-accent/15 border-brand-accent/40 text-brand-accent hover:bg-brand-accent hover:text-white'
                   }`}
-                  title="Add component to this location"
+                  data-tooltip="Add component to this location"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   <span>Add</span>
@@ -2364,7 +2413,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       <Link
                         href={`/inventory/new?locationId=${selectedLeafHotspot.id}`}
                         className="flex items-center gap-1 px-3 py-1.5 bg-brand-accent/15 hover:bg-brand-accent border border-brand-accent/40 hover:border-brand-accent text-brand-accent hover:text-white rounded text-xs font-medium transition-colors"
-                        title="Create and assign new item to this location"
+                        data-tooltip="Create and assign new item to this location"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         <span>New Item</span>
@@ -2389,7 +2438,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                               });
                             }}
                             className="h-10 w-10 rounded border border-[#332f2a] hover:border-brand-accent overflow-hidden shrink-0 cursor-zoom-in group/thumb block bg-black/40"
-                            title="Click to view full image"
+                            data-tooltip="Click to view full image"
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={lc.components.photo_url} alt={lc.components?.name} className="h-full w-full object-cover group-hover/thumb:scale-110 transition-transform duration-200" />
@@ -2398,7 +2447,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                         <div 
                           onClick={() => setQuickViewComponentId(lc.component_id)}
                           className="flex flex-col flex-1 min-w-0 cursor-pointer group/item"
-                          title="Click to view item details"
+                          data-tooltip="Click to view item details"
                         >
                           <div className="flex items-center gap-1.5">
                             <span className="text-sm text-white font-medium truncate group-hover/item:text-brand-accent transition-colors">
@@ -2419,51 +2468,25 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
                         {/* Quantity Stepper */}
-                        <div className="flex items-center border border-[#332f2a] rounded overflow-hidden bg-[#141311]">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newQty = lc.quantity - 1;
-                              if (newQty <= 0) {
-                                handleUpdateLeafComponents(leafComponents.filter(c => c.component_id !== lc.component_id));
-                              } else {
-                                handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: newQty } : c));
-                              }
-                            }}
-                            className="px-1.5 py-0.5 text-brand-text-muted hover:text-white hover:bg-[#2a2a2a] transition-colors text-xs font-bold"
-                            title="Decrease quantity"
-                          >
-                            -
-                          </button>
-                          <input 
-                            type="number" 
-                            min="1" 
-                            value={lc.quantity}
-                            onChange={(e) => {
-                              const qty = parseInt(e.target.value, 10);
-                              if (!isNaN(qty) && qty > 0) {
-                                handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: qty } : c));
-                              }
-                            }}
-                            className="w-10 bg-transparent text-white text-xs text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none font-mono font-bold"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: lc.quantity + 1 } : c));
-                            }}
-                            className="px-1.5 py-0.5 text-brand-text-muted hover:text-white hover:bg-[#2a2a2a] transition-colors text-xs font-bold"
-                            title="Increase quantity"
-                          >
-                            +
-                          </button>
-                        </div>
+                        <ThemedNumberInput
+                          size="sm"
+                          min={1}
+                          value={lc.quantity}
+                          onChange={(val) => {
+                            const qty = parseInt(val, 10);
+                            if (!isNaN(qty) && qty > 0) {
+                              handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: qty } : c));
+                            }
+                          }}
+                          className="w-16 border-[#332f2a] bg-[#141311]"
+                          inputClassName="text-center font-mono font-bold text-xs"
+                        />
                         
                         <button 
                           type="button"
                           onClick={() => handleUpdateLeafComponents(leafComponents.filter(c => c.component_id !== lc.component_id))}
                           className="p-1 text-brand-text-muted hover:text-red-400 transition-colors opacity-70 group-hover:opacity-100"
-                          title="Remove from location"
+                          data-tooltip="Remove from location"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
@@ -2481,7 +2504,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     <Link 
                       href={`/inventory/new?locationId=${selectedLeafHotspot.id}`} 
                       className="text-[10px] text-brand-accent hover:underline flex items-center gap-1 font-semibold"
-                      title="Create new item in inventory"
+                      data-tooltip="Create new item in inventory"
                     >
                       <Plus className="h-3 w-3" /> New Item
                     </Link>
@@ -2499,59 +2522,59 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     />
                   </div>
                   
-                  <div className="flex flex-col gap-1.5 max-h-60 overflow-y-auto pr-1">
-                    {allInventory
-                      .filter(c => !leafComponents.some(lc => lc.component_id === c.id))
-                      .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.tags?.some(t => t.name.toLowerCase().includes(searchQuery.toLowerCase())))
-                      .slice(0, 50)
-                      .map(c => (
-                      <button 
-                        key={c.id}
-                        type="button"
-                        onClick={() => {
-                          handleUpdateLeafComponents([...leafComponents, { component_id: c.id, quantity: 1, components: c }]);
-                          setSearchQuery("");
-                        }}
-                        className="flex items-center justify-between p-2.5 text-left bg-black/20 hover:bg-[#2a2825] border border-transparent hover:border-[#332f2a] rounded transition-colors group"
-                      >
-                        <div className="flex flex-col min-w-0 pr-2">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm text-brand-text group-hover:text-white font-medium truncate">{c.name}</span>
-                            {isPersonalItem(c) && (
-                              <span className="text-[8px] px-1 py-0.2 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
-                                Personal
-                              </span>
-                            )}
+                  <div className="flex flex-col gap-1.5 max-h-60 overflow-y-auto themed-scrollbar pr-1">
+                    {(() => {
+                      const matched = filterAndRankInventory(
+                        allInventory.filter(c => !leafComponents.some(lc => lc.component_id === c.id)),
+                        searchQuery
+                      );
+                      if (matched.length === 0) {
+                        return (
+                          <div className="text-center py-4 text-xs text-brand-text-muted border border-dashed border-[#332f2a] rounded">
+                            {searchQuery ? `No items match "${searchQuery}"` : "All inventory items are already in this location"}
                           </div>
-                          <span className="text-[10px] text-brand-text-muted">
-                            Total: {c.totals?.total_owned_qty ?? 0} | In storage: {c.totals?.in_storage_qty ?? 0}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span
-                            role="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setQuickViewComponentId(c.id);
-                            }}
-                            className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#332f2a] rounded transition-colors"
-                            title="Preview item details"
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                          </span>
-                          <div className="flex items-center gap-1 text-xs text-brand-accent font-bold px-2 py-1 bg-brand-accent/10 rounded group-hover:bg-brand-accent group-hover:text-white transition-colors">
-                            <Plus className="h-3.5 w-3.5" />
-                            <span>Add</span>
+                        );
+                      }
+                      return matched.slice(0, 50).map(c => (
+                        <button 
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            handleUpdateLeafComponents([...leafComponents, { component_id: c.id, quantity: 1, components: c }]);
+                            setSearchQuery("");
+                          }}
+                          className="flex items-center justify-between p-2.5 text-left bg-black/20 hover:bg-[#2a2825] border border-transparent hover:border-[#332f2a] rounded transition-colors group"
+                        >
+                          <div className="flex flex-col min-w-0 pr-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm text-brand-text group-hover:text-white font-medium truncate">{c.name}</span>
+                              {isPersonalItem(c) && (
+                                <span className="text-[8px] px-1 py-0.2 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
+                                  Personal
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-brand-text-muted">
+                              Total: {c.totals?.total_owned_qty ?? 0} | In storage: {c.totals?.in_storage_qty ?? 0}
+                            </span>
                           </div>
-                        </div>
-                      </button>
-                    ))}
-
-                    {allInventory.filter(c => !leafComponents.some(lc => lc.component_id === c.id)).filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
-                      <div className="text-center py-4 text-xs text-brand-text-muted border border-dashed border-[#332f2a] rounded">
-                        {searchQuery ? `No items match "${searchQuery}"` : "All inventory items are already in this location"}
-                      </div>
-                    )}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span
+                              role="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setQuickViewComponentId(c.id);
+                              }}
+                              className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#333] rounded transition-colors"
+                              data-tooltip="Quick View Component"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </span>
+                            <Plus className="h-4 w-4 text-brand-accent group-hover:scale-110 transition-transform" />
+                          </div>
+                        </button>
+                      ));
+                    })()}
                   </div>
                 </div>
               )}

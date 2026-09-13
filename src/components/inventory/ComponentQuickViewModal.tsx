@@ -104,7 +104,7 @@ export function ComponentQuickViewModal({
               <Link
                 href={`/inventory/${component.id}/edit`}
                 className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-[#252320] hover:bg-[#332f2a] text-brand-text hover:text-white border border-[#332f2a] rounded transition-colors"
-                title="Edit component details"
+                data-tooltip="Edit component details"
               >
                 <Edit2 className="h-3 w-3" />
                 <span className="hidden sm:inline">Edit</span>
@@ -114,7 +114,7 @@ export function ComponentQuickViewModal({
               type="button"
               onClick={onClose} 
               className="p-1 text-brand-text-muted hover:text-white hover:bg-[#252320] rounded transition-colors"
-              title="Close popup (Esc)"
+              data-tooltip="Close popup (Esc)"
               aria-label="Close"
             >
               <X className="h-5 w-5" />
@@ -151,7 +151,7 @@ export function ComponentQuickViewModal({
                       type="button"
                       onClick={() => setPreviewImage({ url: component.photo_url!, title: component.name, subtitle: isPersonal ? "Personal Item Photo" : "Component Image" })}
                       className="w-full h-full relative group/photo cursor-zoom-in block"
-                      title="Click to view full image"
+                      data-tooltip="Click to view full image"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img 
@@ -308,7 +308,7 @@ export function ComponentQuickViewModal({
                               type="button"
                               onClick={() => setPreviewImage({ url: field.value, title: `${component.name} - ${key}`, subtitle: "Custom Field Image" })}
                               className="group/img mt-1 relative block cursor-zoom-in text-left"
-                              title="Click to view full image"
+                              data-tooltip="Click to view full image"
                             >
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img 
@@ -321,7 +321,7 @@ export function ComponentQuickViewModal({
                             <div className="mt-1 flex items-center justify-between p-2 bg-black/40 border border-[#2d2924] rounded">
                               <div className="flex items-center gap-2 min-w-0 pr-2">
                                 <FileText className="h-3.5 w-3.5 text-brand-accent shrink-0" />
-                                <span className="text-xs text-white truncate" title={field.fileName || field.value}>
+                                <span className="text-xs text-white truncate" data-tooltip={field.fileName || field.value}>
                                   {field.fileName || (typeof field.value === "string" ? field.value.split("/").pop()?.split("_").slice(2).join("_") || field.value.split("/").pop() : "Document")}
                                 </span>
                               </div>
@@ -407,7 +407,7 @@ export function ComponentQuickViewModal({
             <Link
               href={`/inventory/${component.id}`}
               className="text-xs font-semibold text-brand-accent hover:text-white flex items-center gap-1.5 transition-colors"
-              title="Navigate to full component page"
+              data-tooltip="Navigate to full component page"
             >
               <span>{isPersonal ? "Open Personal Item Page" : "Open Component Page"}</span>
               <ExternalLink className="h-3 w-3" />

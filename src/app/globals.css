@@ -29,3 +29,69 @@ body {
   height: 100vh;
   overflow: hidden;
 }
+
+/* Universal Themed Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #38332d #141211;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #141211;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #38332d;
+  border-radius: 9999px;
+  border: 1px solid #141211;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #bc7353;
+}
+
+::-webkit-scrollbar-corner {
+  background: #141211;
+}
+
+/* Custom scrollbar class for tight dropdowns & popovers with transparent background */
+.themed-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #3d3730 transparent;
+}
+
+.themed-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.themed-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.themed-scrollbar::-webkit-scrollbar-thumb {
+  background: #3d3730;
+  border-radius: 9999px;
+}
+
+.themed-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #bc7353;
+}
+
+/* Universal Themed Number Inputs - Hide default browser spin buttons */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+

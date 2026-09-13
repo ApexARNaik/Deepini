@@ -67,12 +67,24 @@ export interface ComponentTotals {
   component_id: string;
   in_storage_qty: number;
   checked_out_qty: number;
+  lent_qty?: number;
   total_owned_qty: number;
+}
+
+export interface ComponentLocationSummary {
+  id: string;
+  hotspot_id: string;
+  quantity: number;
+  label?: string;
+  fullLabel?: string;
+  room_id?: string;
+  room_name?: string;
 }
 
 export interface ComponentWithTotals extends Component {
   totals: ComponentTotals;
   tags: Tag[];
+  locations?: ComponentLocationSummary[];
 }
 
 export interface ComponentLocation {
@@ -156,64 +168,223 @@ export async function getHotspotById(hotspotId: string): Promise<SpatialHotspot 
   return data as SpatialHotspot | null;
 }
 
+export function buildComponentLocationsMap(
+  compLocs: any[],
+  allHotspots: any[],
+  allPhotos: any[],
+  allRooms: any[]
+): Map<string, ComponentLocationSummary[]> {
+  const hsMap = new Map<string, any>(allHotspots.map(h => [h.id, h]));
+  const phMap = new Map<string, any>(allPhotos.map(p => [p.id, p]));
+  const rmMap = new Map<string, any>(allRooms.map(r => [r.id, r]));
+
+  const map = new Map<string, ComponentLocationSummary[]>();
+
+  for (const cl of compLocs) {
+    let curHsId = cl.hotspot_id;
+    let roomId: string | undefined;
+    let roomName: string | undefined;
+    const chain: string[] = [];
+    let depth = 0;
+    const targetHs = hsMap.get(cl.hotspot_id);
+
+    while (curHsId && depth < 25) {
+      depth++;
+      const hs = hsMap.get(curHsId);
+      if (!hs) break;
+      if (hs.label) chain.unshift(hs.label);
+
+      if (!hs.photo_id) break;
+      const ph = phMap.get(hs.photo_id);
+      if (!ph) break;
+      if (ph.label) chain.unshift(ph.label);
+
+      if (ph.parent_hotspot_id) {
+        curHsId = ph.parent_hotspot_id;
+      } else if (ph.room_id) {
+        roomId = ph.room_id;
+        roomName = rmMap.get(ph.room_id)?.name;
+        if (roomName) chain.unshift(roomName);
+        break;
+      } else {
+        break;
+      }
+    }
+
+    const summary: ComponentLocationSummary = {
+      id: cl.id,
+      hotspot_id: cl.hotspot_id,
+      quantity: cl.quantity,
+      label: targetHs?.label || 'Storage Bin',
+      fullLabel: chain.length > 0 ? chain.join(' → ') : (targetHs?.label || 'Storage Bin'),
+      room_id: roomId,
+      room_name: roomName
+    };
+
+    const list = map.get(cl.component_id) || [];
+    list.push(summary);
+    map.set(cl.component_id, list);
+  }
+
+  return map;
+}
+
+/**
+ * Calculates the match rank of an item against a search query.
+ * Lower score = higher priority.
+ *
+ * Tier 1 (10-12): Direct match in name (exact, name startsWith, or word startsWith)
+ * Tier 2 (20-22): Direct match in tags (exact, tag startsWith, or word startsWith)
+ * Tier 3 (30-31): Direct match in notes (notes startsWith, or word startsWith)
+ * Tier 4 (40-42): In-between match in name (query is substring inside a word)
+ * Tier 5 (50): In-between match in tags (query is substring inside a tag)
+ * Tier 6 (60): In-between match in notes (query is substring inside notes)
+ * Tier 999: No match (filtered out)
+ */
+export function getItemSearchScore(
+  item: { name: string; notes?: string | null; tags?: { name: string }[] },
+  search: string
+): number {
+  const q = search.toLowerCase().trim();
+  if (!q) return 0;
+
+  const name = (item.name || "").toLowerCase().trim();
+  const notes = (item.notes || "").toLowerCase().trim();
+  const tagNames = (item.tags || []).map(t => (t.name || "").toLowerCase().trim());
+
+  const splitWords = (text: string) => text.split(/[\s\-_\/,\.;:\(\)\[\]\{\}]+/).filter(Boolean);
+
+  const nameWords = splitWords(name);
+  const noteWords = splitWords(notes);
+  const tagWords = tagNames.flatMap(t => splitWords(t));
+
+  // 1. Direct match in Name
+  if (name === q) return 10;
+  if (name.startsWith(q)) return 11;
+  if (nameWords.some(w => w.startsWith(q))) return 12;
+
+  // 2. Direct match in Tags
+  if (tagNames.some(t => t === q)) return 20;
+  if (tagNames.some(t => t.startsWith(q))) return 21;
+  if (tagWords.some(w => w.startsWith(q))) return 22;
+
+  // 3. Direct match in Notes
+  if (notes.startsWith(q)) return 30;
+  if (noteWords.some(w => w.startsWith(q))) return 31;
+
+  // 4. In-between match in Name
+  if (name.includes(q)) return 40;
+
+  // 5. In-between match in Tags
+  if (tagNames.some(t => t.includes(q))) return 50;
+
+  // 6. In-between match in Notes
+  if (notes.includes(q)) return 60;
+
+  // Multi-word fallback: if query has multiple space-separated words, check if all words match
+  const queryTokens = q.split(/\s+/).filter(Boolean);
+  if (queryTokens.length > 1) {
+    const allTokensMatchName = queryTokens.every(token => name.includes(token));
+    if (allTokensMatchName) return 42;
+
+    const allTokensMatchAnywhere = queryTokens.every(token =>
+      name.includes(token) ||
+      notes.includes(token) ||
+      tagNames.some(t => t.includes(token))
+    );
+    if (allTokensMatchAnywhere) return 65;
+  }
+
+  return 999;
+}
+
+export function filterAndRankInventory<T extends { name: string; notes?: string | null; tags?: { name: string }[] }>(
+  items: T[],
+  search: string
+): T[] {
+  if (!search || !search.trim()) {
+    return [...items].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  }
+
+  const scored = items
+    .map(item => ({
+      item,
+      score: getItemSearchScore(item, search)
+    }))
+    .filter(({ score }) => score < 999);
+
+  scored.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return a.item.name.localeCompare(b.item.name, undefined, { numeric: true, sensitivity: 'base' });
+  });
+
+  return scored.map(({ item }) => item);
+}
+
 // Phase 4 Functions
 export async function getInventory(search: string = ""): Promise<ComponentWithTotals[]> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
-    const allComps = await db.components.toArray();
-    const allTotals = await db.component_totals.toArray();
-    const allTags = await db.tags.toArray();
-    const allCompTags = await db.component_tags.toArray();
+    const [allComps, allTotals, allTags, allCompTags, allCompLocs, allHotspots, allPhotos, allRooms] = await Promise.all([
+      db.components.toArray(),
+      db.component_totals.toArray(),
+      db.tags.toArray(),
+      db.component_tags.toArray(),
+      db.component_locations.toArray(),
+      db.spatial_hotspots.toArray(),
+      db.spatial_photos.toArray(),
+      db.rooms.toArray()
+    ]);
 
     const totalsMap = new Map(allTotals.map(t => [t.component_id, t]));
     const tagMap = new Map(allTags.map(t => [t.id, t]));
+    const locationsMap = buildComponentLocationsMap(allCompLocs, allHotspots, allPhotos, allRooms);
 
     let results = allComps.filter(c => !c.pending_delete);
     
-    return results.map(c => {
+    const mapped = results.map(c => {
       const cTags = allCompTags.filter(ct => ct.component_id === c.id).map(ct => tagMap.get(ct.tag_id)).filter(Boolean) as Tag[];
       return {
         ...c,
         tags: cTags,
-        totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 }
-      }
-    }).filter(c => {
-      if (!search) return true;
-      const s = search.toLowerCase();
-      return c.name.toLowerCase().includes(s) || 
-             (c.notes && c.notes.toLowerCase().includes(s)) ||
-             c.tags.some(t => t.name.toLowerCase().includes(s));
-    }).sort((a, b) => a.name.localeCompare(b.name));
+        totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 },
+        locations: locationsMap.get(c.id) || []
+      };
+    });
+
+    return filterAndRankInventory(mapped, search);
   }
 
-  let query = supabase.from("components").select(`
-    *,
-    component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))
-  `).eq("pending_delete", false).order("name");
+  const [compDataRes, totalsDataRes, compLocsRes, hsRes, phRes, rmRes] = await Promise.all([
+    supabase.from("components").select(`
+      *,
+      component_tags!component_tags_component_id_fkey(tags!component_tags_tag_id_fkey(*))
+    `).eq("pending_delete", false).order("name"),
+    supabase.from("component_totals").select("*"),
+    supabase.from("component_locations").select("*"),
+    supabase.from("spatial_hotspots").select("id, label, photo_id"),
+    supabase.from("spatial_photos").select("id, label, parent_hotspot_id, room_id"),
+    supabase.from("rooms").select("id, name")
+  ]);
 
-  const { data: compData, error: compErr } = await query;
-  if (compErr) throw compErr;
+  if (compDataRes.error) throw compDataRes.error;
+  if (totalsDataRes.error) throw totalsDataRes.error;
 
-  const { data: totalsData, error: totErr } = await supabase.from("component_totals").select("*");
-  if (totErr) throw totErr;
+  const totalsMap = new Map((totalsDataRes.data || []).map(t => [t.component_id, t]));
+  const locationsMap = buildComponentLocationsMap(
+    compLocsRes.data || [],
+    hsRes.data || [],
+    phRes.data || [],
+    rmRes.data || []
+  );
 
-  const totalsMap = new Map(totalsData.map(t => [t.component_id, t]));
-
-  let results = compData.map(c => ({
+  let results = (compDataRes.data || []).map(c => ({
     ...c,
     tags: c.component_tags.map((ct: any) => ct.tags).filter(Boolean),
-    totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 }
+    totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 },
+    locations: locationsMap.get(c.id) || []
   }));
 
-  if (search) {
-    const s = search.toLowerCase();
-    results = results.filter(c => 
-      c.name.toLowerCase().includes(s) || 
-      (c.notes && c.notes.toLowerCase().includes(s)) ||
-      c.tags.some((t: any) => t.name.toLowerCase().includes(s))
-    );
-  }
-
-  return results;
+  return filterAndRankInventory(results, search);
 }
 
 export async function getLowStock(): Promise<ComponentWithTotals[]> {
@@ -342,24 +513,52 @@ export async function getHotspotBreadcrumbPath(hotspotId: string): Promise<{ id:
 
 export async function getFullHotspotPath(hotspotId: string) {
   // Recursive fetch to root
-  const chain: { type: 'photo' | 'hotspot', id: string, label: string }[] = [];
+  const chain: { type: 'room' | 'photo' | 'hotspot', id: string, label: string }[] = [];
   let currentHotspotId: string | null = hotspotId;
+  const isOffline = typeof window !== 'undefined' && !navigator.onLine;
 
   while (currentHotspotId) {
-    const { data: hs }: any = await supabase.from("spatial_hotspots").select("*").eq("id", currentHotspotId).single();
+    let hs: any = null;
+    if (isOffline) {
+      hs = await db.spatial_hotspots.get(currentHotspotId);
+    } else {
+      const res = await supabase.from("spatial_hotspots").select("*").eq("id", currentHotspotId).maybeSingle();
+      hs = res.data;
+      if (!hs) {
+        hs = await db.spatial_hotspots.get(currentHotspotId);
+      }
+    }
     if (!hs) break;
     chain.unshift({ type: 'hotspot', id: hs.id, label: hs.label });
     
-    const { data: photo }: any = await supabase.from("spatial_photos").select("*").eq("id", hs.photo_id).single();
+    let photo: any = null;
+    if (isOffline) {
+      photo = await db.spatial_photos.get(hs.photo_id);
+    } else {
+      const res = await supabase.from("spatial_photos").select("*").eq("id", hs.photo_id).maybeSingle();
+      photo = res.data;
+      if (!photo) {
+        photo = await db.spatial_photos.get(hs.photo_id);
+      }
+    }
     if (!photo) break;
     chain.unshift({ type: 'photo', id: photo.id, label: photo.label || 'View' });
     
     if (photo.parent_hotspot_id) {
       currentHotspotId = photo.parent_hotspot_id;
     } else if (photo.room_id) {
-      const { data: room }: any = await supabase.from("rooms").select("name").eq("id", photo.room_id).single();
+      let room: any = null;
+      if (isOffline) {
+        room = await db.rooms.get(photo.room_id);
+      } else {
+        const res = await supabase.from("rooms").select("name").eq("id", photo.room_id).maybeSingle();
+        room = res.data;
+        if (!room) {
+          room = await db.rooms.get(photo.room_id);
+        }
+      }
       if (room?.name) {
-        chain.unshift({ type: 'photo', id: photo.room_id, label: room.name });
+        chain.unshift({ type: 'room', id: photo.room_id, label: room.name });
       }
       break;
     } else {
@@ -369,36 +568,98 @@ export async function getFullHotspotPath(hotspotId: string) {
   return chain;
 }
 
-export async function getAllLeafHotspots() {
-  let data: any[] = [];
-  if (typeof window !== 'undefined' && !navigator.onLine) {
-    const allHotspots = await db.spatial_hotspots.toArray();
-    data = allHotspots.filter(h => h.is_leaf);
-  } else {
-    const { data: dbData, error } = await supabase
-      .from('spatial_hotspots')
-      .select('*')
-      .eq('is_leaf', true)
-      .order('created_at', { ascending: false });
-    if (error) throw new Error(error.message || "Failed to fetch leaf hotspots");
-    data = dbData || [];
-  }
-  
-  const hotspotsWithPaths = await Promise.all(data.map(async (hs) => {
-    const path = await getFullHotspotPath(hs.id);
-    const label = path.map(p => p.label).join(' → ');
-    return { ...hs, fullLabel: label };
-  }));
-  
-  // Arrange in the order of recently added (newest first)
-  return hotspotsWithPaths.sort((a, b) => {
+export function buildLeafHotspotsHierarchy(
+  allHotspots: any[],
+  allPhotos: any[],
+  allRooms: any[]
+) {
+  const hotspotMap = new Map<string, any>();
+  allHotspots.forEach(h => hotspotMap.set(h.id, h));
+
+  const photoMap = new Map<string, any>();
+  allPhotos.forEach(p => photoMap.set(p.id, p));
+
+  const roomMap = new Map<string, any>();
+  allRooms.forEach(r => roomMap.set(r.id, r));
+
+  const leafHotspots = allHotspots.filter(h => h.is_leaf);
+
+  const results = leafHotspots.map(hs => {
+    const chain: { type: 'hotspot' | 'photo'; id: string; label: string }[] = [];
+    let currentHotspotId: string | null = hs.id;
+    let depth = 0;
+
+    while (currentHotspotId && depth < 30) {
+      depth++;
+      const curHs = hotspotMap.get(currentHotspotId);
+      if (!curHs) break;
+      chain.unshift({ type: 'hotspot', id: curHs.id, label: curHs.label || 'Hotspot' });
+
+      if (!curHs.photo_id) break;
+      const photo = photoMap.get(curHs.photo_id);
+      if (!photo) break;
+      chain.unshift({ type: 'photo', id: photo.id, label: photo.label || 'View' });
+
+      if (photo.parent_hotspot_id) {
+        currentHotspotId = photo.parent_hotspot_id;
+      } else if (photo.room_id) {
+        const room = roomMap.get(photo.room_id);
+        if (room?.name) {
+          chain.unshift({ type: 'photo', id: photo.room_id, label: room.name });
+        }
+        break;
+      } else {
+        break;
+      }
+    }
+
+    const fullLabel = chain.map(c => c.label).filter(Boolean).join(' → ');
+    const rootRoom = chain.find(c => roomMap.has(c.id));
+    const roomName = rootRoom?.label || (fullLabel.includes('→') ? fullLabel.split('→')[0].trim() : undefined);
+    const roomId = rootRoom?.id;
+    return {
+      ...hs,
+      fullLabel: fullLabel || hs.label || 'Unknown Location',
+      roomId,
+      roomName
+    };
+  });
+
+  return results.sort((a, b) => {
     const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
     const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
     if (timeB !== timeA) {
       return timeB - timeA;
     }
-    return a.fullLabel.localeCompare(b.fullLabel);
+    return (a.fullLabel || '').localeCompare(b.fullLabel || '');
   });
+}
+
+export async function getAllLeafHotspots() {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const [allHotspots, allPhotos, allRooms] = await Promise.all([
+      db.spatial_hotspots.toArray(),
+      db.spatial_photos.toArray(),
+      db.rooms.toArray()
+    ]);
+    return buildLeafHotspotsHierarchy(allHotspots, allPhotos, allRooms);
+  }
+
+  const [hotspotsRes, photosRes, roomsRes] = await Promise.all([
+    supabase.from('spatial_hotspots').select('*'),
+    supabase.from('spatial_photos').select('*'),
+    supabase.from('rooms').select('id, name')
+  ]);
+
+  if (hotspotsRes.error) throw new Error(hotspotsRes.error.message || "Failed to fetch hotspots");
+  if (photosRes.error) throw new Error(photosRes.error.message || "Failed to fetch photos");
+  if (roomsRes.error) throw new Error(roomsRes.error.message || "Failed to fetch rooms");
+
+  return buildLeafHotspotsHierarchy(
+    hotspotsRes.data || [],
+    photosRes.data || [],
+    roomsRes.data || []
+  );
 }
 
 export async function getHotspotComponents(hotspotId: string) {
@@ -1182,9 +1443,13 @@ export async function insertIntermediateSpatialPhoto(params: {
 export interface Project {
   id: string;
   name: string;
-  status: 'planning' | 'active' | 'completed' | 'archived';
+  status: 'planning' | 'active' | 'archived';
   description: string | null;
+  location_id?: string | null;
+  location_label?: string | null;
+  location_room_id?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface ProjectComponent {
@@ -1200,13 +1465,107 @@ export interface ProjectComponent {
   source_hotspot?: SpatialHotspot;
 }
 
+export interface Loan {
+  id: string;
+  loan_type: 'component' | 'project';
+  component_id: string | null;
+  project_id: string | null;
+  source_location_id: string | null;
+  returned_location_id: string | null;
+  component_name?: string;
+  project_name?: string;
+  source_location_label?: string;
+  returned_location_label?: string;
+  quantity: number;
+  borrower_name: string;
+  borrower_contact?: string | null;
+  notes?: string | null;
+  lent_at: string;
+  due_date: string;
+  returned_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  // Resolved relations for UI convenience
+  component?: Component;
+  project?: Project;
+  source_hotspot?: any;
+  returned_hotspot?: any;
+}
+
+export interface LoanNotification {
+  id: string;
+  loanId: string;
+  type: 'due_tomorrow' | 'due_today' | 'overdue';
+  title: string;
+  message: string;
+  urgency: 'critical' | 'high' | 'medium';
+  daysRemaining: number;
+  loan: Loan;
+}
+
+export function calculateLoanDaysRemaining(dueDateStr: string): number {
+  if (!dueDateStr) return 0;
+  const parts = dueDateStr.split('T')[0].split('-');
+  const dueYear = parseInt(parts[0], 10);
+  const dueMonth = parseInt(parts[1], 10) - 1;
+  const dueDay = parseInt(parts[2], 10);
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDate = new Date(dueYear, dueMonth, dueDay);
+
+  const diffTime = dueDate.getTime() - today.getTime();
+  return Math.round(diffTime / (1000 * 60 * 60 * 24));
+}
+
+
+export function extractProjectLocation(project: any): { cleanDescription: string; locationId: string | null } {
+  if (project.location_id) {
+    return {
+      cleanDescription: (project.description || '').replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim(),
+      locationId: project.location_id
+    };
+  }
+  const desc = project.description || '';
+  const match = desc.match(/<!--archive_location:([a-f0-9\-]+)-->/i);
+  if (match) {
+    return {
+      cleanDescription: desc.replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim(),
+      locationId: match[1]
+    };
+  }
+  return { cleanDescription: desc, locationId: null };
+}
+
+export function formatProjectDescriptionWithLocation(description: string | null | undefined, locationId: string | null | undefined): string {
+  const clean = (description || '').replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim();
+  if (locationId) {
+    return `${clean}${clean ? '\n\n' : ''}<!--archive_location:${locationId}-->`;
+  }
+  return clean;
+}
+
 export async function getProjects(): Promise<(Project & { active_count: number })[]> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
   if (typeof window !== 'undefined' && !navigator.onLine) {
     const allProj = await db.projects.orderBy('created_at').reverse().toArray();
     const allProjComps = await db.project_components.toArray();
     return allProj.map(p => {
       const active = allProjComps.filter(pc => pc.project_id === p.id && !pc.returned_at).reduce((acc, pc) => acc + pc.quantity, 0);
-      return { ...p, active_count: active };
+      const { cleanDescription, locationId } = extractProjectLocation(p);
+      const loc = locationId ? hotspotMap.get(locationId) : undefined;
+      const status: 'planning' | 'active' | 'archived' = (p.status as any) === 'completed' ? 'archived' : (p.status as any);
+      return {
+        ...p,
+        status,
+        description: cleanDescription,
+        location_id: locationId,
+        location_label: loc?.fullLabel || loc?.label,
+        location_room_id: loc?.roomId,
+        active_count: active
+      };
     });
   }
 
@@ -1215,26 +1574,176 @@ export async function getProjects(): Promise<(Project & { active_count: number }
   
   return data.map(p => {
     const active = p.project_components.filter((pc: any) => !pc.returned_at).reduce((acc: number, pc: any) => acc + pc.quantity, 0);
-    return { ...p, active_count: active };
+    const { cleanDescription, locationId } = extractProjectLocation(p);
+    const loc = locationId ? hotspotMap.get(locationId) : undefined;
+    const status: 'planning' | 'active' | 'archived' = p.status === 'completed' ? 'archived' : (p.status as any);
+    return {
+      ...p,
+      status,
+      description: cleanDescription,
+      location_id: locationId,
+      location_label: loc?.fullLabel || loc?.label,
+      location_room_id: loc?.roomId,
+      active_count: active
+    };
   });
 }
 
 export async function createProject(name: string, description: string = ''): Promise<Project> {
   const { data, error } = await supabase.from('projects').insert([{ name, description, status: 'planning' }]).select().single();
   if (error) throw error;
+  if (typeof window !== 'undefined') {
+    await db.projects.put(data);
+  }
   return data;
 }
 
-export async function updateProjectStatus(id: string, status: 'planning' | 'active' | 'completed' | 'archived'): Promise<Project> {
-  const { data, error } = await supabase.from('projects').update({ status }).eq('id', id).select().single();
-  if (error) throw error;
-  return data;
+export async function updateProject(
+  id: string,
+  updates: {
+    name?: string;
+    description?: string | null;
+    status?: 'planning' | 'active' | 'archived';
+    location_id?: string | null;
+  }
+): Promise<Project> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
+  // Strict Rule 1: The archive transition and location_id assignment must be atomic.
+  // A project must not become Archived without a valid storage location, and the location must reference a leaf hotspot.
+  if (updates.status === 'archived') {
+    if (!updates.location_id) {
+      throw new Error("A project cannot become Archived without a valid leaf storage location.");
+    }
+    const loc = hotspotMap.get(updates.location_id);
+    if (!loc || !loc.is_leaf) {
+      throw new Error("Project archive location must reference a valid leaf storage location.");
+    }
+  }
+
+  // Strict Rule 2: Planning phase means no components are being used.
+  if (updates.status === 'planning') {
+    const { items } = await getProjectDetails(id);
+    const activeItems = items.filter(i => !i.returned_at);
+    if (activeItems.length > 0) {
+      throw new Error(`Cannot transition to Planning phase: ${activeItems.length} active component(s) are currently in use. Check in all components first.`);
+    }
+  }
+
+  // Determine existing project data if needed for fallback description
+  let existingDesc: string | null | undefined = updates.description;
+  if (existingDesc === undefined) {
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      const p = await db.projects.get(id);
+      existingDesc = p?.description;
+    } else {
+      const { data: cur } = await supabase.from('projects').select('description').eq('id', id).single();
+      existingDesc = cur?.description;
+    }
+  }
+
+  // If moving away from archived, clear location_id
+  const finalLocationId = updates.status && updates.status !== 'archived' ? null : updates.location_id;
+
+  const payload: any = {
+    ...updates,
+    location_id: finalLocationId,
+    updated_at: new Date().toISOString()
+  };
+  Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+
+  let savedData: any = null;
+
+  // Try updating with location_id column in Supabase
+  const { data, error } = await supabase
+    .from('projects')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (!error && data) {
+    savedData = data;
+  } else if (error && (error.code === 'PGRST204' || error.message?.includes('location_id'))) {
+    // Column location_id not present yet in remote Supabase schema -> store in description fallback
+    const encodedDesc = formatProjectDescriptionWithLocation(existingDesc, finalLocationId);
+    const fallbackPayload: any = {
+      name: updates.name,
+      status: updates.status,
+      description: encodedDesc,
+      updated_at: new Date().toISOString()
+    };
+    Object.keys(fallbackPayload).forEach(k => fallbackPayload[k] === undefined && delete fallbackPayload[k]);
+
+    const { data: fbData, error: fbErr } = await supabase
+      .from('projects')
+      .update(fallbackPayload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (fbErr) throw fbErr;
+    savedData = { ...fbData, location_id: finalLocationId };
+  } else if (error) {
+    throw error;
+  }
+
+  if (typeof window !== 'undefined') {
+    await db.projects.update(id, {
+      ...updates,
+      location_id: finalLocationId,
+      status: updates.status as any
+    });
+  }
+
+  const { cleanDescription, locationId } = extractProjectLocation(savedData);
+  const loc = locationId ? hotspotMap.get(locationId) : undefined;
+
+  return {
+    ...savedData,
+    status: savedData.status,
+    description: cleanDescription,
+    location_id: locationId,
+    location_label: loc?.fullLabel || loc?.label,
+    location_room_id: loc?.roomId
+  };
+}
+
+export async function archiveProject(projectId: string, locationId: string): Promise<Project> {
+  // If remote RPC archive_project is available, attempt it first for strict database-level atomicity
+  try {
+    const { data, error } = await supabase.rpc('archive_project', {
+      p_project_id: projectId,
+      p_location_id: locationId
+    });
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.projects.update(projectId, { status: 'archived', location_id: locationId });
+      }
+      return (await getProjectDetails(projectId)).project;
+    }
+  } catch (e) {
+    // fallback to updateProject
+  }
+  return updateProject(projectId, { status: 'archived', location_id: locationId });
+}
+
+export async function updateProjectStatus(
+  id: string,
+  status: 'planning' | 'active' | 'archived',
+  locationId?: string | null
+): Promise<Project> {
+  return updateProject(id, { status, location_id: locationId });
 }
 
 export async function getProjectDetails(id: string): Promise<{ project: Project, items: ProjectComponent[] }> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
   if (typeof window !== 'undefined' && !navigator.onLine) {
-    const project = await db.projects.get(id);
-    if (!project) throw new Error("Project not found");
+    const rawProject = await db.projects.get(id);
+    if (!rawProject) throw new Error("Project not found");
     const rawItems = await db.project_components.where('project_id').equals(id).toArray();
     const items = await Promise.all(rawItems.map(async pc => {
       const component = await db.components.get(pc.component_id);
@@ -1242,19 +1751,51 @@ export async function getProjectDetails(id: string): Promise<{ project: Project,
       return { ...pc, component, source_hotspot };
     }));
     items.sort((a, b) => new Date(b.checked_out_at).getTime() - new Date(a.checked_out_at).getTime());
+    
+    const { cleanDescription, locationId } = extractProjectLocation(rawProject);
+    const loc = locationId ? hotspotMap.get(locationId) : undefined;
+    const status: 'planning' | 'active' | 'archived' = (rawProject.status as any) === 'completed' ? 'archived' : (rawProject.status as any);
+
+    const project: Project = {
+      ...rawProject,
+      status,
+      description: cleanDescription,
+      location_id: locationId,
+      location_label: loc?.fullLabel || loc?.label,
+      location_room_id: loc?.roomId
+    };
+
     return { project, items };
   }
 
-  const { data: project, error } = await supabase.from('projects').select('*').eq('id', id).single();
+  const { data: rawProject, error } = await supabase.from('projects').select('*').eq('id', id).single();
   if (error) throw error;
   
   const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components!project_components_component_id_fkey(*), source_hotspot:spatial_hotspots!fk_project_components_source_loc(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
   if (itemsErr) throw itemsErr;
-  
+
+  const { cleanDescription, locationId } = extractProjectLocation(rawProject);
+  const loc = locationId ? hotspotMap.get(locationId) : undefined;
+  const status: 'planning' | 'active' | 'archived' = rawProject.status === 'completed' ? 'archived' : (rawProject.status as any);
+
+  const project: Project = {
+    ...rawProject,
+    status,
+    description: cleanDescription,
+    location_id: locationId,
+    location_label: loc?.fullLabel || loc?.label,
+    location_room_id: loc?.roomId
+  };
+
   return { project, items };
 }
 
 export async function checkoutComponent(projectId: string, componentId: string, sourceLocationId: string, quantity: number): Promise<void> {
+  const { data: rawProject } = await supabase.from('projects').select('status').eq('id', projectId).single();
+  if (rawProject && rawProject.status === 'archived') {
+    throw new Error("Cannot check out components to an Archived project. Switch project to Active first.");
+  }
+
   const { error } = await supabase.rpc('checkout_component', {
     p_project_id: projectId,
     p_component_id: componentId,
@@ -1262,6 +1803,13 @@ export async function checkoutComponent(projectId: string, componentId: string, 
     p_quantity: quantity
   });
   if (error) throw error;
+
+  // Option A: Planning phase auto-transitions to Active upon checkout
+  if (rawProject && rawProject.status === 'planning') {
+    await updateProject(projectId, { status: 'active' }).catch(err => {
+      console.warn("Auto-transition to active warning:", err);
+    });
+  }
 }
 
 export async function checkinComponent(projectComponentId: string, returnLocationId: string): Promise<void> {
@@ -1306,10 +1854,129 @@ export async function getComponentLocationAssignments(componentId: string): Prom
   }));
 }
 
+export interface ComponentProjectUsage {
+  id: string;
+  project_id: string;
+  project_name: string;
+  project_status: 'planning' | 'active' | 'archived';
+  project_location_id?: string | null;
+  project_location_label?: string | null;
+  project_location_room_id?: string | null;
+  quantity: number;
+  source_location_id: string;
+  source_location_label?: string | null;
+  source_room_id?: string | null;
+  source_room_name?: string | null;
+  checked_out_at: string;
+}
+
+export async function getComponentProjectUsage(componentId: string): Promise<ComponentProjectUsage[]> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const rawItems = await db.project_components
+      .where('component_id')
+      .equals(componentId)
+      .toArray();
+    const activeItems = rawItems.filter(pc => !pc.returned_at);
+
+    const results: ComponentProjectUsage[] = [];
+    for (const item of activeItems) {
+      const proj = await db.projects.get(item.project_id);
+      if (!proj) continue;
+      const { locationId } = extractProjectLocation(proj);
+      const projLoc = locationId ? hotspotMap.get(locationId) : undefined;
+      const sourceLoc = hotspotMap.get(item.source_location_id);
+
+      results.push({
+        id: item.id,
+        project_id: proj.id,
+        project_name: proj.name,
+        project_status: ((proj.status as string) === 'completed' ? 'archived' : proj.status) as any,
+        project_location_id: locationId,
+        project_location_label: projLoc?.fullLabel || projLoc?.label,
+        project_location_room_id: projLoc?.roomId,
+        quantity: item.quantity,
+        source_location_id: item.source_location_id,
+        source_location_label: sourceLoc?.fullLabel || sourceLoc?.label,
+        source_room_id: sourceLoc?.roomId,
+        source_room_name: sourceLoc?.roomName,
+        checked_out_at: item.checked_out_at
+      });
+    }
+    return results;
+  }
+
+  const { data: rawItems, error } = await supabase
+    .from('project_components')
+    .select(`
+      id,
+      project_id,
+      quantity,
+      source_location_id,
+      checked_out_at,
+      project:projects!project_components_project_id_fkey(
+        id,
+        name,
+        status,
+        description,
+        location_id
+      )
+    `)
+    .eq('component_id', componentId)
+    .is('returned_at', null)
+    .order('checked_out_at', { ascending: false });
+
+  if (error || !rawItems) return [];
+
+  return rawItems
+    .filter((item: any) => item.project)
+    .map((item: any) => {
+      const proj = item.project;
+      const { locationId } = extractProjectLocation(proj);
+      const projLoc = locationId ? hotspotMap.get(locationId) : undefined;
+      const sourceLoc = hotspotMap.get(item.source_location_id);
+
+      return {
+        id: item.id,
+        project_id: proj.id,
+        project_name: proj.name,
+        project_status: ((proj.status as string) === 'completed' ? 'archived' : proj.status) as any,
+        project_location_id: locationId,
+        project_location_label: projLoc?.fullLabel || projLoc?.label,
+        project_location_room_id: projLoc?.roomId,
+        quantity: item.quantity,
+        source_location_id: item.source_location_id,
+        source_location_label: sourceLoc?.fullLabel || sourceLoc?.label,
+        source_room_id: sourceLoc?.roomId,
+        source_room_name: sourceLoc?.roomName,
+        checked_out_at: item.checked_out_at
+      };
+    });
+}
+
 export async function deleteComponent(id: string): Promise<void> {
   const { error } = await supabase.rpc('delete_component_safe', { p_component_id: id });
   if (error) {
-    console.warn("RPC delete_component_safe error, falling back to direct delete:", error);
+    console.warn("RPC delete_component_safe error, falling back to client safe delete:", error);
+    const { data: activeProj } = await supabase.from('project_components').select('id').eq('component_id', id).is('returned_at', null);
+    let activeLoans: any[] | null = null;
+    try {
+      const res = await supabase.from('loans').select('id').eq('component_id', id).is('returned_at', null);
+      activeLoans = res.data;
+    } catch {}
+
+    if ((activeProj && activeProj.length > 0) || (activeLoans && activeLoans.length > 0)) {
+      await supabase.from('component_locations').delete().eq('component_id', id);
+      await supabase.from('components').update({ pending_delete: true }).eq('id', id);
+      if (typeof window !== 'undefined') {
+        await db.components.update(id, { pending_delete: true });
+        await db.component_locations.where('component_id').equals(id).delete();
+      }
+      return;
+    }
+
     await supabase.from('component_tags').delete().eq('component_id', id);
     await supabase.from('component_locations').delete().eq('component_id', id);
     const { error: delErr } = await supabase.from('components').delete().eq('id', id);
@@ -1424,3 +2091,465 @@ export async function searchLeafHotspots(query: string = ""): Promise<{ id: stri
   
   return results.slice(0, 50); // limit
 }
+
+// -------------------------------------------------------------
+// LENDING SYSTEM API & DYNAMIC NOTIFICATIONS
+// -------------------------------------------------------------
+
+export async function getLoans(): Promise<Loan[]> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const rawLoans = await db.loans.toArray().catch(() => []);
+    const [allComps, allProjs] = await Promise.all([
+      db.components.toArray().catch(() => []),
+      db.projects.toArray().catch(() => [])
+    ]);
+    const compMap = new Map<string, any>(allComps.map(c => [c.id, c]));
+    const projMap = new Map<string, any>(allProjs.map(p => [p.id, p]));
+
+    return rawLoans.map(loan => {
+      const src = loan.source_location_id ? hotspotMap.get(loan.source_location_id) : undefined;
+      const ret = loan.returned_location_id ? hotspotMap.get(loan.returned_location_id) : undefined;
+      const comp = loan.component_id ? compMap.get(loan.component_id) : undefined;
+      const proj = loan.project_id ? projMap.get(loan.project_id) : undefined;
+
+      return {
+        ...loan,
+        component_name: comp?.name || loan.component_name,
+        project_name: proj?.name || loan.project_name,
+        source_location_label: src?.fullLabel || src?.label || loan.source_location_label,
+        returned_location_label: ret?.fullLabel || ret?.label || loan.returned_location_label,
+        component: comp,
+        project: proj,
+        source_hotspot: src,
+        returned_hotspot: ret
+      };
+    }).sort((a, b) => new Date(b.lent_at).getTime() - new Date(a.lent_at).getTime());
+  }
+
+  // Online fetch with graceful fallback to Dexie if remote table is missing
+  try {
+    const { data, error } = await supabase
+      .from('loans')
+      .select('*, component:components(*), project:projects(*)')
+      .order('lent_at', { ascending: false });
+
+    if (!error && data) {
+      return data.map((loan: any) => {
+        const src = loan.source_location_id ? hotspotMap.get(loan.source_location_id) : undefined;
+        const ret = loan.returned_location_id ? hotspotMap.get(loan.returned_location_id) : undefined;
+
+        return {
+          ...loan,
+          component_name: loan.component?.name || loan.component_name,
+          project_name: loan.project?.name || loan.project_name,
+          source_location_label: src?.fullLabel || src?.label || loan.source_location_label,
+          returned_location_label: ret?.fullLabel || ret?.label || loan.returned_location_label,
+          source_hotspot: src,
+          returned_hotspot: ret
+        };
+      });
+    }
+  } catch (err) {
+    console.warn("Could not query loans from Supabase, falling back to local Dexie:", err);
+  }
+
+  // Fallback to local Dexie
+  if (typeof window !== 'undefined') {
+    const localLoans = await db.loans.toArray().catch(() => []);
+    return localLoans.sort((a, b) => new Date(b.lent_at).getTime() - new Date(a.lent_at).getTime());
+  }
+
+  return [];
+}
+
+export async function getActiveLoans(): Promise<Loan[]> {
+  const all = await getLoans();
+  return all.filter(l => !l.returned_at);
+}
+
+export async function lendComponent(params: {
+  componentId: string;
+  sourceLocationId: string;
+  quantity: number;
+  borrowerName: string;
+  borrowerContact?: string;
+  dueDate: string;
+  notes?: string;
+}): Promise<Loan> {
+  const { componentId, sourceLocationId, quantity, borrowerName, borrowerContact, dueDate, notes } = params;
+
+  if (quantity <= 0) throw new Error("Quantity must be greater than zero.");
+  if (!borrowerName.trim()) throw new Error("Borrower name is required.");
+  if (!dueDate) throw new Error("Return due date is required.");
+
+  // 1. Validate leaf source location
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const srcHotspot = leafHotspots.find(h => h.id === sourceLocationId);
+  if (!srcHotspot || !srcHotspot.is_leaf) {
+    throw new Error("Source location must reference a valid leaf storage location.");
+  }
+
+  // 2. Try remote RPC lend_component
+  try {
+    const { data, error } = await supabase.rpc('lend_component', {
+      p_component_id: componentId,
+      p_source_location_id: sourceLocationId,
+      p_quantity: quantity,
+      p_borrower_name: borrowerName.trim(),
+      p_borrower_contact: borrowerContact?.trim() || null,
+      p_due_date: dueDate,
+      p_notes: notes?.trim() || null
+    });
+
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.loans.put(data);
+        // Refresh local cache
+        const locs = await db.component_locations.where({ component_id: componentId, hotspot_id: sourceLocationId }).first();
+        if (locs) {
+          if (locs.quantity <= quantity) {
+            await db.component_locations.delete(locs.id);
+          } else {
+            await db.component_locations.update(locs.id, { quantity: locs.quantity - quantity });
+          }
+        }
+      }
+      return data;
+    }
+  } catch (rpcErr) {
+    console.warn("RPC lend_component failed, executing client fallback:", rpcErr);
+  }
+
+  // 3. Client Fallback
+  // Check location stock
+  let locRecord: any = null;
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    locRecord = await db.component_locations.where({ component_id: componentId, hotspot_id: sourceLocationId }).first();
+  } else {
+    const { data: locs } = await supabase
+      .from('component_locations')
+      .select('*')
+      .eq('component_id', componentId)
+      .eq('hotspot_id', sourceLocationId)
+      .single();
+    locRecord = locs;
+  }
+
+  if (!locRecord || locRecord.quantity < quantity) {
+    throw new Error(`Insufficient quantity in source location. Available: ${locRecord?.quantity || 0}`);
+  }
+
+  // Decrement storage
+  if (locRecord.quantity === quantity) {
+    await supabase.from('component_locations').delete().eq('id', locRecord.id);
+    if (typeof window !== 'undefined') await db.component_locations.delete(locRecord.id);
+  } else {
+    await supabase.from('component_locations').update({ quantity: locRecord.quantity - quantity }).eq('id', locRecord.id);
+    if (typeof window !== 'undefined') await db.component_locations.update(locRecord.id, { quantity: locRecord.quantity - quantity });
+  }
+
+  // Get component name snapshot
+  let compName = "Component";
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const comp = await db.components.get(componentId);
+    compName = comp?.name || compName;
+  } else {
+    const { data: comp } = await supabase.from('components').select('name').eq('id', componentId).single();
+    compName = comp?.name || compName;
+  }
+
+  const loanId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `loan-${Date.now()}`;
+  const newLoan: Loan = {
+    id: loanId,
+    loan_type: 'component',
+    component_id: componentId,
+    component_name: compName,
+    project_id: null,
+    source_location_id: sourceLocationId,
+    source_location_label: srcHotspot.fullLabel || srcHotspot.label,
+    returned_location_id: null,
+    quantity,
+    borrower_name: borrowerName.trim(),
+    borrower_contact: borrowerContact?.trim() || null,
+    notes: notes?.trim() || null,
+    lent_at: new Date().toISOString(),
+    due_date: dueDate,
+    returned_at: null
+  };
+
+  try {
+    await supabase.from('loans').insert([newLoan]);
+  } catch {}
+  if (typeof window !== 'undefined') {
+    await db.loans.put(newLoan);
+  }
+
+  return newLoan;
+}
+
+export async function returnLentComponent(loanId: string, returnLocationId: string): Promise<Loan> {
+  // Validate return location is a leaf hotspot
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const retHotspot = leafHotspots.find(h => h.id === returnLocationId);
+  if (!retHotspot || !retHotspot.is_leaf) {
+    throw new Error("Return location must reference a valid leaf storage location.");
+  }
+
+  // Try RPC
+  try {
+    const { data, error } = await supabase.rpc('return_lent_component', {
+      p_loan_id: loanId,
+      p_return_location_id: returnLocationId
+    });
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.loans.update(loanId, {
+          returned_at: data.returned_at,
+          returned_location_id: returnLocationId,
+          returned_location_label: retHotspot.fullLabel || retHotspot.label
+        });
+      }
+      return data;
+    }
+  } catch (rpcErr) {
+    console.warn("RPC return_lent_component failed, executing client fallback:", rpcErr);
+  }
+
+  // Fallback
+  let loan: any = null;
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    loan = await db.loans.get(loanId);
+  } else {
+    const { data } = await supabase.from('loans').select('*').eq('id', loanId).single();
+    loan = data;
+  }
+  if (!loan) throw new Error("Loan record not found.");
+
+  const now = new Date().toISOString();
+  if (loan.component_id) {
+    // Add quantity back to return location
+    const { data: existingLoc } = await supabase
+      .from('component_locations')
+      .select('*')
+      .eq('component_id', loan.component_id)
+      .eq('hotspot_id', returnLocationId)
+      .maybeSingle();
+
+    if (existingLoc) {
+      await supabase.from('component_locations').update({ quantity: existingLoc.quantity + loan.quantity }).eq('id', existingLoc.id);
+      if (typeof window !== 'undefined') {
+        await db.component_locations.update(existingLoc.id, { quantity: existingLoc.quantity + loan.quantity });
+      }
+    } else {
+      const newLocId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `loc-${Date.now()}`;
+      const locPayload = { id: newLocId, component_id: loan.component_id, hotspot_id: returnLocationId, quantity: loan.quantity };
+      try {
+        await supabase.from('component_locations').insert([locPayload]);
+      } catch {}
+      if (typeof window !== 'undefined') {
+        await db.component_locations.put(locPayload);
+      }
+    }
+  }
+
+  const updates = {
+    returned_at: now,
+    returned_location_id: returnLocationId,
+    returned_location_label: retHotspot.fullLabel || retHotspot.label
+  };
+
+  try {
+    await supabase.from('loans').update(updates).eq('id', loanId);
+  } catch {}
+  if (typeof window !== 'undefined') {
+    await db.loans.update(loanId, updates);
+  }
+
+  return { ...loan, ...updates };
+}
+
+export async function lendProject(params: {
+  projectId: string;
+  borrowerName: string;
+  borrowerContact?: string;
+  dueDate: string;
+  notes?: string;
+}): Promise<Loan> {
+  const { projectId, borrowerName, borrowerContact, dueDate, notes } = params;
+
+  if (!borrowerName.trim()) throw new Error("Borrower name is required.");
+  if (!dueDate) throw new Error("Return due date is required.");
+
+  // Fetch project details
+  const { project } = await getProjectDetails(projectId);
+  if (project.status === 'planning') {
+    throw new Error("Cannot lend a project in Planning phase (no physical build or components in use).");
+  }
+
+  // Try RPC
+  try {
+    const { data, error } = await supabase.rpc('lend_project', {
+      p_project_id: projectId,
+      p_borrower_name: borrowerName.trim(),
+      p_borrower_contact: borrowerContact?.trim() || null,
+      p_due_date: dueDate,
+      p_notes: notes?.trim() || null
+    });
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.loans.put(data);
+      }
+      return data;
+    }
+  } catch (rpcErr) {
+    console.warn("RPC lend_project failed, executing client fallback:", rpcErr);
+  }
+
+  const loanId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `loan-${Date.now()}`;
+  const newLoan: Loan = {
+    id: loanId,
+    loan_type: 'project',
+    project_id: projectId,
+    project_name: project.name,
+    component_id: null,
+    source_location_id: project.location_id || null,
+    source_location_label: project.location_label || undefined,
+    returned_location_id: null,
+    quantity: 1,
+    borrower_name: borrowerName.trim(),
+    borrower_contact: borrowerContact?.trim() || null,
+    notes: notes?.trim() || null,
+    lent_at: new Date().toISOString(),
+    due_date: dueDate,
+    returned_at: null
+  };
+
+  try {
+    await supabase.from('loans').insert([newLoan]);
+  } catch {}
+  if (typeof window !== 'undefined') {
+    await db.loans.put(newLoan);
+  }
+
+  return newLoan;
+}
+
+export async function returnLentProject(loanId: string, returnLocationId?: string): Promise<Loan> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const retHotspot = returnLocationId ? leafHotspots.find(h => h.id === returnLocationId) : undefined;
+  if (returnLocationId && (!retHotspot || !retHotspot.is_leaf)) {
+    throw new Error("Return location must reference a valid leaf storage location.");
+  }
+
+  // Try RPC
+  try {
+    const { data, error } = await supabase.rpc('return_lent_project', {
+      p_loan_id: loanId,
+      p_return_location_id: returnLocationId || null
+    });
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.loans.update(loanId, {
+          returned_at: data.returned_at,
+          returned_location_id: returnLocationId,
+          returned_location_label: retHotspot?.fullLabel || retHotspot?.label
+        });
+      }
+      return data;
+    }
+  } catch (rpcErr) {
+    console.warn("RPC return_lent_project failed, executing client fallback:", rpcErr);
+  }
+
+  const now = new Date().toISOString();
+  let loan: any = null;
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    loan = await db.loans.get(loanId);
+  } else {
+    const { data } = await supabase.from('loans').select('*').eq('id', loanId).single();
+    loan = data;
+  }
+  if (!loan) throw new Error("Loan record not found.");
+
+  if (loan.project_id && returnLocationId) {
+    await updateProject(loan.project_id, { location_id: returnLocationId });
+  }
+
+  const updates = {
+    returned_at: now,
+    returned_location_id: returnLocationId || null,
+    returned_location_label: retHotspot?.fullLabel || retHotspot?.label
+  };
+
+  try {
+    await supabase.from('loans').update(updates).eq('id', loanId);
+  } catch {}
+  if (typeof window !== 'undefined') {
+    await db.loans.update(loanId, updates);
+  }
+
+  return { ...loan, ...updates };
+}
+
+// -------------------------------------------------------------
+// DYNAMIC NOTIFICATION GENERATION (No persistent DB rows)
+// -------------------------------------------------------------
+
+export async function getLoanNotifications(): Promise<LoanNotification[]> {
+  const activeLoans = await getActiveLoans().catch(() => []);
+  const notifications: LoanNotification[] = [];
+
+  for (const loan of activeLoans) {
+    const daysRemaining = calculateLoanDaysRemaining(loan.due_date);
+    const itemName = loan.loan_type === 'project' 
+      ? (loan.project_name || loan.project?.name || 'Project')
+      : (loan.component_name || loan.component?.name || 'Component');
+
+    if (daysRemaining === 1) {
+      // Exactly 1 day before return date (User requirement)
+      notifications.push({
+        id: `notif-tomorrow-${loan.id}`,
+        loanId: loan.id,
+        type: 'due_tomorrow',
+        title: 'Due Tomorrow',
+        message: `${itemName} lent to ${loan.borrower_name} is due for return tomorrow.`,
+        urgency: 'medium',
+        daysRemaining,
+        loan
+      });
+    } else if (daysRemaining === 0) {
+      // Due today
+      notifications.push({
+        id: `notif-today-${loan.id}`,
+        loanId: loan.id,
+        type: 'due_today',
+        title: 'Due Today',
+        message: `${itemName} lent to ${loan.borrower_name} is due for return today!`,
+        urgency: 'high',
+        daysRemaining,
+        loan
+      });
+    } else if (daysRemaining < 0) {
+      // Overdue
+      const overdueDays = Math.abs(daysRemaining);
+      notifications.push({
+        id: `notif-overdue-${loan.id}`,
+        loanId: loan.id,
+        type: 'overdue',
+        title: `Overdue by ${overdueDays} day${overdueDays === 1 ? '' : 's'}`,
+        message: `${itemName} lent to ${loan.borrower_name} was due on ${new Date(loan.due_date).toLocaleDateString()}.`,
+        urgency: 'critical',
+        daysRemaining,
+        loan
+      });
+    }
+  }
+
+  // Sort by urgency: critical first, then high, then medium
+  const priorityOrder = { critical: 0, high: 1, medium: 2 };
+  return notifications.sort((a, b) => priorityOrder[a.urgency] - priorityOrder[b.urgency]);
+}
+

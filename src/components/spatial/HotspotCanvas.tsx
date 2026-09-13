@@ -31,7 +31,7 @@ type DrawMode = 'freehand' | 'polygon' | 'rectangle' | 'arrow' | 'delete' | 'edi
 type RectStage = 'idle' | 'drawing' | 'resizing';
 type ResizeHandle = 'top' | 'bottom' | 'left' | 'right' | 'tl' | 'tr' | 'bl' | 'br' | 'move';
 type ArrowStage = 'idle' | 'drawing' | 'adjusting';
-type ArrowHandle = 'tail' | 'tip' | 'body';
+type ArrowHandle = 'tail' | 'tip' | 'body' | 'width1' | 'width2';
 
 export function HotspotCanvas({ 
   imageUrl, 
@@ -81,6 +81,7 @@ export function HotspotCanvas({
   const [arrowStage, setArrowStage] = useState<ArrowStage>('idle');
   const [arrowStart, setArrowStart] = useState<{ x: number; y: number } | null>(null);
   const [arrowEnd, setArrowEnd] = useState<{ x: number; y: number } | null>(null);
+  const [arrowWidthScale, setArrowWidthScale] = useState<number>(1.0);
   const [activeArrowHandle, setActiveArrowHandle] = useState<ArrowHandle | null>(null);
   const [arrowDragInfo, setArrowDragInfo] = useState<{
     startX: number;
@@ -128,11 +129,13 @@ export function HotspotCanvas({
     setArrowEnd(null);
     setActiveArrowHandle(null);
     setArrowDragInfo(null);
+    setArrowWidthScale(1.0);
   };
 
   const computeArrowPoints = (
     start: { x: number; y: number },
-    end: { x: number; y: number }
+    end: { x: number; y: number },
+    widthScale: number = 1.0
   ): { x: number; y: number }[] => {
     const dx = end.x - start.x;
     const dy = end.y - start.y;
@@ -145,8 +148,9 @@ export function HotspotCanvas({
     const ny = ux;
 
     const headLength = Math.min(length * 0.38, Math.max(0.025, length * 0.25));
-    const headHalfWidth = Math.min(headLength * 0.55, 0.045);
-    const shaftHalfWidth = Math.max(0.005, headHalfWidth * 0.42);
+    const baseHeadWidth = Math.min(headLength * 0.55, 0.045);
+    const headHalfWidth = Math.max(0.008, Math.min(0.20, baseHeadWidth * widthScale));
+    const shaftHalfWidth = Math.max(0.004, Math.min(0.12, headHalfWidth * 0.45));
 
     const bx = end.x - ux * headLength;
     const by = end.y - uy * headLength;
@@ -157,14 +161,40 @@ export function HotspotCanvas({
     });
 
     return [
-      clampPt({ x: start.x - nx * shaftHalfWidth, y: start.y - ny * shaftHalfWidth }),
-      clampPt({ x: bx - nx * shaftHalfWidth, y: by - ny * shaftHalfWidth }),
-      clampPt({ x: bx - nx * headHalfWidth, y: by - ny * headHalfWidth }),
-      clampPt({ x: end.x, y: end.y }),
-      clampPt({ x: bx + nx * headHalfWidth, y: by + ny * headHalfWidth }),
-      clampPt({ x: bx + nx * shaftHalfWidth, y: by + ny * shaftHalfWidth }),
-      clampPt({ x: start.x + nx * shaftHalfWidth, y: start.y + ny * shaftHalfWidth })
+      clampPt({ x: start.x - nx * shaftHalfWidth, y: start.y - ny * shaftHalfWidth }), // 0: tail bottom
+      clampPt({ x: bx - nx * shaftHalfWidth, y: by - ny * shaftHalfWidth }),           // 1: shaft neck bottom
+      clampPt({ x: bx - nx * headHalfWidth, y: by - ny * headHalfWidth }),             // 2: wing bottom
+      clampPt({ x: end.x, y: end.y }),                                                 // 3: tip
+      clampPt({ x: bx + nx * headHalfWidth, y: by + ny * headHalfWidth }),             // 4: wing top
+      clampPt({ x: bx + nx * shaftHalfWidth, y: by + ny * shaftHalfWidth }),           // 5: shaft neck top
+      clampPt({ x: start.x + nx * shaftHalfWidth, y: start.y + ny * shaftHalfWidth })  // 6: tail top
     ];
+  };
+
+  /**
+   * Detects if a hotspot's polygon coordinates form an arrow shape,
+   * so it can be rendered with yellow shading rather than the standard white frosted blur.
+   */
+  const isArrowShape = (points?: { x: number; y: number }[]): boolean => {
+    if (!points || points.length !== 7) return false;
+    
+    // Midpoints of neck (P1 & P5) and wings (P2 & P4)
+    const neckMidX = (points[1].x + points[5].x) / 2;
+    const neckMidY = (points[1].y + points[5].y) / 2;
+    const wingsMidX = (points[2].x + points[4].x) / 2;
+    const wingsMidY = (points[2].y + points[4].y) / 2;
+    
+    const midDist = Math.hypot(neckMidX - wingsMidX, neckMidY - wingsMidY);
+    if (midDist > 0.03) return false;
+
+    const neckWidth = Math.hypot(points[5].x - points[1].x, points[5].y - points[1].y);
+    const wingsWidth = Math.hypot(points[4].x - points[2].x, points[4].y - points[2].y);
+    const tailWidth = Math.hypot(points[6].x - points[0].x, points[6].y - points[0].y);
+
+    if (wingsWidth <= neckWidth * 1.1) return false;
+    if (Math.abs(tailWidth - neckWidth) > Math.max(tailWidth, neckWidth) * 0.45 + 0.01) return false;
+
+    return true;
   };
 
   // Reset mode when exiting edit
@@ -206,6 +236,28 @@ export function HotspotCanvas({
       setAdjustedHotspots([]);
     }
   }, [movingHotspot]);
+
+  // When a hotspot is highlighted (e.g. locate button or leaf selection), smoothly center it in view
+  useEffect(() => {
+    if (!highlightedHotspotId || !containerRef.current) return;
+    const targetHs = hotspots.find(h => h.id === highlightedHotspotId);
+    if (!targetHs || !targetHs.shape_points || targetHs.shape_points.length === 0) return;
+
+    const parentContainer = containerRef.current.parentElement;
+    if (!parentContainer) return;
+
+    const avgX = targetHs.shape_points.reduce((acc, p) => acc + p.x, 0) / targetHs.shape_points.length;
+    const avgY = targetHs.shape_points.reduce((acc, p) => acc + p.y, 0) / targetHs.shape_points.length;
+
+    const targetLeft = avgX * containerRef.current.clientWidth - parentContainer.clientWidth / 2;
+    const targetTop = avgY * containerRef.current.clientHeight - parentContainer.clientHeight / 2;
+
+    parentContainer.scrollTo({
+      left: Math.max(0, targetLeft),
+      top: Math.max(0, targetTop),
+      behavior: 'smooth'
+    });
+  }, [highlightedHotspotId, hotspots]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -427,21 +479,63 @@ export function HotspotCanvas({
         x: Math.max(0.002, Math.min(0.998, pt.x)),
         y: Math.max(0.002, Math.min(0.998, pt.y))
       };
+      setArrowEnd(newEnd);
+      const pts = computeArrowPoints(arrowStart, newEnd, arrowWidthScale);
+      if (pts.length > 0) {
+        setCurrentPoints(pts);
+      }
     } else if (activeArrowHandle === 'tail') {
       newStart = {
         x: Math.max(0.002, Math.min(0.998, pt.x)),
         y: Math.max(0.002, Math.min(0.998, pt.y))
       };
+      setArrowStart(newStart);
+      const pts = computeArrowPoints(newStart, arrowEnd, arrowWidthScale);
+      if (pts.length > 0) {
+        setCurrentPoints(pts);
+      }
     } else if (activeArrowHandle === 'body') {
       const clampDx = Math.max(-arrowDragInfo.origStart.x + 0.01, Math.min(0.99 - arrowDragInfo.origEnd.x, dx));
       const clampDy = Math.max(-arrowDragInfo.origStart.y + 0.01, Math.min(0.99 - arrowDragInfo.origEnd.y, dy));
       newStart = { x: arrowDragInfo.origStart.x + clampDx, y: arrowDragInfo.origStart.y + clampDy };
       newEnd = { x: arrowDragInfo.origEnd.x + clampDx, y: arrowDragInfo.origEnd.y + clampDy };
-    }
+      setArrowStart(newStart);
+      setArrowEnd(newEnd);
+      const pts = computeArrowPoints(newStart, newEnd, arrowWidthScale);
+      if (pts.length > 0) {
+        setCurrentPoints(pts);
+      }
+    } else if (activeArrowHandle === 'width1' || activeArrowHandle === 'width2') {
+      // Calculate perpendicular distance from pointer to arrow center line
+      const adx = arrowEnd.x - arrowStart.x;
+      const ady = arrowEnd.y - arrowStart.y;
+      const length = Math.hypot(adx, ady);
+      if (length > 0.005) {
+        const nx = -ady / length;
+        const ny = adx / length;
+        const vpx = pt.x - arrowStart.x;
+        const vpy = pt.y - arrowStart.y;
+        const perpDist = Math.abs(vpx * nx + vpy * ny);
 
-    setArrowStart(newStart);
-    setArrowEnd(newEnd);
-    const pts = computeArrowPoints(newStart, newEnd);
+        const headLength = Math.min(length * 0.38, Math.max(0.025, length * 0.25));
+        const baseHeadWidth = Math.min(headLength * 0.55, 0.045);
+        if (baseHeadWidth > 0.001) {
+          const newScale = Math.max(0.3, Math.min(3.5, Number((perpDist / baseHeadWidth).toFixed(2))));
+          setArrowWidthScale(newScale);
+          const pts = computeArrowPoints(arrowStart, arrowEnd, newScale);
+          if (pts.length > 0) {
+            setCurrentPoints(pts);
+          }
+        }
+      }
+    }
+  };
+
+  const handleAdjustArrowWidth = (delta: number) => {
+    if (!arrowStart || !arrowEnd) return;
+    const newScale = Math.max(0.3, Math.min(3.5, Number((arrowWidthScale + delta).toFixed(2))));
+    setArrowWidthScale(newScale);
+    const pts = computeArrowPoints(arrowStart, arrowEnd, newScale);
     if (pts.length > 0) {
       setCurrentPoints(pts);
     }
@@ -547,7 +641,7 @@ export function HotspotCanvas({
         e.preventDefault();
         const pt = getNormalizedPoint(e);
         setArrowEnd(pt);
-        const pts = computeArrowPoints(arrowStart, pt);
+        const pts = computeArrowPoints(arrowStart, pt, arrowWidthScale);
         if (pts.length > 0) {
           setCurrentPoints(pts);
         }
@@ -623,7 +717,7 @@ export function HotspotCanvas({
 
         const dist = Math.hypot(arrowEnd.x - arrowStart.x, arrowEnd.y - arrowStart.y);
         if (dist > 0.02) {
-          const pts = computeArrowPoints(arrowStart, arrowEnd);
+          const pts = computeArrowPoints(arrowStart, arrowEnd, arrowWidthScale);
           if (pts.length > 0) {
             setCurrentPoints(pts);
             setArrowStage('adjusting');
@@ -967,7 +1061,7 @@ export function HotspotCanvas({
                     ? 'bg-brand-accent text-white shadow-sm' 
                     : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
               }`}
-              title={
+              data-tooltip={
                 drawMode === 'rectangle'
                   ? "Rectangle Mode Active (Click to switch to Polygon, or double-click to toggle)"
                   : "Polygon Tool (Double-click to activate Rectangle mode)"
@@ -986,12 +1080,12 @@ export function HotspotCanvas({
               onDoubleClick={handleFreehandButtonDoubleClick}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-all ${
                 drawMode === 'arrow' 
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md ring-1 ring-purple-400/50' 
+                  ? 'bg-gradient-to-r from-amber-600 to-yellow-600 text-white shadow-md ring-1 ring-yellow-400/50' 
                   : drawMode === 'freehand' 
                     ? 'bg-brand-accent text-white shadow-sm' 
                     : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
               }`}
-              title={
+              data-tooltip={
                 drawMode === 'arrow'
                   ? "Arrow Mode Active (Click to switch to Freehand, or double-click to toggle)"
                   : "Freehand Tool (Double-click to activate Arrow mode)"
@@ -999,7 +1093,7 @@ export function HotspotCanvas({
             >
               <span>Freehand</span>
               {drawMode === 'arrow' && (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/40 text-purple-200 border border-purple-400/40">
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/40 text-amber-200 border border-amber-400/40">
                   Arrow ➔
                 </span>
               )}
@@ -1062,7 +1156,7 @@ export function HotspotCanvas({
                   type="button"
                   onClick={handleScaleToFitAll}
                   className="flex items-center gap-1 px-2.5 py-1 bg-[#252320] hover:bg-[#332f2a] text-sky-300 hover:text-white text-xs font-medium rounded border border-[#332f2a] transition-colors"
-                  title="Scale hotspots proportionally to fit canvas bounds"
+                  data-tooltip="Scale hotspots proportionally to fit canvas bounds"
                 >
                   <span>Fit to Canvas</span>
                 </button>
@@ -1070,7 +1164,7 @@ export function HotspotCanvas({
                   type="button"
                   onClick={handleCenterAll}
                   className="flex items-center gap-1 px-2.5 py-1 bg-[#252320] hover:bg-[#332f2a] text-sky-300 hover:text-white text-xs font-medium rounded border border-[#332f2a] transition-colors"
-                  title="Center all hotspots horizontally and vertically"
+                  data-tooltip="Center all hotspots horizontally and vertically"
                 >
                   <span>Center</span>
                 </button>
@@ -1078,7 +1172,7 @@ export function HotspotCanvas({
                   type="button"
                   onClick={handleApplyAdjustments}
                   className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                  title="Save new positions for all hotspots"
+                  data-tooltip="Save new positions for all hotspots"
                 >
                   <Check className="h-3.5 w-3.5" />
                   <span>Save Adjustments</span>
@@ -1158,7 +1252,7 @@ export function HotspotCanvas({
                         }
                       }}
                       className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                      title="Confirm rectangle hotspot (Enter)"
+                      data-tooltip="Confirm rectangle hotspot (Enter)"
                     >
                       <Check className="h-3.5 w-3.5" />
                       <span>Confirm Hotspot</span>
@@ -1173,7 +1267,7 @@ export function HotspotCanvas({
                         setIsDrawing(false);
                       }}
                       className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
-                      title="Cancel and redraw (Esc)"
+                      data-tooltip="Cancel and redraw (Esc)"
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                       <span>Redraw</span>
@@ -1185,19 +1279,51 @@ export function HotspotCanvas({
 
             {drawMode === 'arrow' && (
               <div className="flex items-center gap-2">
-                <div className="bg-purple-950/80 text-purple-200 border border-purple-600/60 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-sm">
-                  <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+                <div className="bg-amber-950/80 text-amber-200 border border-amber-600/60 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-2 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
                   <span>
                     {arrowStage === 'idle'
-                      ? "Click & drag on image to draw arrow"
+                      ? "Click & drag on image to draw yellow arrow"
                       : arrowStage === 'drawing'
                         ? "Release pointer to set arrow"
-                        : "Drag tip or tail to adjust. Press Enter or Confirm to save."}
+                        : "Drag tip/tail to aim, wings or +/- for width. Enter to confirm."}
                   </span>
                 </div>
 
                 {arrowStage === 'adjusting' && currentPoints.length > 0 && (
                   <div className="flex items-center gap-1.5">
+                    {/* Width adjustment buttons */}
+                    <div className="flex items-center gap-1 bg-[#252320] border border-[#3d3832] rounded px-1.5 py-0.5 text-xs text-amber-200 shadow-sm">
+                      <span className="text-[11px] font-semibold text-amber-300/90">Width:</span>
+                      <button
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAdjustArrowWidth(-0.25);
+                        }}
+                        className="w-5 h-5 flex items-center justify-center rounded bg-[#332f2a] hover:bg-[#443f38] text-white text-xs font-bold transition-colors"
+                        data-tooltip="Decrease arrow width (-)"
+                      >
+                        -
+                      </button>
+                      <span className="text-[10px] font-mono px-1 font-bold text-amber-100 min-w-[28px] text-center">
+                        {Math.round(arrowWidthScale * 100)}%
+                      </span>
+                      <button
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAdjustArrowWidth(0.25);
+                        }}
+                        className="w-5 h-5 flex items-center justify-center rounded bg-[#332f2a] hover:bg-[#443f38] text-white text-xs font-bold transition-colors"
+                        data-tooltip="Increase arrow width (+)"
+                      >
+                        +
+                      </button>
+                    </div>
+
                     <button
                       type="button"
                       onPointerDown={(e) => e.stopPropagation()}
@@ -1216,7 +1342,7 @@ export function HotspotCanvas({
                         }
                       }}
                       className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                      title="Confirm arrow hotspot (Enter)"
+                      data-tooltip="Confirm arrow hotspot (Enter)"
                     >
                       <Check className="h-3.5 w-3.5" />
                       <span>Confirm Hotspot</span>
@@ -1231,7 +1357,7 @@ export function HotspotCanvas({
                         setIsDrawing(false);
                       }}
                       className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
-                      title="Cancel and redraw (Esc)"
+                      data-tooltip="Cancel and redraw (Esc)"
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                       <span>Redraw</span>
@@ -1279,7 +1405,7 @@ export function HotspotCanvas({
                   ? 'bg-sky-600 text-white shadow-md' 
                   : 'text-sky-400 hover:text-sky-300 hover:bg-sky-500/15 disabled:opacity-30 disabled:pointer-events-none'
               }`}
-              title="Adjust Hotspots"
+              data-tooltip="Adjust Hotspots"
               aria-label="Adjust Hotspots"
             >
               <Sliders className="h-4 w-4" />
@@ -1299,7 +1425,7 @@ export function HotspotCanvas({
                   ? 'bg-amber-600 text-white shadow-md' 
                   : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/15'
               }`}
-              title="Edit Hotspot"
+              data-tooltip="Edit Hotspot"
               aria-label="Edit Hotspot"
             >
               <Edit2 className="h-4 w-4" />
@@ -1319,7 +1445,8 @@ export function HotspotCanvas({
                   ? 'bg-red-600 text-white shadow-md' 
                   : 'text-red-400 hover:text-red-300 hover:bg-red-500/15'
               }`}
-              title="Delete Hotspot"
+              data-tooltip="Delete Hotspot"
+              data-tooltip-variant="danger"
               aria-label="Delete Hotspot"
             >
               <Trash2 className="h-4 w-4" />
@@ -1517,14 +1644,15 @@ export function HotspotCanvas({
             const isHighlighted = highlightedHotspotId === hs.id;
             const isReshaping = reshapingHotspot?.id === hs.id;
             const isClickable = !isReshaping && (isDeleteMode || isEditMode || !isEditing);
+            const isArrow = isArrowShape(hs.shape_points);
             
             if (isReshaping) {
               return (
                 <polygon
                   key={hs.id}
                   points={hs.shape_points.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
-                  fill="rgba(56, 189, 248, 0.15)"
-                  stroke="#38bdf8"
+                  fill={isArrow ? "rgba(234, 179, 8, 0.25)" : "rgba(56, 189, 248, 0.15)"}
+                  stroke={isArrow ? "#eab308" : "#38bdf8"}
                   strokeWidth="0.5"
                   strokeDasharray="3,3"
                   className="pointer-events-none"
@@ -1543,27 +1671,38 @@ export function HotspotCanvas({
                     ? (isHovered ? "rgba(239, 68, 68, 0.55)" : "rgba(239, 68, 68, 0.22)")
                     : isEditMode
                       ? (isHovered 
-                          ? (!hs.child_photo_id ? "rgba(245, 158, 11, 0.45)" : "rgba(100, 100, 100, 0.25)")
-                          : (!hs.child_photo_id ? "rgba(245, 158, 11, 0.22)" : "rgba(255, 255, 255, 0.15)"))
+                          ? (isArrow ? "rgba(250, 204, 21, 0.65)" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.45)" : "rgba(100, 100, 100, 0.25)")
+                          : (isArrow ? "rgba(234, 179, 8, 0.40)" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.22)" : "rgba(255, 255, 255, 0.15)"))
                       : isHovered 
-                        ? "rgba(239, 68, 68, 0.4)" 
+                        ? (isArrow ? "rgba(250, 204, 21, 0.70)" : "rgba(56, 189, 248, 0.35)") 
                         : isHighlighted 
-                          ? "rgba(239, 68, 68, 0.2)" 
-                          : "rgba(255, 255, 255, 0.3)"
+                          ? (isArrow ? "rgba(234, 179, 8, 0.65)" : "rgba(239, 68, 68, 0.2)") 
+                          : (isArrow ? "rgba(234, 179, 8, 0.45)" : "rgba(255, 255, 255, 0.25)")
                 }
                 stroke={
                   isDeleteMode
                     ? (isHovered ? "#ff2222" : "rgba(239, 68, 68, 0.85)")
                     : isEditMode
                       ? (isHovered 
-                          ? (!hs.child_photo_id ? "#f59e0b" : "rgba(156, 163, 175, 0.6)")
-                          : (!hs.child_photo_id ? "rgba(245, 158, 11, 0.75)" : "rgba(156, 163, 175, 0.4)"))
-                      : isHovered || isHighlighted 
-                        ? "#ef4444" 
-                        : "rgba(255,255,255,0.5)"
+                          ? (isArrow ? "#facc15" : !hs.child_photo_id ? "#f59e0b" : "rgba(156, 163, 175, 0.6)")
+                          : (isArrow ? "#eab308" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.75)" : "rgba(156, 163, 175, 0.4)"))
+                      : isHighlighted 
+                        ? (isArrow ? "#facc15" : "#ef4444")
+                        : isHovered
+                          ? (isArrow ? "#facc15" : "#38bdf8")
+                          : (isArrow ? "#eab308" : "#7dd3fc")
                 }
-                strokeWidth={isDeleteMode || isEditMode ? (isHovered ? "0.8" : "0.5") : (isHighlighted ? "0.6" : "0.3")}
+                strokeWidth={
+                  isArrow 
+                    ? (isHovered || isHighlighted ? "0.8" : "0.5") 
+                    : (isDeleteMode || isEditMode ? (isHovered ? "0.8" : "0.5") : (isHovered || isHighlighted ? "0.5" : "0.3"))
+                }
                 strokeDasharray={isDeleteMode ? (isHovered ? "none" : "2,2") : isEditMode ? (isHovered ? "none" : "3,3") : "none"}
+                style={
+                  isArrow 
+                    ? { filter: isHovered ? 'drop-shadow(0 0 6px rgba(234,179,8,0.75))' : 'drop-shadow(0 0 3px rgba(234,179,8,0.35))' } 
+                    : { filter: isHovered ? 'drop-shadow(0 0 6px rgba(56,189,248,0.75))' : 'drop-shadow(0 0 1.5px rgba(125,211,252,0.4))' }
+                }
                 className={`transition-all duration-200 ${isHighlighted ? 'animate-pulse' : ''} ${
                   isClickable ? "cursor-pointer pointer-events-auto" : "pointer-events-none"
                 }`}
@@ -1629,7 +1768,7 @@ export function HotspotCanvas({
             <g className="arrow-preview-group pointer-events-none">
               <polygon
                 points={toPolygonString(currentPoints)}
-                className="fill-purple-500/30 stroke-purple-400 stroke-[0.5]"
+                className="fill-yellow-400/40 stroke-yellow-400 stroke-[0.5]"
                 strokeDasharray="2,2"
               />
               <line
@@ -1637,20 +1776,20 @@ export function HotspotCanvas({
                 y1={arrowStart.y * 100}
                 x2={arrowEnd.x * 100}
                 y2={arrowEnd.y * 100}
-                stroke="#c084fc"
+                stroke="#facc15"
                 strokeWidth="0.4"
                 strokeDasharray="1.5,1.5"
               />
             </g>
           )}
 
-          {/* Arrow in Adjusting Stage: Draggable Body + Tail/Tip Handles */}
+          {/* Arrow in Adjusting Stage: Draggable Body + Tail/Tip Handles + Wing Width Handles */}
           {drawMode === 'arrow' && arrowStage === 'adjusting' && arrowStart && arrowEnd && currentPoints.length > 0 && (
             <g className="arrow-editor-group pointer-events-auto">
               {/* Draggable body for moving the whole arrow */}
               <polygon
                 points={toPolygonString(currentPoints)}
-                className="fill-purple-500/30 stroke-purple-400 stroke-[0.6] cursor-move pointer-events-auto"
+                className="fill-yellow-400/45 stroke-yellow-400 stroke-[0.6] cursor-move pointer-events-auto filter drop-shadow-[0_0_5px_rgba(234,179,8,0.4)]"
                 onPointerDown={(e) => handleArrowResizeStart(e, 'body')}
                 onPointerMove={handleArrowResizeMove}
                 onPointerUp={handleArrowResizeEnd}
@@ -1661,31 +1800,62 @@ export function HotspotCanvas({
                 y1={arrowStart.y * 100}
                 x2={arrowEnd.x * 100}
                 y2={arrowEnd.y * 100}
-                stroke="#c084fc"
-                strokeWidth="0.4"
+                stroke="#fde047"
+                strokeWidth="0.35"
                 strokeDasharray="1,1"
-                className="pointer-events-none"
+                className="pointer-events-none opacity-80"
               />
               {/* Tail handle */}
               <circle
                 cx={arrowStart.x * 100}
                 cy={arrowStart.y * 100}
                 r={1.8}
-                className="fill-purple-300 stroke-purple-900 stroke-[0.4] cursor-grab pointer-events-auto hover:scale-125 transition-transform"
+                className="fill-amber-300 stroke-amber-900 stroke-[0.4] cursor-grab pointer-events-auto hover:scale-125 transition-transform"
                 onPointerDown={(e) => handleArrowResizeStart(e, 'tail')}
                 onPointerMove={handleArrowResizeMove}
                 onPointerUp={handleArrowResizeEnd}
-              />
+              >
+                <title>Drag tail to adjust position or angle</title>
+              </circle>
               {/* Tip handle */}
               <circle
                 cx={arrowEnd.x * 100}
                 cy={arrowEnd.y * 100}
                 r={2.2}
-                className="fill-amber-300 stroke-amber-900 stroke-[0.4] cursor-grab pointer-events-auto hover:scale-125 transition-transform"
+                className="fill-yellow-300 stroke-yellow-900 stroke-[0.4] cursor-grab pointer-events-auto hover:scale-125 transition-transform"
                 onPointerDown={(e) => handleArrowResizeStart(e, 'tip')}
                 onPointerMove={handleArrowResizeMove}
                 onPointerUp={handleArrowResizeEnd}
-              />
+              >
+                <title>Drag tip to re-aim or change length</title>
+              </circle>
+              {/* Wing Handles for Adjusting Arrow Width (P2 & P4) */}
+              {currentPoints.length >= 7 && (
+                <>
+                  <circle
+                    cx={currentPoints[2].x * 100}
+                    cy={currentPoints[2].y * 100}
+                    r={1.6}
+                    className="fill-amber-400 stroke-amber-950 stroke-[0.4] cursor-ew-resize pointer-events-auto hover:scale-135 transition-transform"
+                    onPointerDown={(e) => handleArrowResizeStart(e, 'width1')}
+                    onPointerMove={handleArrowResizeMove}
+                    onPointerUp={handleArrowResizeEnd}
+                  >
+                    <title>Drag wing to adjust arrow width / thickness</title>
+                  </circle>
+                  <circle
+                    cx={currentPoints[4].x * 100}
+                    cy={currentPoints[4].y * 100}
+                    r={1.6}
+                    className="fill-amber-400 stroke-amber-950 stroke-[0.4] cursor-ew-resize pointer-events-auto hover:scale-135 transition-transform"
+                    onPointerDown={(e) => handleArrowResizeStart(e, 'width2')}
+                    onPointerMove={handleArrowResizeMove}
+                    onPointerUp={handleArrowResizeEnd}
+                  >
+                    <title>Drag wing to adjust arrow width / thickness</title>
+                  </circle>
+                </>
+              )}
             </g>
           )}
 
@@ -1890,7 +2060,7 @@ export function HotspotCanvas({
                   }
                 }}
                 className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                title="Confirm rectangle hotspot (Enter)"
+                data-tooltip="Confirm rectangle hotspot (Enter)"
               >
                 <Check className="h-3.5 w-3.5" />
                 <span>Confirm Hotspot</span>
@@ -1905,7 +2075,7 @@ export function HotspotCanvas({
                   setIsDrawing(false);
                 }}
                 className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
-                title="Cancel and redraw (Esc)"
+                data-tooltip="Cancel and redraw (Esc)"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 <span>Redraw</span>
@@ -1935,6 +2105,38 @@ export function HotspotCanvas({
                 isNearTop ? "mt-3" : "-translate-y-full -mt-3"
               }`}
             >
+              {/* Quick Width Buttons */}
+              <div className="flex items-center gap-1 bg-[#252320] border border-[#3d3832] rounded px-1.5 py-0.5 text-xs text-amber-200">
+                <span className="text-[11px] font-semibold text-amber-300/90">Width:</span>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAdjustArrowWidth(-0.25);
+                  }}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-[#332f2a] hover:bg-[#443f38] text-white text-xs font-bold transition-colors"
+                  data-tooltip="Decrease arrow width (-)"
+                >
+                  -
+                </button>
+                <span className="text-[10px] font-mono px-1 font-bold text-amber-100 min-w-[28px] text-center">
+                  {Math.round(arrowWidthScale * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAdjustArrowWidth(0.25);
+                  }}
+                  className="w-5 h-5 flex items-center justify-center rounded bg-[#332f2a] hover:bg-[#443f38] text-white text-xs font-bold transition-colors"
+                  data-tooltip="Increase arrow width (+)"
+                >
+                  +
+                </button>
+              </div>
+
               <button
                 type="button"
                 onPointerDown={(e) => e.stopPropagation()}
@@ -1955,7 +2157,7 @@ export function HotspotCanvas({
                   }
                 }}
                 className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                title="Confirm arrow hotspot (Enter)"
+                data-tooltip="Confirm arrow hotspot (Enter)"
               >
                 <Check className="h-3.5 w-3.5" />
                 <span>Confirm Arrow</span>
@@ -1970,7 +2172,7 @@ export function HotspotCanvas({
                   setIsDrawing(false);
                 }}
                 className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
-                title="Cancel and redraw (Esc)"
+                data-tooltip="Cancel and redraw (Esc)"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 <span>Redraw</span>
@@ -1986,19 +2188,33 @@ export function HotspotCanvas({
           const avgY = hs.shape_points.reduce((acc, p) => acc + p.y, 0) / hs.shape_points.length;
           
           return (
-            <div
-              key={`highlight-badge-${hs.id}`}
-              style={{
-                left: `${avgX * 100}%`,
-                top: `${avgY * 100}%`
-              }}
-              className="absolute -translate-x-1/2 -translate-y-full -mt-2 z-30 pointer-events-none flex flex-col items-center animate-bounce duration-1000"
-            >
-              <div className="bg-red-600 text-white text-[11px] font-bold px-2.5 py-1 rounded shadow-xl border border-white/30 whitespace-nowrap flex items-center gap-1.5 backdrop-blur-xs">
-                <MapPin className="h-3.5 w-3.5 fill-white text-white" />
-                <span>{hs.label}</span>
+            <div key={`highlight-group-${hs.id}`}>
+              {/* Pulsing center target dot */}
+              <div
+                style={{
+                  left: `${avgX * 100}%`,
+                  top: `${avgY * 100}%`
+                }}
+                className="absolute -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none flex items-center justify-center"
+              >
+                <div className="w-4 h-4 rounded-full bg-red-500 animate-ping opacity-60" />
+                <div className="w-2.5 h-2.5 rounded-full bg-red-600 absolute shadow-md border-2 border-white" />
               </div>
-              <div className="w-2 h-2 bg-red-600 rotate-45 -mt-1 shadow" />
+
+              {/* Bouncing Map Pin & Badge */}
+              <div
+                style={{
+                  left: `${avgX * 100}%`,
+                  top: `${avgY * 100}%`
+                }}
+                className="absolute -translate-x-1/2 -translate-y-full -mt-2.5 z-30 pointer-events-none flex flex-col items-center animate-bounce duration-1000"
+              >
+                <div className="bg-red-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-md shadow-2xl border border-white/40 whitespace-nowrap flex items-center gap-1.5 ring-2 ring-red-500/50 backdrop-blur-xs">
+                  <MapPin className="h-3.5 w-3.5 fill-white text-white shrink-0" />
+                  <span>{hs.label}</span>
+                </div>
+                <div className="w-2.5 h-2.5 bg-red-600 rotate-45 -mt-1 shadow border-r border-b border-white/30" />
+              </div>
             </div>
           );
         })}

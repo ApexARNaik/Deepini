@@ -28,11 +28,19 @@ export async function syncToLocalDB() {
       supabase.from('component_totals').select('*')
     ]);
 
+    let loansData: any[] = [];
+    try {
+      const { data } = await supabase.from('loans').select('*');
+      if (data) loansData = data;
+    } catch {
+      // loans table may not exist yet
+    }
+
     // Use transaction for bulk put
     await db.transaction('rw', 
       [db.rooms, db.spatial_photos, db.spatial_hotspots, 
       db.components, db.tags, db.component_tags, db.component_locations,
-      db.projects, db.project_components, db.component_totals],
+      db.projects, db.project_components, db.component_totals, db.loans],
       async () => {
         if (rooms.data) { await db.rooms.clear(); await db.rooms.bulkPut(rooms.data); }
         if (photos.data) { await db.spatial_photos.clear(); await db.spatial_photos.bulkPut(photos.data); }
@@ -44,6 +52,7 @@ export async function syncToLocalDB() {
         if (projects.data) { await db.projects.clear(); await db.projects.bulkPut(projects.data); }
         if (projComps.data) { await db.project_components.clear(); await db.project_components.bulkPut(projComps.data); }
         if (compTotals.data) { await db.component_totals.clear(); await db.component_totals.bulkPut(compTotals.data); }
+        if (loansData.length > 0) { await db.loans.clear(); await db.loans.bulkPut(loansData); }
       }
     );
     

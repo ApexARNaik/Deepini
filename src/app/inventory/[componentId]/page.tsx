@@ -1,26 +1,86 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getComponentDetails, ComponentWithTotals, ComponentLocation, isPersonalItem } from "@/lib/api";
+import { 
+  getComponentDetails, 
+  ComponentWithTotals, 
+  ComponentLocation, 
+  isPersonalItem, 
+  getLoans, 
+  Loan, 
+  calculateLoanDaysRemaining,
+  getComponentProjectUsage,
+  ComponentProjectUsage,
+  checkinComponent
+} from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Edit2, MapPin, ExternalLink, ArrowLeft, FileText, Maximize2 } from "lucide-react";
+import { 
+  Edit2, 
+  MapPin, 
+  ExternalLink, 
+  ArrowLeft, 
+  FileText, 
+  Maximize2, 
+  Share2, 
+  RotateCcw, 
+  User, 
+  Calendar,
+  FolderGit2,
+  Lock,
+  Hammer,
+  Loader2
+} from "lucide-react";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
+import { LendModal } from "@/components/loans/LendModal";
+import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
 
 export default function ComponentDetailPage() {
   const { componentId } = useParams();
   const router = useRouter();
   const [data, setData] = useState<{ component: ComponentWithTotals, locations: ComponentLocation[] } | null>(null);
+  const [activeLoans, setActiveLoans] = useState<Loan[]>([]);
+  const [projectUsages, setProjectUsages] = useState<ComponentProjectUsage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [returningUsageId, setReturningUsageId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
+  const [showLendModal, setShowLendModal] = useState(false);
+  const [returnLoanItem, setReturnLoanItem] = useState<Loan | null>(null);
 
-  useEffect(() => {
+  const handleReturnToOrigin = async (usage: ComponentProjectUsage) => {
+    const locName = usage.source_location_label || 'its original storage location';
+    if (!confirm(`Return ${usage.quantity} unit(s) from "${usage.project_name}" directly back to ${locName}?`)) {
+      return;
+    }
+    setReturningUsageId(usage.id);
+    try {
+      await checkinComponent(usage.id, usage.source_location_id);
+      loadData();
+    } catch (err: any) {
+      console.error("Failed to return component:", err);
+      alert("Failed to return component: " + (err.message || "Unknown error"));
+    } finally {
+      setReturningUsageId(null);
+    }
+  };
+
+  const loadData = () => {
     if (typeof componentId !== 'string') return;
-    getComponentDetails(componentId).then(res => {
+    Promise.all([
+      getComponentDetails(componentId),
+      getLoans().then(all => all.filter(l => l.component_id === componentId && !l.returned_at)).catch(() => [] as Loan[]),
+      getComponentProjectUsage(componentId).catch(() => [] as ComponentProjectUsage[])
+    ]).then(([res, loans, usages]) => {
       setData(res);
+      setActiveLoans(loans);
+      setProjectUsages(usages);
       setLoading(false);
     }).catch(console.error);
+  };
+
+  useEffect(() => {
+    loadData();
   }, [componentId]);
 
   if (loading) return <div className="p-6 text-brand-text-muted">Loading...</div>;
@@ -50,7 +110,7 @@ export default function ComponentDetailPage() {
                   type="button"
                   onClick={() => setPreviewImage({ url: component.photo_url!, title: component.name, subtitle: isPersonal ? "Personal Item Photo" : "Component Image" })}
                   className="w-full h-full relative group/photo cursor-zoom-in block"
-                  title="Click to view full image"
+                  data-tooltip="Click to view full image"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={component.photo_url} alt={component.name} className="w-full h-full object-cover group-hover/photo:scale-105 transition-transform duration-200" />
@@ -83,12 +143,22 @@ export default function ComponentDetailPage() {
               </div>
             </div>
           </div>
-          <Link 
-            href={`/inventory/${component.id}/edit`}
-            className="flex items-center px-4 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text text-xs font-bold uppercase tracking-widest hover:border-[#4a443c] transition-colors"
-          >
-            <Edit2 className="h-3 w-3 mr-2" /> {isPersonal ? "Edit Item" : "Edit Component"}
-          </Link>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowLendModal(true)}
+              disabled={component.totals.in_storage_qty <= 0}
+              className="flex items-center px-4 py-2 bg-brand-gold/10 border border-brand-gold/30 text-brand-gold text-xs font-bold uppercase tracking-widest hover:bg-brand-gold/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              data-tooltip={component.totals.in_storage_qty <= 0 ? "No items in storage to lend" : "Lend this item"}
+            >
+              <Share2 className="h-3 w-3 mr-2" /> Lend
+            </button>
+            <Link 
+              href={`/inventory/${component.id}/edit`}
+              className="flex items-center px-4 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text text-xs font-bold uppercase tracking-widest hover:border-[#4a443c] transition-colors"
+            >
+              <Edit2 className="h-3 w-3 mr-2" /> {isPersonal ? "Edit Item" : "Edit Component"}
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -100,7 +170,7 @@ export default function ComponentDetailPage() {
               {/* Personal Item Details */}
               <section>
                 <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Item Details</h2>
-                <div className="grid grid-cols-2 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
                   <div>
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Total Owned</div>
                     <div className="text-xl font-serif text-white">{component.totals.total_owned_qty}</div>
@@ -109,6 +179,16 @@ export default function ComponentDetailPage() {
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Storage</div>
                     <div className="text-xl font-serif text-white">{component.totals.in_storage_qty}</div>
                   </div>
+                  <div>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Projects</div>
+                    <div className="text-xl font-serif text-brand-accent">{component.totals.checked_out_qty}</div>
+                  </div>
+                  {(component.totals.lent_qty || 0) > 0 && (
+                    <div>
+                      <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Lent Out</div>
+                      <div className="text-xl font-serif text-brand-gold">{component.totals.lent_qty}</div>
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -127,7 +207,7 @@ export default function ComponentDetailPage() {
               {/* Component Details */}
               <section>
                 <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Details</h2>
-                <div className="grid grid-cols-2 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
                   <div>
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Total Owned</div>
                     <div className="text-xl font-serif text-white">{component.totals.total_owned_qty}</div>
@@ -136,6 +216,16 @@ export default function ComponentDetailPage() {
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Storage</div>
                     <div className="text-xl font-serif text-white">{component.totals.in_storage_qty}</div>
                   </div>
+                  <div>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Projects</div>
+                    <div className="text-xl font-serif text-brand-accent">{component.totals.checked_out_qty}</div>
+                  </div>
+                  {(component.totals.lent_qty || 0) > 0 && (
+                    <div>
+                      <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Lent Out</div>
+                      <div className="text-xl font-serif text-brand-gold">{component.totals.lent_qty}</div>
+                    </div>
+                  )}
                   <div>
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Price</div>
                     <div className="text-sm font-mono text-white">{component.price != null ? formatCurrency(component.price) : '-'}</div>
@@ -200,7 +290,7 @@ export default function ComponentDetailPage() {
                           type="button"
                           onClick={() => setPreviewImage({ url: field.value, title: `${component.name} - ${key}`, subtitle: "Custom Field Image" })}
                           className="group/img mt-1 relative block cursor-zoom-in text-left"
-                          title="Click to view full image"
+                          data-tooltip="Click to view full image"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#332f2a] rounded group-hover/img:border-brand-accent group-hover/img:scale-105 transition-all duration-200" />
@@ -209,7 +299,7 @@ export default function ComponentDetailPage() {
                         <div className="mt-1 flex items-center justify-between p-2.5 bg-black/30 border border-[#332f2a] rounded">
                           <div className="flex items-center gap-2 min-w-0 pr-2">
                             <FileText className="h-4 w-4 text-brand-accent shrink-0" />
-                            <span className="text-xs text-white truncate" title={field.fileName || field.value}>
+                            <span className="text-xs text-white truncate" data-tooltip={field.fileName || field.value}>
                               {field.fileName || (typeof field.value === 'string' ? field.value.split('/').pop()?.split('_').slice(2).join('_') || field.value.split('/').pop() : 'Document')}
                             </span>
                           </div>
@@ -270,6 +360,234 @@ export default function ComponentDetailPage() {
               </div>
             )}
           </section>
+
+          {/* In Use in Projects Section */}
+          <section>
+            <div className="flex items-center justify-between border-b border-[#332f2a] pb-2 mb-4">
+              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest flex items-center gap-1.5">
+                <FolderGit2 className="h-3.5 w-3.5 text-brand-accent" />
+                <span>In Projects ({projectUsages.length})</span>
+              </h2>
+              {projectUsages.length > 0 && (
+                <span className="text-[10px] text-brand-accent font-mono font-bold">
+                  {projectUsages.reduce((sum, u) => sum + u.quantity, 0)} in use
+                </span>
+              )}
+            </div>
+            {projectUsages.length === 0 ? (
+              <div className="text-sm text-brand-text-muted italic bg-[#1a1816] p-4 rounded border border-[#332f2a]">
+                Not currently in use in any project.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {projectUsages.map(usage => {
+                  const isArchived = usage.project_status === 'archived';
+
+                  return (
+                    <div key={usage.id} className="bg-[#1a1816] border border-[#332f2a] rounded p-4 flex flex-col gap-3">
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0 flex-1 pr-2">
+                          <Link 
+                            href={`/projects/${usage.project_id}`}
+                            className="text-white font-bold hover:text-brand-accent transition-colors flex items-center gap-1.5 group"
+                          >
+                            <span className="truncate">{usage.project_name}</span>
+                            <ExternalLink className="h-3 w-3 text-brand-text-muted group-hover:text-brand-accent shrink-0" />
+                          </Link>
+                          <div className="mt-1 flex items-center gap-1.5">
+                            {isArchived ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-300 border border-zinc-700">
+                                <Lock className="h-2.5 w-2.5 text-amber-400" /> Archived Build
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-950/40 text-emerald-400 border border-emerald-800/50">
+                                <Hammer className="h-2.5 w-2.5" /> Active Build
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-xl font-serif text-brand-accent leading-none">{usage.quantity}</div>
+                          <div className="text-[9px] text-brand-text-muted uppercase tracking-widest">In Build</div>
+                        </div>
+                      </div>
+
+                      {/* Origin Location (where component was taken from) */}
+                      <div className="text-xs bg-black/30 p-2.5 rounded border border-[#2a2622] space-y-1.5">
+                        <div className="flex items-center justify-between text-brand-text-muted">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400 flex items-center gap-1">
+                            <MapPin className="h-3 w-3 text-brand-accent shrink-0" /> Origin Location:
+                          </span>
+                          {usage.source_room_id && (
+                            <Link
+                              href={`/rooms/${usage.source_room_id}?locateHotspot=${usage.source_location_id}`}
+                              className="text-[10px] text-brand-accent hover:underline font-bold uppercase tracking-wider"
+                              data-tooltip="Locate origin compartment on map"
+                            >
+                              Locate ↗
+                            </Link>
+                          )}
+                        </div>
+                        <div className="text-white text-xs pl-4 truncate font-medium">
+                          {usage.source_location_label || "Source location"}
+                        </div>
+                      </div>
+
+                      {/* Build Storage Location if Archived */}
+                      {isArchived && usage.project_location_label && (
+                        <div className="text-xs bg-amber-950/20 p-2.5 rounded border border-amber-900/40 space-y-1.5">
+                          <div className="flex items-center justify-between text-amber-400">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1">
+                              <MapPin className="h-3 w-3 text-amber-400 shrink-0" /> Build Stored At:
+                            </span>
+                            {usage.project_location_room_id && usage.project_location_id && (
+                              <Link
+                                href={`/rooms/${usage.project_location_room_id}?locateHotspot=${usage.project_location_id}`}
+                                className="text-[10px] text-amber-400 hover:underline font-bold uppercase tracking-wider"
+                                data-tooltip="Locate build on room map"
+                              >
+                                Locate ↗
+                              </Link>
+                            )}
+                          </div>
+                          <div className="text-white text-xs pl-4 truncate font-medium">
+                            {usage.project_location_label}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between text-[10px] text-brand-text-muted pt-1 border-t border-[#2a2622]">
+                        <span>Checked out: {new Date(usage.checked_out_at).toLocaleDateString()}</span>
+                        <Link 
+                          href={`/projects/${usage.project_id}`}
+                          className="text-brand-accent hover:underline font-bold uppercase tracking-wider flex items-center gap-1"
+                        >
+                          View Project ↗
+                        </Link>
+                      </div>
+
+                      {/* Return to Origin Button for Active Projects */}
+                      {!isArchived ? (
+                        <button
+                          type="button"
+                          disabled={returningUsageId === usage.id}
+                          onClick={() => handleReturnToOrigin(usage)}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-brand-accent/15 hover:bg-brand-accent/25 border border-brand-accent/40 text-brand-accent hover:text-white rounded text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                          data-tooltip={`Return ${usage.quantity} unit(s) directly to origin location: ${usage.source_location_label || 'Storage'}`}
+                        >
+                          {returningUsageId === usage.id ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Returning...
+                            </>
+                          ) : (
+                            <>
+                              <RotateCcw className="h-3.5 w-3.5" /> Return {usage.quantity} to Origin
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div className="text-[10px] text-amber-400/80 bg-amber-950/20 border border-amber-900/30 px-2.5 py-1.5 rounded flex items-center gap-1.5">
+                          <Lock className="h-3 w-3 shrink-0" />
+                          <span>Preserved in build. Reactivate project to return.</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Active Loans Section */}
+          <section>
+            <div className="flex items-center justify-between border-b border-[#332f2a] pb-2 mb-4">
+              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest">
+                Active Loans ({activeLoans.length})
+              </h2>
+              {activeLoans.length > 0 && (
+                <span className="text-[10px] text-brand-gold font-mono font-bold">
+                  {activeLoans.reduce((sum, l) => sum + l.quantity, 0)} lent out
+                </span>
+              )}
+            </div>
+            {activeLoans.length === 0 ? (
+              <div className="text-sm text-brand-text-muted italic bg-[#1a1816] p-4 rounded border border-[#332f2a]">
+                No active loans for this item.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {activeLoans.map(loan => {
+                  const daysRemaining = calculateLoanDaysRemaining(loan.due_date);
+                  const isOverdue = daysRemaining != null && daysRemaining < 0;
+                  const isDueTomorrow = daysRemaining === 1;
+                  const isDueToday = daysRemaining === 0;
+
+                  return (
+                    <div key={loan.id} className="bg-[#1a1816] border border-[#332f2a] rounded p-4 flex flex-col gap-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="text-white font-bold flex items-center gap-1.5">
+                            <User className="h-3.5 w-3.5 text-brand-gold" />
+                            <span>{loan.borrower_name}</span>
+                          </div>
+                          {loan.borrower_contact && (
+                            <div className="text-xs text-brand-text-muted mt-0.5">
+                              {loan.borrower_contact}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xl font-serif text-brand-gold leading-none">{loan.quantity}</div>
+                          <div className="text-[9px] text-brand-text-muted uppercase tracking-widest">Qty Lent</div>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-brand-text-muted flex items-center gap-1.5 bg-black/20 p-2 rounded border border-[#2a2622]">
+                        <MapPin className="h-3 w-3 text-brand-accent shrink-0" />
+                        <span className="truncate">From: {loan.source_location_label || "Source location"}</span>
+                      </div>
+
+                      {loan.due_date && (
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-brand-text-muted flex items-center gap-1">
+                            <Calendar className="h-3 w-3" /> Due {loan.due_date}
+                          </span>
+                          {isOverdue && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/40 border border-red-800/50 px-1.5 py-0.5 rounded">
+                              Overdue ({Math.abs(daysRemaining)}d)
+                            </span>
+                          )}
+                          {isDueToday && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400 bg-orange-950/40 border border-orange-800/50 px-1.5 py-0.5 rounded">
+                              Due Today
+                            </span>
+                          )}
+                          {isDueTomorrow && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-950/40 border border-amber-800/50 px-1.5 py-0.5 rounded">
+                              Due Tomorrow
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {loan.notes && (
+                        <div className="text-xs text-brand-text-muted italic border-l-2 border-[#332f2a] pl-2">
+                          &quot;{loan.notes}&quot;
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => setReturnLoanItem(loan)}
+                        className="w-full flex items-center justify-center px-4 py-2 bg-brand-gold/10 hover:bg-brand-gold/20 text-brand-gold border border-brand-gold/30 text-xs uppercase tracking-widest font-bold transition-colors"
+                      >
+                        <RotateCcw className="h-3 w-3 mr-2" /> Return Item
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </div>
       </div>
 
@@ -281,6 +599,32 @@ export default function ComponentDetailPage() {
         subtitle={previewImage?.subtitle}
         onClose={() => setPreviewImage(null)}
       />
+
+      {/* Lend Modal */}
+      {showLendModal && (
+        <LendModal
+          isOpen={showLendModal}
+          initialComponentId={component.id}
+          onClose={() => setShowLendModal(false)}
+          onSuccess={() => {
+            setShowLendModal(false);
+            loadData();
+          }}
+        />
+      )}
+
+      {/* Return Loan Modal */}
+      {returnLoanItem && (
+        <ReturnLoanModal
+          isOpen={!!returnLoanItem}
+          loan={returnLoanItem}
+          onClose={() => setReturnLoanItem(null)}
+          onSuccess={() => {
+            setReturnLoanItem(null);
+            loadData();
+          }}
+        />
+      )}
     </div>
   );
 }

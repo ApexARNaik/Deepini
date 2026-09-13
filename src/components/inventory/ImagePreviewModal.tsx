@@ -69,7 +69,7 @@ export function ImagePreviewModal({
               type="button"
               onClick={() => setIsZoomed(!isZoomed)}
               className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#282522] rounded transition-colors"
-              title={isZoomed ? "Fit to view" : "Zoom in"}
+              data-tooltip={isZoomed ? "Fit to view" : "Zoom in"}
             >
               {isZoomed ? <ZoomOut className="h-4 w-4" /> : <ZoomIn className="h-4 w-4" />}
             </button>
@@ -79,7 +79,7 @@ export function ImagePreviewModal({
               target="_blank"
               rel="noreferrer"
               className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#282522] rounded transition-colors"
-              title="Open in new tab"
+              data-tooltip="Open in new tab"
             >
               <ExternalLink className="h-4 w-4" />
             </a>
@@ -90,7 +90,7 @@ export function ImagePreviewModal({
               target="_blank"
               rel="noreferrer"
               className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#282522] rounded transition-colors"
-              title="Download original image"
+              data-tooltip="Download original image"
             >
               <Download className="h-4 w-4" />
             </a>
@@ -99,7 +99,7 @@ export function ImagePreviewModal({
               type="button"
               onClick={onClose}
               className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#282522] rounded transition-colors ml-1"
-              title="Close (Esc)"
+              data-tooltip="Close (Esc)"
               aria-label="Close"
             >
               <X className="h-4 w-4" />

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, isPersonalItem } from "@/lib/api";
-import { X, Plus, UploadCloud, FileText, Maximize2 } from "lucide-react";
+import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, getFullHotspotPath, isPersonalItem } from "@/lib/api";
+import { X, Plus, UploadCloud, FileText, Maximize2, Tag as TagIcon, ChevronDown, MapPin, Search, Check, Type, Hash, ExternalLink, Image as ImageIcon, Paperclip } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import { ImagePreviewModal } from "./ImagePreviewModal";
+import { StorageSequenceTooltip, StorageTooltipData } from "@/components/spatial/StorageSequenceTooltip";
+import { ThemedNumberInput } from "@/components/ThemedNumberInput";
 
 interface Props {
   initialData?: Component;
@@ -36,6 +38,63 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [tags, setTags] = useState<Tag[]>(initialTags || []);
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [tagInput, setTagInput] = useState("");
+  const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
+  const [highlightedTagIndex, setHighlightedTagIndex] = useState(-1);
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+
+  // Filter available tags that have not yet been assigned
+  const unselectedTags = availableTags.filter(
+    at => !tags.some(t => t.id === at.id || t.name.toLowerCase() === at.name.toLowerCase())
+  );
+
+  const trimmedTagInput = tagInput.trim();
+  const matchingTags = unselectedTags.filter(t =>
+    !trimmedTagInput || t.name.toLowerCase().includes(trimmedTagInput.toLowerCase())
+  );
+
+  const exactAvailableMatch = availableTags.find(
+    t => t.name.toLowerCase() === trimmedTagInput.toLowerCase()
+  );
+  const isTagAlreadyAdded = tags.some(
+    t => t.name.toLowerCase() === trimmedTagInput.toLowerCase()
+  );
+
+  const canCreateTag = trimmedTagInput.length > 0 && !exactAvailableMatch && !isTagAlreadyAdded;
+
+  type TagOption = 
+    | { type: 'create'; name: string }
+    | { type: 'existing'; tag: Tag };
+
+  const tagOptions: TagOption[] = [
+    ...(canCreateTag ? [{ type: 'create' as const, name: trimmedTagInput }] : []),
+    ...matchingTags.map(tag => ({ type: 'existing' as const, tag }))
+  ];
+
+  // Click outside to close dropdowns
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(event.target as Node)) {
+        setIsTagDropdownOpen(false);
+      }
+      if (locationDropdownRef.current && !locationDropdownRef.current.contains(event.target as Node)) {
+        setIsLocationDropdownOpen(false);
+      }
+      if (fieldTypeDropdownRef.current && !fieldTypeDropdownRef.current.contains(event.target as Node)) {
+        setIsFieldTypeDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightedTagIndex >= 0) {
+      const el = document.getElementById(`tag-opt-${highlightedTagIndex}`);
+      el?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedTagIndex]);
   
   // Locations
   const [locations, setLocations] = useState<{ hotspot_id: string, quantity: number, label?: string }[]>(
@@ -53,6 +112,80 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [availableHotspots, setAvailableHotspots] = useState<any[]>([]);
   const [selectedHotspot, setSelectedHotspot] = useState("");
   const [locationQuantity, setLocationQuantity] = useState("1");
+  const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
+  const [locationSearch, setLocationSearch] = useState("");
+  const [highlightedLocIndex, setHighlightedLocIndex] = useState(-1);
+  const locationDropdownRef = useRef<HTMLDivElement>(null);
+  const locationSearchInputRef = useRef<HTMLInputElement>(null);
+
+  // Storage Sequence Tooltip on hover
+  const [hoverTooltip, setHoverTooltip] = useState<StorageTooltipData | null>(null);
+
+  useEffect(() => {
+    if (!hoverTooltip) return;
+    const handleScroll = () => setHoverTooltip(null);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, [hoverTooltip]);
+
+  const handleShowTooltip = (
+    e: React.MouseEvent<HTMLElement>,
+    data: { fullLabel?: string; label?: string; roomName?: string; quantity?: number; customText?: string }
+  ) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHoverTooltip({
+      ...data,
+      targetRect: rect
+    });
+  };
+
+  const handleHideTooltip = () => {
+    setHoverTooltip(null);
+  };
+
+  // Focus search input when location dropdown opens
+  useEffect(() => {
+    if (isLocationDropdownOpen) {
+      setTimeout(() => {
+        locationSearchInputRef.current?.focus();
+      }, 50);
+    } else {
+      setLocationSearch("");
+      setHighlightedLocIndex(-1);
+    }
+  }, [isLocationDropdownOpen]);
+
+  // Scroll highlighted location into view
+  useEffect(() => {
+    if (highlightedLocIndex >= 0) {
+      const el = document.getElementById(`loc-opt-${highlightedLocIndex}`);
+      el?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedLocIndex]);
+
+  const filteredHotspots = availableHotspots.filter(hs => {
+    if (!locationSearch.trim()) return true;
+    const query = locationSearch.toLowerCase().trim();
+    const full = (hs.fullLabel || "").toLowerCase();
+    const label = (hs.label || "").toLowerCase();
+    const room = (hs.roomName || "").toLowerCase();
+    return full.includes(query) || label.includes(query) || room.includes(query);
+  });
+
+  const selectedHotspotObj = availableHotspots.find(h => h.id === selectedHotspot);
+
+  const getHotspotDisplay = (hs: any) => {
+    if (!hs) return { destination: "", trail: "" };
+    const label = hs.fullLabel || hs.label || "";
+    if (label.includes('→')) {
+      const parts = label.split('→').map((s: string) => s.trim());
+      return {
+        destination: parts[parts.length - 1],
+        trail: parts.slice(0, parts.length - 1).join(' → ')
+      };
+    }
+    return { destination: label, trail: hs.roomName || "" };
+  };
   
   // Custom Fields
   const [customFields, setCustomFields] = useState<Record<string, { type: 'text' | 'number' | 'link' | 'image' | 'file'; value: any; fileName?: string; fileSize?: number }>>(() => {
@@ -62,10 +195,30 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   });
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState<'text' | 'number' | 'link' | 'image' | 'file'>('text');
+  const [isFieldTypeDropdownOpen, setIsFieldTypeDropdownOpen] = useState(false);
+  const fieldTypeDropdownRef = useRef<HTMLDivElement>(null);
   const [uploadingFieldKey, setUploadingFieldKey] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   
   const [loading, setLoading] = useState(false);
+
+  // Fast path: if creating a new item with locationIdParam, pre-assign and fetch breadcrumb immediately
+  useEffect(() => {
+    if (!initialData && locationIdParam) {
+      setSelectedHotspot(locationIdParam);
+      getFullHotspotPath(locationIdParam).then((path) => {
+        const fullLabel = path.map(p => p.label).filter(Boolean).join(' → ');
+        if (fullLabel) {
+          setLocations(prev => {
+            if (prev.length === 0 || (prev.length === 1 && prev[0].hotspot_id === locationIdParam)) {
+              return [{ hotspot_id: locationIdParam, quantity: 1, label: fullLabel }];
+            }
+            return prev;
+          });
+        }
+      }).catch(console.error);
+    }
+  }, [initialData, locationIdParam]);
 
   useEffect(() => {
     getTags().then(setAvailableTags).catch(console.error);
@@ -105,17 +258,101 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     }).catch(console.error);
   }, [initialData, locationIdParam]);
 
+  const handleSelectTagOption = async (option: TagOption) => {
+    if (option.type === 'existing') {
+      if (!tags.some(t => t.id === option.tag.id)) {
+        setTags([...tags, option.tag]);
+      }
+      setTagInput("");
+      setHighlightedTagIndex(-1);
+      setIsTagDropdownOpen(false);
+      tagInputRef.current?.focus();
+    } else {
+      try {
+        const newTag = await upsertTag(option.name);
+        if (!tags.some(t => t.id === newTag.id)) {
+          setTags([...tags, newTag]);
+        }
+        if (!availableTags.some(t => t.id === newTag.id)) {
+          setAvailableTags(prev => [newTag, ...prev]);
+        }
+        setTagInput("");
+        setHighlightedTagIndex(-1);
+        setIsTagDropdownOpen(false);
+        tagInputRef.current?.focus();
+      } catch (err) {
+        console.error("Failed to create tag:", err);
+      }
+    }
+  };
+
   const handleAddTag = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!tagInput.trim()) return;
+    const trimmed = tagInput.trim();
+    if (!trimmed) return;
+
+    const existing = availableTags.find(
+      t => t.name.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (existing) {
+      if (!tags.some(t => t.id === existing.id)) {
+        setTags([...tags, existing]);
+      }
+      setTagInput("");
+      setHighlightedTagIndex(-1);
+      setIsTagDropdownOpen(false);
+      return;
+    }
+
+    if (tags.some(t => t.name.toLowerCase() === trimmed.toLowerCase())) {
+      setTagInput("");
+      setHighlightedTagIndex(-1);
+      setIsTagDropdownOpen(false);
+      return;
+    }
+
     try {
-      const tag = await upsertTag(tagInput.trim());
+      const tag = await upsertTag(trimmed);
       if (!tags.find(t => t.id === tag.id)) {
         setTags([...tags, tag]);
       }
+      if (!availableTags.find(t => t.id === tag.id)) {
+        setAvailableTags(prev => [tag, ...prev]);
+      }
       setTagInput("");
+      setHighlightedTagIndex(-1);
+      setIsTagDropdownOpen(false);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleTagInputKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!isTagDropdownOpen) {
+        setIsTagDropdownOpen(true);
+        setHighlightedTagIndex(0);
+      } else if (tagOptions.length > 0) {
+        setHighlightedTagIndex(prev => (prev + 1) % tagOptions.length);
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!isTagDropdownOpen) {
+        setIsTagDropdownOpen(true);
+        setHighlightedTagIndex(tagOptions.length - 1);
+      } else if (tagOptions.length > 0) {
+        setHighlightedTagIndex(prev => (prev - 1 + tagOptions.length) % tagOptions.length);
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (isTagDropdownOpen && highlightedTagIndex >= 0 && highlightedTagIndex < tagOptions.length) {
+        handleSelectTagOption(tagOptions[highlightedTagIndex]);
+      } else if (tagInput.trim()) {
+        handleAddTag();
+      }
+    } else if (e.key === 'Escape') {
+      setIsTagDropdownOpen(false);
     }
   };
 
@@ -371,7 +608,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                     setPreviewImage({ url: photoUrl, title: name || "Item Photo", subtitle: itemType === 'personal' ? "Personal Item Photo" : "Component Image" });
                   }}
                   className="absolute top-2 right-2 p-1.5 bg-black/70 hover:bg-black text-white/80 hover:text-white rounded border border-[#444] z-10 transition-colors cursor-zoom-in"
-                  title="View full image"
+                  data-tooltip="View full image"
                 >
                   <Maximize2 className="h-3.5 w-3.5" />
                 </button>
@@ -426,23 +663,25 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                 <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
                   Price (INR)
                 </label>
-                <input
-                  type="number"
-                  step="0.01"
+                <ThemedNumberInput
+                  step={0.01}
+                  min={0}
                   value={price}
-                  onChange={e => setPrice(e.target.value)}
-                  className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
+                  onChange={setPrice}
+                  placeholder="0.00"
+                  className="w-full bg-brand-bg border border-[#332f2a]"
                 />
               </div>
               <div>
                 <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
                   Low Stock Alert At
                 </label>
-                <input
-                  type="number"
+                <ThemedNumberInput
+                  min={0}
                   value={lowStock}
-                  onChange={e => setLowStock(e.target.value)}
-                  className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
+                  onChange={setLowStock}
+                  placeholder="e.g. 5"
+                  className="w-full bg-brand-bg border border-[#332f2a]"
                 />
               </div>
             </div>
@@ -463,9 +702,19 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         {locations.length > 0 && (
           <div className="flex flex-col gap-2 mb-3">
             {locations.map(l => (
-              <div key={l.hotspot_id} className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] rounded">
-                <div className="text-sm text-white">{l.label}</div>
-                <div className="flex items-center gap-4">
+              <div 
+                key={l.hotspot_id} 
+                onMouseEnter={(e) => {
+                  handleShowTooltip(e, {
+                    fullLabel: l.label,
+                    quantity: l.quantity
+                  });
+                }}
+                onMouseLeave={handleHideTooltip}
+                className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] hover:border-[#4a443c] rounded transition-colors group/loc"
+              >
+                <div className="text-sm text-white truncate pr-2" data-tooltip={l.label}>{l.label}</div>
+                <div className="flex items-center gap-4 shrink-0">
                   <div className="text-sm text-brand-text-muted">Qty: <span className="text-brand-accent font-bold">{l.quantity}</span></div>
                   <button type="button" onClick={() => handleRemoveLocation(l.hotspot_id)} className="text-brand-text-muted hover:text-red-400 transition-colors">
                     <X className="h-4 w-4" />
@@ -476,25 +725,193 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
           </div>
         )}
         <div className="flex gap-2 items-end">
-          <div className="flex-1">
-            <select
-              value={selectedHotspot}
-              onChange={e => setSelectedHotspot(e.target.value)}
-              className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+          <div className="flex-1 relative" ref={locationDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                handleHideTooltip();
+                setIsLocationDropdownOpen(prev => !prev);
+              }}
+              onMouseEnter={(e) => {
+                if (selectedHotspotObj) {
+                  handleShowTooltip(e, {
+                    fullLabel: selectedHotspotObj.fullLabel || selectedHotspotObj.label,
+                    label: selectedHotspotObj.label,
+                    roomName: selectedHotspotObj.roomName
+                  });
+                }
+              }}
+              onMouseLeave={handleHideTooltip}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setIsLocationDropdownOpen(true);
+                }
+              }}
+              className={`w-full bg-[#191715] border ${
+                isLocationDropdownOpen ? 'border-brand-accent ring-1 ring-brand-accent/50' : 'border-[#3a352e] hover:border-[#4a443c]'
+              } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none focus:border-brand-accent`}
             >
-              <option value="">Select a location on the map...</option>
-              {availableHotspots.map(hs => (
-                <option key={hs.id} value={hs.id}>{hs.fullLabel}</option>
-              ))}
-            </select>
+              <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                <MapPin className={`h-4 w-4 shrink-0 ${selectedHotspotObj ? 'text-brand-accent' : 'text-brand-text-muted'}`} />
+                {selectedHotspotObj ? (
+                  <div className="flex items-baseline gap-2 min-w-0 truncate">
+                    <span className="text-white font-medium truncate">
+                      {getHotspotDisplay(selectedHotspotObj).destination}
+                    </span>
+                    {getHotspotDisplay(selectedHotspotObj).trail && (
+                      <span className="text-[11px] text-brand-text-muted truncate hidden sm:inline">
+                        ({getHotspotDisplay(selectedHotspotObj).trail})
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-brand-text-muted">Select a location on the map...</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {selectedHotspot && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleHideTooltip();
+                      setSelectedHotspot("");
+                    }}
+                    data-tooltip="Clear selection"
+                    className="p-1 text-brand-text-muted hover:text-white rounded transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </span>
+                )}
+                <ChevronDown className={`h-4 w-4 text-brand-text-muted transition-transform duration-200 ${isLocationDropdownOpen ? 'rotate-180 text-brand-accent' : ''}`} />
+              </div>
+            </button>
+
+            {/* Custom Location Dropdown Popover */}
+            {isLocationDropdownOpen && (
+              <div className="absolute left-0 right-0 top-full mt-1.5 w-full z-50 bg-[#191715] border border-[#3a352e] rounded-md shadow-2xl shadow-black/95 ring-1 ring-black/50 overflow-hidden flex flex-col">
+                {/* Search Bar */}
+                <div className="p-2.5 bg-[#141210] border-b border-[#2e2a25] shrink-0">
+                  <div className="relative">
+                    <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-brand-text-muted" />
+                    <input
+                      ref={locationSearchInputRef}
+                      type="text"
+                      value={locationSearch}
+                      onChange={(e) => {
+                        setLocationSearch(e.target.value);
+                        setHighlightedLocIndex(0);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setHighlightedLocIndex(prev => (prev + 1) % Math.max(1, filteredHotspots.length));
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setHighlightedLocIndex(prev => (prev - 1 + filteredHotspots.length) % Math.max(1, filteredHotspots.length));
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (filteredHotspots[highlightedLocIndex]) {
+                            setSelectedHotspot(filteredHotspots[highlightedLocIndex].id);
+                            setIsLocationDropdownOpen(false);
+                          }
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setIsLocationDropdownOpen(false);
+                        }
+                      }}
+                      placeholder="Search compartment or room path..."
+                      className="w-full bg-[#1e1b18] border border-[#3a352e] rounded pl-8 pr-7 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none"
+                    />
+                    {locationSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setLocationSearch("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-brand-text-muted hover:text-white"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex justify-between items-center px-1 mt-2 text-[10px] uppercase tracking-wider text-brand-text-muted font-medium select-none">
+                    <span>Available Storage Locations</span>
+                    <span className="text-brand-gold/80">{filteredHotspots.length} locations</span>
+                  </div>
+                </div>
+
+                {/* Locations List */}
+                <div className="max-h-64 overflow-y-auto themed-scrollbar divide-y divide-[#26231f]/60 py-1">
+                  {filteredHotspots.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-brand-text-muted">
+                      No locations match &quot;{locationSearch}&quot;
+                    </div>
+                  ) : (
+                    filteredHotspots.map((hs, idx) => {
+                      const isSelected = selectedHotspot === hs.id;
+                      const isHighlighted = idx === highlightedLocIndex;
+                      const isAlreadyAssigned = locations.some(l => l.hotspot_id === hs.id);
+                      const display = getHotspotDisplay(hs);
+
+                      return (
+                        <button
+                          key={hs.id}
+                          id={`loc-opt-${idx}`}
+                          type="button"
+                          onClick={() => {
+                            handleHideTooltip();
+                            setSelectedHotspot(hs.id);
+                            setIsLocationDropdownOpen(false);
+                          }}
+                          onMouseEnter={(e) => {
+                            setHighlightedLocIndex(idx);
+                            handleShowTooltip(e, {
+                              fullLabel: hs.fullLabel || hs.label,
+                              label: display.destination,
+                              roomName: hs.roomName || (hs.fullLabel ? hs.fullLabel.split('→')[0].trim() : undefined)
+                            });
+                          }}
+                          onMouseLeave={handleHideTooltip}
+                          className={`w-full text-left px-3.5 py-2.5 text-xs flex items-start justify-between gap-3 transition-colors ${
+                            isSelected
+                              ? 'bg-brand-accent/20 border-l-2 border-brand-accent text-white font-medium'
+                              : isHighlighted
+                              ? 'bg-[#25221e] text-white'
+                              : 'text-brand-text hover:bg-[#1f1c19] hover:text-white'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <MapPin className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-brand-accent' : 'text-brand-gold/70'}`} />
+                              <span className="font-semibold text-white truncate">{display.destination}</span>
+                              {isAlreadyAssigned && (
+                                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                                  Added ({locations.find(l => l.hotspot_id === hs.id)?.quantity})
+                                </span>
+                              )}
+                            </div>
+                            {display.trail && (
+                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5" data-tooltip={hs.fullLabel}>
+                                {display.trail}
+                              </div>
+                            )}
+                          </div>
+                          {isSelected && (
+                            <Check className="h-4 w-4 text-brand-accent shrink-0 mt-0.5" />
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           <div className="w-24">
-            <input
-              type="number"
-              min="1"
+            <ThemedNumberInput
+              min={1}
               value={locationQuantity}
-              onChange={e => setLocationQuantity(e.target.value)}
-              className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+              onChange={setLocationQuantity}
+              className="w-full bg-brand-bg border border-[#332f2a]"
             />
           </div>
           <button type="button" onClick={handleAddLocation} disabled={!selectedHotspot} className="px-4 py-2 bg-brand-accent text-white font-medium hover:bg-brand-accent-hover disabled:opacity-50">
@@ -512,30 +929,129 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         </label>
         <div className="flex flex-wrap gap-2 mb-3">
           {tags.map(t => (
-            <span key={t.id} className="inline-flex items-center gap-1 px-3 py-1 bg-[#1a1816] border border-[#332f2a] rounded text-xs text-brand-text">
-              {t.name}
-              <button type="button" onClick={() => handleRemoveTag(t.id)} className="text-brand-text-muted hover:text-white">
+            <span key={t.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#1a1816] border border-[#332f2a] rounded text-xs text-brand-text group hover:border-[#443e37] transition-colors">
+              <TagIcon className="w-3 h-3 text-brand-gold/80" />
+              <span>{t.name}</span>
+              <button type="button" onClick={() => handleRemoveTag(t.id)} className="text-brand-text-muted hover:text-white transition-colors ml-0.5" data-tooltip={`Remove ${t.name}`}>
                 <X className="h-3 w-3" />
               </button>
             </span>
           ))}
         </div>
-        <div className="flex gap-2 max-w-sm">
-          <input
-            type="text"
-            value={tagInput}
-            onChange={e => setTagInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAddTag(e)}
-            placeholder="Add new or existing tag..."
-            className="flex-1 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
-            list="available-tags"
-          />
-          <datalist id="available-tags">
-            {availableTags.map(t => <option key={t.id} value={t.name} />)}
-          </datalist>
-          <button type="button" onClick={handleAddTag} className="px-3 bg-[#1a1816] border border-[#332f2a] text-brand-text hover:bg-[#222]">
-            Add
-          </button>
+
+        <div className="relative max-w-sm" ref={tagDropdownRef}>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                ref={tagInputRef}
+                type="text"
+                value={tagInput}
+                onChange={e => {
+                  setTagInput(e.target.value);
+                  setIsTagDropdownOpen(true);
+                  setHighlightedTagIndex(0);
+                }}
+                onFocus={() => {
+                  setIsTagDropdownOpen(true);
+                  setHighlightedTagIndex(-1);
+                }}
+                onKeyDown={handleTagInputKeyDown}
+                placeholder="Add or search tags..."
+                className="w-full bg-brand-bg border border-[#332f2a] p-2 pr-8 text-sm text-white focus:border-brand-accent focus:outline-none transition-colors rounded-sm"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setIsTagDropdownOpen(prev => !prev)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-brand-text-muted hover:text-white transition-colors p-0.5"
+                data-tooltip="Toggle tags list"
+              >
+                <ChevronDown className={`w-4 h-4 transition-transform duration-150 ${isTagDropdownOpen ? 'rotate-180 text-brand-accent' : ''}`} />
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddTag}
+              disabled={!tagInput.trim()}
+              className="px-3 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text hover:bg-[#25221e] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium transition-colors rounded-sm"
+            >
+              Add
+            </button>
+          </div>
+
+          {/* Proper Custom Dropdown */}
+          {isTagDropdownOpen && (
+            <div className="absolute left-0 top-full mt-1.5 w-full z-50 bg-[#191715] border border-[#3a352e] rounded-md shadow-2xl shadow-black/90 overflow-hidden ring-1 ring-black/50">
+              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-text-muted bg-[#12110f] border-b border-[#2e2a25] flex justify-between items-center select-none">
+                <span>{trimmedTagInput ? "Matching Tags" : "Available Tags"}</span>
+                <span className="text-[9px] text-[#807a70]">{matchingTags.length} available</span>
+              </div>
+
+              <div className="max-h-56 overflow-y-auto themed-scrollbar divide-y divide-[#26231f]/60 py-1">
+                {tagOptions.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-brand-text-muted">
+                    {isTagAlreadyAdded ? (
+                      <span>Tag <strong>"{trimmedTagInput}"</strong> is already added</span>
+                    ) : unselectedTags.length === 0 ? (
+                      <span>All existing tags are added</span>
+                    ) : (
+                      <span>No tags match "{trimmedTagInput}"</span>
+                    )}
+                  </div>
+                ) : (
+                  tagOptions.map((opt, idx) => {
+                    const isHighlighted = idx === highlightedTagIndex;
+                    if (opt.type === 'create') {
+                      return (
+                        <button
+                          key="create-option"
+                          id={`tag-opt-${idx}`}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleSelectTagOption(opt);
+                          }}
+                          onMouseEnter={() => setHighlightedTagIndex(idx)}
+                          className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors ${
+                            isHighlighted ? 'bg-brand-accent/20 text-brand-accent font-medium' : 'text-brand-accent hover:bg-brand-accent/10'
+                          }`}
+                        >
+                          <Plus className="w-3.5 h-3.5 shrink-0" />
+                          <span>Create tag <strong className="font-semibold text-white underline decoration-brand-accent">"{opt.name}"</strong></span>
+                        </button>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={opt.tag.id}
+                        id={`tag-opt-${idx}`}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleSelectTagOption(opt);
+                        }}
+                        onMouseEnter={() => setHighlightedTagIndex(idx)}
+                        className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${
+                          isHighlighted ? 'bg-[#2a2622] text-white' : 'text-brand-text hover:bg-[#201d1a] hover:text-white'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 truncate">
+                          <TagIcon className={`w-3.5 h-3.5 shrink-0 ${isHighlighted ? 'text-brand-accent' : 'text-brand-gold/70'}`} />
+                          <span className="truncate">{opt.tag.name}</span>
+                        </span>
+                        {opt.tag.usage_count ? (
+                          <span className="text-[10px] text-brand-text-muted shrink-0 ml-2">
+                            {opt.tag.usage_count} uses
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -606,7 +1122,11 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                   <input type="text" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
                 )}
                 {field.type === 'number' && (
-                  <input type="number" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
+                  <ThemedNumberInput
+                    value={field.value}
+                    onChange={val => handleCustomFieldValueChange(key, val)}
+                    className="w-full bg-brand-bg border border-[#332f2a]"
+                  />
                 )}
                 {field.type === 'link' && (
                   <input type="url" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
@@ -618,7 +1138,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                         type="button"
                         onClick={() => setPreviewImage({ url: field.value, title: `${name || "Item"} - ${key}`, subtitle: "Custom Field Image" })}
                         className="group/img relative cursor-zoom-in"
-                        title="Click to preview full image"
+                        data-tooltip="Click to preview full image"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={field.value} alt={key} className="h-12 w-12 object-cover border border-[#332f2a] rounded group-hover/img:border-brand-accent group-hover/img:scale-105 transition-all duration-200" />
@@ -649,7 +1169,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                               target="_blank" 
                               rel="noreferrer" 
                               className="text-xs font-semibold text-white hover:text-brand-accent underline truncate block"
-                              title={field.fileName || field.value}
+                              data-tooltip={field.fileName || field.value}
                             >
                               {field.fileName || field.value.split('/').pop()?.split('_').slice(2).join('_') || field.value.split('/').pop() || "Document"}
                             </a>
@@ -706,17 +1226,62 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
             onChange={e => setNewFieldName(e.target.value)}
             className="flex-1 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
           />
-          <select 
-            value={newFieldType}
-            onChange={e => setNewFieldType(e.target.value as any)}
-            className="w-36 bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:outline-none"
-          >
-            <option value="text">Text</option>
-            <option value="number">Number</option>
-            <option value="link">Link</option>
-            <option value="image">Image</option>
-            <option value="file">File (PDF, PPT...)</option>
-          </select>
+          <div className="relative" ref={fieldTypeDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsFieldTypeDropdownOpen(prev => !prev)}
+              className={`w-44 bg-brand-bg border ${
+                isFieldTypeDropdownOpen ? 'border-brand-accent ring-1 ring-brand-accent/50' : 'border-[#332f2a] hover:border-[#4a443c]'
+              } p-2 text-sm text-white rounded flex items-center justify-between transition-colors focus:outline-none focus:border-brand-accent`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {newFieldType === 'text' && <Type className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                {newFieldType === 'number' && <Hash className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                {newFieldType === 'link' && <ExternalLink className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                {newFieldType === 'image' && <ImageIcon className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                {newFieldType === 'file' && <Paperclip className="h-3.5 w-3.5 text-brand-accent shrink-0" />}
+                <span className="truncate capitalize">{newFieldType === 'file' ? 'File (PDF...)' : newFieldType}</span>
+              </div>
+              <ChevronDown className={`h-3.5 w-3.5 text-brand-text-muted transition-transform duration-150 ${isFieldTypeDropdownOpen ? 'rotate-180 text-brand-accent' : ''}`} />
+            </button>
+
+            {isFieldTypeDropdownOpen && (
+              <div className="absolute right-0 bottom-full mb-1.5 w-48 z-40 bg-[#191715] border border-[#3a352e] rounded-md shadow-2xl shadow-black/90 ring-1 ring-black/50 py-1 overflow-hidden">
+                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-brand-text-muted bg-[#12110f] border-b border-[#2e2a25]">
+                  Select Field Type
+                </div>
+                {[
+                  { value: 'text' as const, label: 'Text', icon: Type },
+                  { value: 'number' as const, label: 'Number', icon: Hash },
+                  { value: 'link' as const, label: 'Link', icon: ExternalLink },
+                  { value: 'image' as const, label: 'Image', icon: ImageIcon },
+                  { value: 'file' as const, label: 'File (PDF, PPT...)', icon: Paperclip },
+                ].map((ft) => {
+                  const Icon = ft.icon;
+                  const isSelected = newFieldType === ft.value;
+                  return (
+                    <button
+                      key={ft.value}
+                      type="button"
+                      onClick={() => {
+                        setNewFieldType(ft.value);
+                        setIsFieldTypeDropdownOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${
+                        isSelected ? 'bg-brand-accent/20 text-white font-medium' : 'text-brand-text hover:bg-[#201d1a] hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Icon className={`h-3.5 w-3.5 ${isSelected ? 'text-brand-accent' : 'text-brand-gold/70'}`} />
+                        <span>{ft.label}</span>
+                      </div>
+                      {isSelected && <Check className="h-3.5 w-3.5 text-brand-accent" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <button type="button" onClick={handleAddCustomField} className="px-3 py-2 bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30 rounded text-sm flex items-center">
             <Plus className="h-4 w-4 mr-1" /> Add
           </button>
@@ -784,6 +1349,9 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         subtitle={previewImage?.subtitle}
         onClose={() => setPreviewImage(null)}
       />
+
+      {/* Floating Storage Sequence Tooltip */}
+      <StorageSequenceTooltip data={hoverTooltip} />
     </form>
   );
 }

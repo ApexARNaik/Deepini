@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { ComponentWithTotals, deleteComponent, getComponentLocationAssignments } from "@/lib/api";
+import { useState, useEffect } from "react";
+import { ComponentWithTotals, ComponentLocationSummary, deleteComponent, getComponentLocationAssignments, getFullHotspotPath } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
-import { ChevronRight, Trash2, AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
+import { ChevronRight, Trash2, AlertTriangle, ExternalLink, Loader2, MapPin, ChevronDown, X, FolderGit2, Share2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ImagePreviewModal } from "./ImagePreviewModal";
+import { StorageSequenceTooltip, StorageTooltipData } from "@/components/spatial/StorageSequenceTooltip";
 
 interface Props {
   components: ComponentWithTotals[];
@@ -23,6 +24,53 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
+  const [selectedLocationItem, setSelectedLocationItem] = useState<ComponentWithTotals | null>(null);
+  const [navigatingId, setNavigatingId] = useState<string | null>(null);
+  const [hoverTooltip, setHoverTooltip] = useState<StorageTooltipData | null>(null);
+
+  // Close tooltip on any scroll
+  useEffect(() => {
+    if (!hoverTooltip) return;
+    const handleScroll = () => setHoverTooltip(null);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, [hoverTooltip]);
+
+  const handleShowTooltip = (
+    e: React.MouseEvent<HTMLElement>,
+    data: { fullLabel?: string; label?: string; roomName?: string; quantity?: number; customText?: string }
+  ) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHoverTooltip({
+      ...data,
+      targetRect: rect
+    });
+  };
+
+  const handleHideTooltip = () => {
+    setHoverTooltip(null);
+  };
+
+  const navigateToLocation = async (loc: ComponentLocationSummary, componentId?: string) => {
+    if (componentId) setNavigatingId(componentId);
+    try {
+      if (loc.room_id) {
+        router.push(`/rooms/${loc.room_id}?locateHotspot=${loc.hotspot_id}`);
+        return;
+      }
+      const path = await getFullHotspotPath(loc.hotspot_id);
+      const roomNode = path.find(p => p.type === 'room') || path.find(p => p.type === 'photo');
+      if (roomNode) {
+        router.push(`/rooms/${roomNode.id}?locateHotspot=${loc.hotspot_id}`);
+      } else {
+        alert("Storage location room not found.");
+      }
+    } catch (err) {
+      console.error("Error navigating to location:", err);
+    } finally {
+      if (componentId) setNavigatingId(null);
+    }
+  };
 
   if (components.length === 0) {
     return (
@@ -85,6 +133,7 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
               {isPersonal ? (
                 <th className="px-6 py-4 font-medium max-w-xs">Description</th>
               ) : null}
+              <th className="px-6 py-4 font-medium">Location</th>
               <th className="px-6 py-4 font-medium">Tags</th>
               <th className="px-6 py-4 font-medium text-right">Quantity</th>
               {!isPersonal && (
@@ -115,7 +164,7 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
                           setPreviewImage({ url: c.photo_url!, title: c.name });
                         }}
                         className="h-10 w-10 relative group/img rounded overflow-hidden border border-[#332f2a] hover:border-brand-accent transition-all cursor-zoom-in block"
-                        title={`Click to view full image of ${c.name}`}
+                        data-tooltip={`Click to view full image of ${c.name}`}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={c.photo_url} alt={c.name} className="h-full w-full object-cover group-hover/img:scale-110 transition-transform duration-200" />
@@ -137,6 +186,71 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
                       {c.notes || "-"}
                     </td>
                   )}
+                  <td className="px-6 py-4">
+                    {(!c.locations || c.locations.length === 0) ? (
+                      c.totals.checked_out_qty > 0 ? (
+                        <span 
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-brand-accent/15 border border-brand-accent/30 text-brand-accent text-[11px] font-medium"
+                          data-tooltip={`${c.totals.checked_out_qty} unit(s) currently in use in project builds`}
+                        >
+                          <FolderGit2 className="h-3 w-3 shrink-0" /> In Projects ({c.totals.checked_out_qty})
+                        </span>
+                      ) : (c.totals.lent_qty || 0) > 0 ? (
+                        <span 
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-brand-gold/15 border border-brand-gold/30 text-brand-gold text-[11px] font-medium"
+                          data-tooltip={`${c.totals.lent_qty} unit(s) currently on loan`}
+                        >
+                          <Share2 className="h-3 w-3 shrink-0" /> On Loan ({c.totals.lent_qty})
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-brand-text-muted/40 italic flex items-center gap-1 select-none">
+                          <MapPin className="h-3 w-3 opacity-30 shrink-0" /> Unassigned
+                        </span>
+                      )
+                    ) : c.locations.length === 1 ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleHideTooltip();
+                          navigateToLocation(c.locations![0], c.id);
+                        }}
+                        onMouseEnter={(e) => handleShowTooltip(e, {
+                          fullLabel: c.locations![0].fullLabel,
+                          label: c.locations![0].label,
+                          roomName: c.locations![0].room_name,
+                          quantity: c.locations![0].quantity
+                        })}
+                        onMouseLeave={handleHideTooltip}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1c1a17] border border-[#332f2a] hover:border-brand-accent hover:bg-brand-accent/15 text-brand-gold hover:text-white text-xs font-medium transition-all group/btn shadow-xs max-w-[220px]"
+                      >
+                        {navigatingId === c.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-accent shrink-0" />
+                        ) : (
+                          <MapPin className="h-3.5 w-3.5 text-brand-accent shrink-0 group-hover/btn:scale-110 transition-transform" />
+                        )}
+                        <span className="truncate">{c.locations[0].label || c.locations[0].fullLabel}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleHideTooltip();
+                          setSelectedLocationItem(c);
+                        }}
+                        onMouseEnter={(e) => handleShowTooltip(e, {
+                          customText: `Stored across ${c.locations!.length} locations in ${[...new Set(c.locations!.map(l => l.room_name).filter(Boolean))].join(', ') || 'rooms'}. Click to view & navigate.`
+                        })}
+                        onMouseLeave={handleHideTooltip}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1c1a17] border border-[#332f2a] hover:border-brand-accent hover:bg-brand-accent/15 text-brand-gold hover:text-white text-xs font-medium transition-all group/btn shadow-xs"
+                      >
+                        <MapPin className="h-3.5 w-3.5 text-brand-accent shrink-0 group-hover/btn:scale-110 transition-transform" />
+                        <span>{c.locations.length} Locations</span>
+                        <ChevronDown className="h-3 w-3 text-brand-text-muted group-hover/btn:text-white transition-colors" />
+                      </button>
+                    )}
+                  </td>
                   <td className="px-6 py-4">
                     <div className="flex gap-2 flex-wrap max-w-[200px]">
                       {c.tags.map(t => (
@@ -168,10 +282,49 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
                     <div className="inline-flex items-center gap-2">
                       <button
                         type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleHideTooltip();
+                          if (!c.locations || c.locations.length === 0) return;
+                          if (c.locations.length === 1) {
+                            navigateToLocation(c.locations[0], c.id);
+                          } else {
+                            setSelectedLocationItem(c);
+                          }
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!c.locations || c.locations.length === 0) {
+                            handleShowTooltip(e, { customText: "No storage location assigned." });
+                          } else if (c.locations.length === 1) {
+                            handleShowTooltip(e, {
+                              fullLabel: c.locations[0].fullLabel,
+                              label: c.locations[0].label,
+                              roomName: c.locations[0].room_name,
+                              quantity: c.locations[0].quantity
+                            });
+                          } else {
+                            handleShowTooltip(e, {
+                              customText: `Stored in ${c.locations.length} locations. Click to choose.`
+                            });
+                          }
+                        }}
+                        onMouseLeave={handleHideTooltip}
+                        disabled={!c.locations || c.locations.length === 0 || navigatingId === c.id}
+                        className="p-1.5 text-brand-text-muted hover:text-brand-accent hover:bg-brand-accent/10 rounded transition-colors disabled:opacity-20 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-brand-text-muted"
+                      >
+                        {navigatingId === c.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-brand-accent" />
+                        ) : (
+                          <MapPin className="h-4 w-4" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
                         onClick={(e) => handleDeleteClick(e, c)}
                         disabled={checkingId === c.id || isDeleting}
                         className="p-1.5 text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                        title={`Delete ${isPersonal ? 'personal item' : 'component'} "${c.name}"`}
+                        data-tooltip={`Delete ${isPersonal ? 'personal item' : 'component'} "${c.name}"`}
+                        data-tooltip-variant="danger"
                       >
                         {checkingId === c.id ? (
                           <Loader2 className="h-4 w-4 animate-spin text-brand-text-muted" />
@@ -318,6 +471,105 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
         subtitle={isPersonal ? "Personal Item Photo" : "Component Image"}
         onClose={() => setPreviewImage(null)}
       />
+
+      {/* Multiple Locations Chooser Modal */}
+      {selectedLocationItem && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-fadeIn"
+          onClick={() => setSelectedLocationItem(null)}
+        >
+          <div 
+            className="bg-[#1a1816] border border-[#332f2a] rounded-lg max-w-md w-full p-6 shadow-2xl relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-[#332f2a]">
+              <div className="flex items-center gap-2 text-white">
+                <div className="p-1.5 bg-brand-accent/15 rounded border border-brand-accent/30">
+                  <MapPin className="h-4 w-4 text-brand-accent" />
+                </div>
+                <h3 className="font-bold text-sm uppercase tracking-wider">
+                  Select Storage Location
+                </h3>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setSelectedLocationItem(null)} 
+                className="text-brand-text-muted hover:text-white transition-colors p-1"
+                data-tooltip="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-brand-text-muted mb-4 leading-relaxed">
+              <strong className="text-white">&quot;{selectedLocationItem.name}&quot;</strong> is stored in multiple locations. Select which location to navigate to on the room map:
+            </p>
+
+            <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+              {selectedLocationItem.locations?.map((loc) => (
+                <button
+                  key={loc.id}
+                  type="button"
+                  onClick={() => {
+                    const item = selectedLocationItem;
+                    handleHideTooltip();
+                    setSelectedLocationItem(null);
+                    navigateToLocation(loc, item.id);
+                  }}
+                  onMouseEnter={(e) => handleShowTooltip(e, {
+                    fullLabel: loc.fullLabel,
+                    label: loc.label,
+                    roomName: loc.room_name,
+                    quantity: loc.quantity
+                  })}
+                  onMouseLeave={handleHideTooltip}
+                  className="w-full text-left p-3.5 rounded-lg bg-[#201e1b] hover:bg-brand-accent/15 border border-[#332f2a] hover:border-brand-accent flex items-center justify-between group transition-all cursor-pointer shadow-xs hover:shadow-md"
+                >
+                  <div className="min-w-0 pr-3 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <MapPin className="h-3.5 w-3.5 text-brand-accent shrink-0" />
+                      <span className="text-sm font-bold text-white group-hover:text-brand-accent transition-colors">
+                        {loc.label || "Storage Bin"}
+                      </span>
+                      {loc.room_name && (
+                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-black/40 text-brand-text-muted border border-[#332f2a]">
+                          {loc.room_name}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-brand-text-muted group-hover:text-brand-text/80 transition-colors line-clamp-1 flex items-center gap-1">
+                      <span className="text-[10px] uppercase font-semibold text-brand-gold/70 tracking-wider shrink-0">Path:</span>
+                      <span className="truncate">{loc.fullLabel || loc.label}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-xs font-mono font-bold px-2.5 py-1 rounded bg-black/50 text-brand-gold border border-[#332f2a]">
+                      Qty: {loc.quantity}
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-brand-text-muted group-hover:text-white group-hover:translate-x-0.5 transition-all" />
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-[#332f2a] flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  handleHideTooltip();
+                  setSelectedLocationItem(null);
+                }}
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-brand-text-muted hover:text-white transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Custom Storage Sequence Tooltip */}
+      <StorageSequenceTooltip data={hoverTooltip ? { ...hoverTooltip, footerHint: "Click to open room map & highlight" } : null} />
     </>
   );
 }

@@ -65,23 +65,26 @@ export function RoomList() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {rooms.map((room) => (
-        <div key={room.id} className="relative group">
-          <button
-            onClick={() => router.push(`/rooms/${room.id}`)}
-            className="w-full bg-[#1f1f1f] border border-[#2a2a2a] p-6 rounded text-left hover:border-brand-accent transition-colors flex items-center justify-between"
-          >
-            <span className="font-serif text-xl font-bold text-white group-hover:text-brand-accent transition-colors">
+        <div 
+          key={room.id} 
+          onClick={() => router.push(`/rooms/${room.id}`)}
+          className="bg-[#1a1816] border border-[#332f2a] hover:border-brand-accent p-6 rounded-lg text-left transition-all flex items-center justify-between group cursor-pointer shadow-sm hover:shadow-md min-h-[84px]"
+        >
+          <div className="min-w-0 pr-4">
+            <span className="font-serif text-xl font-bold text-white group-hover:text-brand-accent transition-colors truncate block">
               {room.name}
             </span>
-          </button>
+          </div>
           {isOnline && (
             <button
+              type="button"
               onClick={(e) => {
-                e.preventDefault();
+                e.stopPropagation();
                 handleDeleteRoom(room.id, room.name);
               }}
-              className="absolute top-1/2 right-4 -translate-y-1/2 p-2 text-brand-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all bg-[#1f1f1f]"
-              title="Delete Room"
+              className="p-2 text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 rounded-md transition-all opacity-0 group-hover:opacity-100 shrink-0"
+              data-tooltip={`Delete room "${room.name}"`}
+              data-tooltip-variant="danger"
             >
               <Trash2 className="h-5 w-5" />
             </button>
@@ -90,8 +93,8 @@ export function RoomList() {
       ))}
 
       {/* Create Room Form */}
-      <div className="bg-[#1a1816] border border-dashed border-[#332f2a] p-6 rounded relative">
-        <form onSubmit={handleCreate} className="flex flex-col gap-4">
+      <div className="bg-[#1a1816] border border-dashed border-[#332f2a] p-6 rounded-lg relative flex flex-col justify-center min-h-[84px]">
+        <form onSubmit={handleCreate} className="flex flex-col gap-3">
           <label className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">
             Create New Room
           </label>
@@ -101,13 +104,14 @@ export function RoomList() {
               value={newRoomName}
               onChange={(e) => setNewRoomName(e.target.value)}
               placeholder="e.g. Workshop, Garage"
-              className="flex-1 bg-brand-bg border border-[#2a2a2a] px-3 py-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+              className="flex-1 bg-brand-bg border border-[#332f2a] px-3 py-2 text-sm text-white focus:border-brand-accent focus:outline-none rounded-sm transition-colors"
               disabled={isCreating}
             />
             <button 
               type="submit" 
               disabled={isCreating || !newRoomName.trim()}
-              className="bg-[#2a2a2a] hover:bg-brand-accent disabled:opacity-50 text-white p-2 transition-colors"
+              className="bg-[#24211e] hover:bg-brand-accent hover:text-white disabled:opacity-50 text-brand-text p-2 rounded-sm transition-colors shrink-0"
+              data-tooltip="Add Room"
             >
               <Plus className="h-5 w-5" />
             </button>
