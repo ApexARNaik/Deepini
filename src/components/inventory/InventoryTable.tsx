@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { ComponentWithTotals, ComponentLocationSummary, deleteComponent, getComponentLocationAssignments, getFullHotspotPath } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
-import { ChevronRight, Trash2, AlertTriangle, ExternalLink, Loader2, MapPin, ChevronDown, X } from "lucide-react";
+import { ChevronRight, Trash2, AlertTriangle, ExternalLink, Loader2, MapPin, ChevronDown, X, FolderGit2, Share2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ImagePreviewModal } from "./ImagePreviewModal";
 import { StorageSequenceTooltip, StorageTooltipData } from "@/components/spatial/StorageSequenceTooltip";
@@ -188,9 +188,25 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
                   )}
                   <td className="px-6 py-4">
                     {(!c.locations || c.locations.length === 0) ? (
-                      <span className="text-[11px] text-brand-text-muted/40 italic flex items-center gap-1 select-none">
-                        <MapPin className="h-3 w-3 opacity-30 shrink-0" /> Unassigned
-                      </span>
+                      c.totals.checked_out_qty > 0 ? (
+                        <span 
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-brand-accent/15 border border-brand-accent/30 text-brand-accent text-[11px] font-medium"
+                          title={`${c.totals.checked_out_qty} unit(s) currently in use in project builds`}
+                        >
+                          <FolderGit2 className="h-3 w-3 shrink-0" /> In Projects ({c.totals.checked_out_qty})
+                        </span>
+                      ) : (c.totals.lent_qty || 0) > 0 ? (
+                        <span 
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-brand-gold/15 border border-brand-gold/30 text-brand-gold text-[11px] font-medium"
+                          title={`${c.totals.lent_qty} unit(s) currently on loan`}
+                        >
+                          <Share2 className="h-3 w-3 shrink-0" /> On Loan ({c.totals.lent_qty})
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-brand-text-muted/40 italic flex items-center gap-1 select-none">
+                          <MapPin className="h-3 w-3 opacity-30 shrink-0" /> Unassigned
+                        </span>
+                      )
                     ) : c.locations.length === 1 ? (
                       <button
                         type="button"

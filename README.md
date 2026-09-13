@@ -28,6 +28,7 @@ Deepini is a personal inventory and spatial tracking web application built for m
 - **Custom Fields & File Attachments**: Attach custom text, numbers, links, images, and document files (PDFs, PPT, Word, Excel, ZIP) directly to items with cloud storage, custom icon-enhanced field type dropdowns, and a full-screen image preview lightbox.
 - **Prioritized Relevance Search**: Six-tier relevance ranking prioritizes direct matches in item names first, then direct matches in tags, direct matches in notes, followed by in-between substring matches in names, tags, and notes (e.g. searching "es" places "ESP32" before "Resistors", and "Resistors" before items with notes mentioning "photoresistors").
 - **Inventory Page Toggle**: Fast switcher between `Components (X)` and `Personal (Y)` with tailored table columns and context-aware action buttons.
+- **Component In-Use Transparency**: Component detail pages feature an "In Projects" workspace detailing every active build and archived build using the component, quantities in use, the original compartment it was taken from with a 1-click "Locate Origin" map button, and the archived build location with a "Locate Build" map button.
 - **Physical Tracking Parity**: Personal items are tracked across the exact same spatial hierarchy as components, featuring full "Locate" button spotlighting.
 
 ### 3. Projects Check-Out, Lifecycle Phases & Physical Archiving
@@ -102,7 +103,7 @@ Run the migration scripts in the Supabase SQL Editor:
 5. `supabase/migrations/010_add_project_location_and_archive_rpc.sql`: Adds `location_id` column to projects and atomic `archive_project` RPC with leaf hotspot validation.
 6. `supabase/migrations/011_add_loans_and_lending_system.sql`: Adds `loans` table, atomic lending RPCs (`lend_component`, `return_lent_component`, `lend_project`, `return_lent_project`), safe component deletion integration, and updated `component_totals` view.
 
-*(Note: The application also includes client-side fallbacks, ensuring continuous operation even before remote database migrations are executed.)*
+*(Note: The application also includes client-side fallbacks, ensuring continuous operation even before remote database migrations are executed. Deepini is designed as a single-user system using a lightweight password gate, so tables operate with Row Level Security (RLS) disabled. Migration 011 explicitly includes `DISABLE ROW LEVEL SECURITY` and grants to `anon`.)*
 
 ### 4. Installation & Development
 

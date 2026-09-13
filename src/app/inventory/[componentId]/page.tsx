@@ -1,11 +1,35 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getComponentDetails, ComponentWithTotals, ComponentLocation, isPersonalItem, getLoans, Loan, calculateLoanDaysRemaining } from "@/lib/api";
+import { 
+  getComponentDetails, 
+  ComponentWithTotals, 
+  ComponentLocation, 
+  isPersonalItem, 
+  getLoans, 
+  Loan, 
+  calculateLoanDaysRemaining,
+  getComponentProjectUsage,
+  ComponentProjectUsage
+} from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Edit2, MapPin, ExternalLink, ArrowLeft, FileText, Maximize2, Share2, RotateCcw, User, Calendar } from "lucide-react";
+import { 
+  Edit2, 
+  MapPin, 
+  ExternalLink, 
+  ArrowLeft, 
+  FileText, 
+  Maximize2, 
+  Share2, 
+  RotateCcw, 
+  User, 
+  Calendar,
+  FolderGit2,
+  Lock,
+  Hammer
+} from "lucide-react";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { LendModal } from "@/components/loans/LendModal";
 import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
@@ -15,6 +39,7 @@ export default function ComponentDetailPage() {
   const router = useRouter();
   const [data, setData] = useState<{ component: ComponentWithTotals, locations: ComponentLocation[] } | null>(null);
   const [activeLoans, setActiveLoans] = useState<Loan[]>([]);
+  const [projectUsages, setProjectUsages] = useState<ComponentProjectUsage[]>([]);
   const [loading, setLoading] = useState(true);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const [showLendModal, setShowLendModal] = useState(false);
@@ -24,10 +49,12 @@ export default function ComponentDetailPage() {
     if (typeof componentId !== 'string') return;
     Promise.all([
       getComponentDetails(componentId),
-      getLoans().then(all => all.filter(l => l.component_id === componentId && !l.returned_at)).catch(() => [] as Loan[])
-    ]).then(([res, loans]) => {
+      getLoans().then(all => all.filter(l => l.component_id === componentId && !l.returned_at)).catch(() => [] as Loan[]),
+      getComponentProjectUsage(componentId).catch(() => [] as ComponentProjectUsage[])
+    ]).then(([res, loans, usages]) => {
       setData(res);
       setActiveLoans(loans);
+      setProjectUsages(usages);
       setLoading(false);
     }).catch(console.error);
   };
@@ -123,7 +150,7 @@ export default function ComponentDetailPage() {
               {/* Personal Item Details */}
               <section>
                 <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Item Details</h2>
-                <div className="grid grid-cols-2 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
                   <div>
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Total Owned</div>
                     <div className="text-xl font-serif text-white">{component.totals.total_owned_qty}</div>
@@ -132,6 +159,16 @@ export default function ComponentDetailPage() {
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Storage</div>
                     <div className="text-xl font-serif text-white">{component.totals.in_storage_qty}</div>
                   </div>
+                  <div>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Projects</div>
+                    <div className="text-xl font-serif text-brand-accent">{component.totals.checked_out_qty}</div>
+                  </div>
+                  {(component.totals.lent_qty || 0) > 0 && (
+                    <div>
+                      <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Lent Out</div>
+                      <div className="text-xl font-serif text-brand-gold">{component.totals.lent_qty}</div>
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -150,7 +187,7 @@ export default function ComponentDetailPage() {
               {/* Component Details */}
               <section>
                 <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest border-b border-[#332f2a] pb-2 mb-4">Details</h2>
-                <div className="grid grid-cols-2 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
                   <div>
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Total Owned</div>
                     <div className="text-xl font-serif text-white">{component.totals.total_owned_qty}</div>
@@ -159,6 +196,16 @@ export default function ComponentDetailPage() {
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Storage</div>
                     <div className="text-xl font-serif text-white">{component.totals.in_storage_qty}</div>
                   </div>
+                  <div>
+                    <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">In Projects</div>
+                    <div className="text-xl font-serif text-brand-accent">{component.totals.checked_out_qty}</div>
+                  </div>
+                  {(component.totals.lent_qty || 0) > 0 && (
+                    <div>
+                      <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Lent Out</div>
+                      <div className="text-xl font-serif text-brand-gold">{component.totals.lent_qty}</div>
+                    </div>
+                  )}
                   <div>
                     <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mb-1">Price</div>
                     <div className="text-sm font-mono text-white">{component.price != null ? formatCurrency(component.price) : '-'}</div>
@@ -290,6 +337,117 @@ export default function ComponentDetailPage() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+          </section>
+
+          {/* In Use in Projects Section */}
+          <section>
+            <div className="flex items-center justify-between border-b border-[#332f2a] pb-2 mb-4">
+              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest flex items-center gap-1.5">
+                <FolderGit2 className="h-3.5 w-3.5 text-brand-accent" />
+                <span>In Projects ({projectUsages.length})</span>
+              </h2>
+              {projectUsages.length > 0 && (
+                <span className="text-[10px] text-brand-accent font-mono font-bold">
+                  {projectUsages.reduce((sum, u) => sum + u.quantity, 0)} in use
+                </span>
+              )}
+            </div>
+            {projectUsages.length === 0 ? (
+              <div className="text-sm text-brand-text-muted italic bg-[#1a1816] p-4 rounded border border-[#332f2a]">
+                Not currently in use in any project.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {projectUsages.map(usage => {
+                  const isArchived = usage.project_status === 'archived';
+
+                  return (
+                    <div key={usage.id} className="bg-[#1a1816] border border-[#332f2a] rounded p-4 flex flex-col gap-3">
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0 flex-1 pr-2">
+                          <Link 
+                            href={`/projects/${usage.project_id}`}
+                            className="text-white font-bold hover:text-brand-accent transition-colors flex items-center gap-1.5 group"
+                          >
+                            <span className="truncate">{usage.project_name}</span>
+                            <ExternalLink className="h-3 w-3 text-brand-text-muted group-hover:text-brand-accent shrink-0" />
+                          </Link>
+                          <div className="mt-1 flex items-center gap-1.5">
+                            {isArchived ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-300 border border-zinc-700">
+                                <Lock className="h-2.5 w-2.5 text-amber-400" /> Archived Build
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-950/40 text-emerald-400 border border-emerald-800/50">
+                                <Hammer className="h-2.5 w-2.5" /> Active Build
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-xl font-serif text-brand-accent leading-none">{usage.quantity}</div>
+                          <div className="text-[9px] text-brand-text-muted uppercase tracking-widest">In Build</div>
+                        </div>
+                      </div>
+
+                      {/* Origin Location (where component was taken from) */}
+                      <div className="text-xs bg-black/30 p-2.5 rounded border border-[#2a2622] space-y-1.5">
+                        <div className="flex items-center justify-between text-brand-text-muted">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400 flex items-center gap-1">
+                            <MapPin className="h-3 w-3 text-brand-accent shrink-0" /> Origin Location:
+                          </span>
+                          {usage.source_room_id && (
+                            <Link
+                              href={`/rooms/${usage.source_room_id}?locateHotspot=${usage.source_location_id}`}
+                              className="text-[10px] text-brand-accent hover:underline font-bold uppercase tracking-wider"
+                              title="Locate origin compartment on map"
+                            >
+                              Locate ↗
+                            </Link>
+                          )}
+                        </div>
+                        <div className="text-white text-xs pl-4 truncate font-medium">
+                          {usage.source_location_label || "Source location"}
+                        </div>
+                      </div>
+
+                      {/* Build Storage Location if Archived */}
+                      {isArchived && usage.project_location_label && (
+                        <div className="text-xs bg-amber-950/20 p-2.5 rounded border border-amber-900/40 space-y-1.5">
+                          <div className="flex items-center justify-between text-amber-400">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1">
+                              <MapPin className="h-3 w-3 text-amber-400 shrink-0" /> Build Stored At:
+                            </span>
+                            {usage.project_location_room_id && usage.project_location_id && (
+                              <Link
+                                href={`/rooms/${usage.project_location_room_id}?locateHotspot=${usage.project_location_id}`}
+                                className="text-[10px] text-amber-400 hover:underline font-bold uppercase tracking-wider"
+                                title="Locate build on room map"
+                              >
+                                Locate ↗
+                              </Link>
+                            )}
+                          </div>
+                          <div className="text-white text-xs pl-4 truncate font-medium">
+                            {usage.project_location_label}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between text-[10px] text-brand-text-muted pt-1 border-t border-[#2a2622]">
+                        <span>Checked out: {new Date(usage.checked_out_at).toLocaleDateString()}</span>
+                        <Link 
+                          href={`/projects/${usage.project_id}`}
+                          className="text-brand-accent hover:underline font-bold uppercase tracking-wider flex items-center gap-1"
+                        >
+                          View Project ↗
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>

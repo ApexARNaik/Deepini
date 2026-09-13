@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS loans (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Ensure RLS is disabled and anon has access (matching Deepini single-user architecture)
+ALTER TABLE loans DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON loans TO anon, authenticated, service_role;
+
 CREATE INDEX IF NOT EXISTS idx_loans_active ON loans(returned_at) WHERE returned_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_loans_due_date ON loans(due_date);
 CREATE INDEX IF NOT EXISTS idx_loans_component_id ON loans(component_id);

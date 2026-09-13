@@ -348,12 +348,18 @@ loans
 
 - **Personal Item Presentation**:
   - Distinct gold `"Personal Item"` badge next to title.
-  - Clean display: Total Owned, In Storage, and Description notes.
+  - Clean display: Total Owned, In Storage, In Projects, Lent Out, and Description notes.
   - Hides empty price, datasheet, and custom specs sections.
   - Storage location card features a **"Locate"** button that navigates directly into the room, drills into the containing perspective photo, opens the compartment side drawer with the components list, and activates the bouncing red marker.
 - **Component Presentation**:
   - Full technical resource links, price in INR (`₹`), low stock alert status, custom specs list, and location cards with deep "Locate" button.
+  - **Comprehensive Stock Status Breakdown**: Overview grid displaying Total Owned, In Storage, In Projects, Lent Out, Price, and Low Stock Alert threshold.
   - **Custom Specs Display**: Renders text, numbers, clickable links, image thumbnails, and attached documents (`file` type) with a document icon (`FileText`), filename, and direct `Open ↗` link.
+- **In-Use & Active Usage Transparency**:
+  - Dedicated **"In Projects"** section showing every project (active build or archived build) currently using units of the component.
+  - Displays the project name (with direct workspace link), project status badge (`Active Build` vs `Archived Build`), quantity checked out, and **Origin Storage Location** (where the unit was pulled from, with a 1-click `Locate` button to the room map).
+  - For archived projects, additionally displays where the physical build assembly is stored (`Build Stored At`) with a 1-click `Locate` button.
+  - Dedicated **"Active Loans"** section displaying borrower details, origin location, and dynamic due date countdowns.
 - **Image Preview Lightbox**:
   - Clicking item photo or custom field image opens a full-screen zoomable preview modal.
 
@@ -462,3 +468,4 @@ loans
 3. **Personal Items Storage**: Personal items share the identical spatial tree and storage mechanics as components.
 4. **View Ordering**: Persisted at database level via `order_index` and updated through `reorder_spatial_photos`.
 5. **Shared Password Gate**: Protected by client-side session password gate (`NEXT_PUBLIC_APP_PASSWORD`).
+6. **Database Permissions & RLS**: As a single-user personal system without Supabase Auth, all tables operate with Row Level Security (RLS) disabled (`DISABLE ROW LEVEL SECURITY`) and grants to `anon`, `authenticated`, and `service_role`.

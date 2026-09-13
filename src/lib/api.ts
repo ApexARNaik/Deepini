@@ -67,6 +67,7 @@ export interface ComponentTotals {
   component_id: string;
   in_storage_qty: number;
   checked_out_qty: number;
+  lent_qty?: number;
   total_owned_qty: number;
 }
 
@@ -1851,6 +1852,108 @@ export async function getComponentLocationAssignments(componentId: string): Prom
     hotspot_id: l.hotspot_id,
     label: l.spatial_hotspots?.label
   }));
+}
+
+export interface ComponentProjectUsage {
+  id: string;
+  project_id: string;
+  project_name: string;
+  project_status: 'planning' | 'active' | 'archived';
+  project_location_id?: string | null;
+  project_location_label?: string | null;
+  project_location_room_id?: string | null;
+  quantity: number;
+  source_location_id: string;
+  source_location_label?: string | null;
+  source_room_id?: string | null;
+  source_room_name?: string | null;
+  checked_out_at: string;
+}
+
+export async function getComponentProjectUsage(componentId: string): Promise<ComponentProjectUsage[]> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const rawItems = await db.project_components
+      .where('component_id')
+      .equals(componentId)
+      .toArray();
+    const activeItems = rawItems.filter(pc => !pc.returned_at);
+
+    const results: ComponentProjectUsage[] = [];
+    for (const item of activeItems) {
+      const proj = await db.projects.get(item.project_id);
+      if (!proj) continue;
+      const { locationId } = extractProjectLocation(proj);
+      const projLoc = locationId ? hotspotMap.get(locationId) : undefined;
+      const sourceLoc = hotspotMap.get(item.source_location_id);
+
+      results.push({
+        id: item.id,
+        project_id: proj.id,
+        project_name: proj.name,
+        project_status: ((proj.status as string) === 'completed' ? 'archived' : proj.status) as any,
+        project_location_id: locationId,
+        project_location_label: projLoc?.fullLabel || projLoc?.label,
+        project_location_room_id: projLoc?.roomId,
+        quantity: item.quantity,
+        source_location_id: item.source_location_id,
+        source_location_label: sourceLoc?.fullLabel || sourceLoc?.label,
+        source_room_id: sourceLoc?.roomId,
+        source_room_name: sourceLoc?.roomName,
+        checked_out_at: item.checked_out_at
+      });
+    }
+    return results;
+  }
+
+  const { data: rawItems, error } = await supabase
+    .from('project_components')
+    .select(`
+      id,
+      project_id,
+      quantity,
+      source_location_id,
+      checked_out_at,
+      project:projects!project_components_project_id_fkey(
+        id,
+        name,
+        status,
+        description,
+        location_id
+      )
+    `)
+    .eq('component_id', componentId)
+    .is('returned_at', null)
+    .order('checked_out_at', { ascending: false });
+
+  if (error || !rawItems) return [];
+
+  return rawItems
+    .filter((item: any) => item.project)
+    .map((item: any) => {
+      const proj = item.project;
+      const { locationId } = extractProjectLocation(proj);
+      const projLoc = locationId ? hotspotMap.get(locationId) : undefined;
+      const sourceLoc = hotspotMap.get(item.source_location_id);
+
+      return {
+        id: item.id,
+        project_id: proj.id,
+        project_name: proj.name,
+        project_status: ((proj.status as string) === 'completed' ? 'archived' : proj.status) as any,
+        project_location_id: locationId,
+        project_location_label: projLoc?.fullLabel || projLoc?.label,
+        project_location_room_id: projLoc?.roomId,
+        quantity: item.quantity,
+        source_location_id: item.source_location_id,
+        source_location_label: sourceLoc?.fullLabel || sourceLoc?.label,
+        source_room_id: sourceLoc?.roomId,
+        source_room_name: sourceLoc?.roomName,
+        checked_out_at: item.checked_out_at
+      };
+    });
 }
 
 export async function deleteComponent(id: string): Promise<void> {
