@@ -120,7 +120,7 @@ export function InsertIntermediateModal({
               {/* Parent Hotspot */}
               <div className="flex flex-col items-center text-center p-2 rounded bg-[#252320] border border-[#3a3530] min-w-[90px] flex-1">
                 <span className="text-[9px] text-brand-text-muted uppercase tracking-wider">Parent</span>
-                <span className="font-bold text-white truncate w-full mt-0.5" title={parentHotspot.label}>
+                <span className="font-bold text-white truncate w-full mt-0.5" data-tooltip={parentHotspot.label}>
                   {parentHotspot.label}
                 </span>
               </div>
@@ -130,7 +130,7 @@ export function InsertIntermediateModal({
               {/* New View */}
               <div className="flex flex-col items-center text-center p-2 rounded bg-brand-accent/20 border border-brand-accent/50 text-white min-w-[110px] flex-1 shadow-[0_0_12px_rgba(188,115,83,0.3)]">
                 <span className="text-[9px] text-amber-300 uppercase tracking-wider font-bold">New View</span>
-                <span className="font-bold text-brand-gold truncate w-full mt-0.5" title={photoLabel || "New View"}>
+                <span className="font-bold text-brand-gold truncate w-full mt-0.5" data-tooltip={photoLabel || "New View"}>
                   {photoLabel || "New View"}
                 </span>
               </div>
@@ -140,7 +140,7 @@ export function InsertIntermediateModal({
               {/* Child View */}
               <div className="flex flex-col items-center text-center p-2 rounded bg-[#252320] border border-[#3a3530] min-w-[90px] flex-1">
                 <span className="text-[9px] text-brand-text-muted uppercase tracking-wider">Child View</span>
-                <span className="font-bold text-white truncate w-full mt-0.5" title={childPhoto.label || "Target View"}>
+                <span className="font-bold text-white truncate w-full mt-0.5" data-tooltip={childPhoto.label || "Target View"}>
                   {childPhoto.label || "Target View"}
                 </span>
               </div>

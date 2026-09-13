@@ -272,7 +272,7 @@ export function MoveHotspotModal({
                         Current View
                       </span>
                     ) : isDescendant ? (
-                      <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-red-950/40 border border-red-800/40 text-red-400 font-mono" title="Cannot move into its own descendant view">
+                      <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-red-950/40 border border-red-800/40 text-red-400 font-mono" data-tooltip="Cannot move into its own descendant view" data-tooltip-variant="danger">
                         <ShieldAlert className="h-3 w-3" />
                         Inside Itself
                       </span>

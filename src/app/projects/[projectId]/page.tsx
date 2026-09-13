@@ -9,7 +9,8 @@ import {
   ProjectComponent, 
   getLoans, 
   Loan, 
-  calculateLoanDaysRemaining 
+  calculateLoanDaysRemaining,
+  checkinComponent
 } from "@/lib/api";
 import { CheckOutModal } from "@/components/projects/CheckOutModal";
 import { CheckInModal } from "@/components/projects/CheckInModal";
@@ -30,7 +31,8 @@ import {
   Share2,
   RotateCcw,
   User,
-  Calendar
+  Calendar,
+  Loader2
 } from "lucide-react";
 import Link from "next/link";
 import { useNetworkState } from "@/hooks/useNetworkState";
@@ -54,6 +56,7 @@ export default function ProjectDetailPage() {
   const [items, setItems] = useState<ProjectComponent[]>([]);
   const [activeLoan, setActiveLoan] = useState<Loan | null>(null);
   const [loading, setLoading] = useState(true);
+  const [returningItemId, setReturningItemId] = useState<string | null>(null);
   
   const [showCheckOut, setShowCheckOut] = useState(false);
   const [checkInItem, setCheckInItem] = useState<ProjectComponent | null>(null);
@@ -63,6 +66,23 @@ export default function ProjectDetailPage() {
   const [editInitialStatus, setEditInitialStatus] = useState<'planning' | 'active' | 'archived' | undefined>(undefined);
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
   const statusDropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleReturnToOrigin = async (item: ProjectComponent) => {
+    const locName = item.source_hotspot?.label || 'its original storage location';
+    if (!confirm(`Return ${item.quantity} unit(s) of "${item.component?.name || 'component'}" directly back to ${locName}?`)) {
+      return;
+    }
+    setReturningItemId(item.id);
+    try {
+      await checkinComponent(item.id, item.source_location_id);
+      load();
+    } catch (err: any) {
+      console.error("Failed to return component:", err);
+      alert("Failed to return component: " + (err.message || "Unknown error"));
+    } finally {
+      setReturningItemId(null);
+    }
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -152,7 +172,7 @@ export default function ProjectDetailPage() {
                     setShowEditModal(true);
                   }}
                   className="p-1.5 text-brand-text-muted hover:text-brand-accent hover:bg-[#25221d] rounded border border-transparent hover:border-[#3a352e] transition-colors"
-                  title="Edit project name, description, or phase"
+                  data-tooltip="Edit project name, description, or phase"
                 >
                   <Edit2 className="h-4 w-4" />
                 </button>
@@ -229,7 +249,7 @@ export default function ProjectDetailPage() {
                 <button
                   onClick={() => setShowLendModal(true)}
                   disabled={project.status === 'planning'}
-                  title={project.status === 'planning' ? "Cannot lend a project in Planning phase" : "Lend this project"}
+                  data-tooltip={project.status === 'planning' ? "Cannot lend a project in Planning phase" : "Lend this project"}
                   className="flex items-center px-3 py-2 bg-brand-gold/10 hover:bg-brand-gold/20 text-brand-gold border border-brand-gold/30 text-xs font-bold uppercase tracking-widest rounded-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Share2 className="h-3.5 w-3.5 mr-1.5" /> Lend
@@ -239,7 +259,7 @@ export default function ProjectDetailPage() {
               <button 
                 onClick={() => setShowCheckOut(true)}
                 disabled={isArchived || !!activeLoan}
-                title={isArchived ? "Archived projects cannot accept new checkouts. Change status to Active to checkout components." : activeLoan ? "Project is currently on loan. Return project before adding checkouts." : undefined}
+                data-tooltip={isArchived ? "Archived projects cannot accept new checkouts. Change status to Active to checkout components." : activeLoan ? "Project is currently on loan. Return project before adding checkouts." : undefined}
                 className={`flex items-center px-4 py-2 text-white text-xs font-bold uppercase tracking-widest rounded-sm transition-colors ${
                   isArchived || !!activeLoan
                     ? "bg-[#25221d] text-zinc-500 border border-[#332f2a] cursor-not-allowed" 
@@ -367,7 +387,7 @@ export default function ProjectDetailPage() {
                     setShowEditModal(true);
                   }}
                   className="px-3 py-2 bg-[#25221d] hover:bg-[#332e27] border border-[#3e3830] text-zinc-300 hover:text-white rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"
-                  title="Relocate project to another leaf hotspot"
+                  data-tooltip="Relocate project to another leaf hotspot"
                 >
                   <Edit2 className="h-3.5 w-3.5" /> Relocate
                 </button>
@@ -422,17 +442,35 @@ export default function ProjectDetailPage() {
                       isArchived ? (
                         <span 
                           className="px-2.5 py-1 bg-zinc-800/80 text-zinc-400 text-[10px] font-bold uppercase tracking-widest rounded border border-zinc-700/60 flex items-center gap-1 cursor-default"
-                          title="Preserved in build. Transition project to Active to check in or dismantle."
+                          data-tooltip="Preserved in build. Transition project to Active to check in or dismantle."
                         >
                           <Lock className="h-3 w-3 text-amber-500/80" /> Preserved
                         </span>
                       ) : (
-                        <button 
-                          onClick={() => setCheckInItem(item)}
-                          className="px-3 py-1 bg-brand-accent/20 text-brand-accent text-[10px] font-bold uppercase tracking-widest rounded hover:bg-brand-accent hover:text-white transition-colors"
-                        >
-                          Check In
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            type="button"
+                            disabled={returningItemId === item.id}
+                            onClick={() => handleReturnToOrigin(item)}
+                            className="px-2.5 py-1 bg-brand-accent/20 hover:bg-brand-accent border border-brand-accent/40 text-brand-accent hover:text-white text-[10px] font-bold uppercase tracking-widest rounded transition-colors flex items-center gap-1 disabled:opacity-50"
+                            data-tooltip={`Return directly to origin: ${item.source_hotspot?.label || 'Source Location'}`}
+                          >
+                            {returningItemId === item.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <RotateCcw className="h-3 w-3" />
+                            )}
+                            <span>Return to Origin</span>
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => setCheckInItem(item)}
+                            className="px-2.5 py-1 bg-[#221f1b] hover:bg-[#2e2a25] border border-[#3a352e] text-zinc-400 hover:text-white text-[10px] font-bold uppercase tracking-widest rounded transition-colors"
+                            data-tooltip="Return to a different storage location"
+                          >
+                            Other Location...
+                          </button>
+                        </div>
                       )
                     )}
                   </div>

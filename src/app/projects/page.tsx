@@ -88,7 +88,7 @@ export default function ProjectsPage() {
                           setEditingProject(p);
                         }}
                         className="p-1 text-brand-text-muted hover:text-brand-accent hover:bg-[#25221d] rounded transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                        title="Edit project"
+                        data-tooltip="Edit project"
                       >
                         <Edit2 className="h-3.5 w-3.5" />
                       </button>
@@ -112,7 +112,7 @@ export default function ProjectsPage() {
                 {p.status === 'archived' && (
                   <div className="mb-4 pt-3 border-t border-[#2e2a25] flex items-center gap-1.5 text-xs text-amber-400/90 font-medium bg-amber-500/5 px-2.5 py-1.5 rounded border border-amber-500/20">
                     <MapPin className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-                    <span className="truncate" title={p.location_label || "Storage location assigned"}>
+                    <span className="truncate" data-tooltip={p.location_label || "Storage location assigned"}>
                       {p.location_label || "Leaf Hotspot Assigned"}
                     </span>
                   </div>

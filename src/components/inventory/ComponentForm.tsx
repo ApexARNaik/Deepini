@@ -608,7 +608,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                     setPreviewImage({ url: photoUrl, title: name || "Item Photo", subtitle: itemType === 'personal' ? "Personal Item Photo" : "Component Image" });
                   }}
                   className="absolute top-2 right-2 p-1.5 bg-black/70 hover:bg-black text-white/80 hover:text-white rounded border border-[#444] z-10 transition-colors cursor-zoom-in"
-                  title="View full image"
+                  data-tooltip="View full image"
                 >
                   <Maximize2 className="h-3.5 w-3.5" />
                 </button>
@@ -713,7 +713,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                 onMouseLeave={handleHideTooltip}
                 className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] hover:border-[#4a443c] rounded transition-colors group/loc"
               >
-                <div className="text-sm text-white truncate pr-2" title={l.label}>{l.label}</div>
+                <div className="text-sm text-white truncate pr-2" data-tooltip={l.label}>{l.label}</div>
                 <div className="flex items-center gap-4 shrink-0">
                   <div className="text-sm text-brand-text-muted">Qty: <span className="text-brand-accent font-bold">{l.quantity}</span></div>
                   <button type="button" onClick={() => handleRemoveLocation(l.hotspot_id)} className="text-brand-text-muted hover:text-red-400 transition-colors">
@@ -777,7 +777,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                       handleHideTooltip();
                       setSelectedHotspot("");
                     }}
-                    title="Clear selection"
+                    data-tooltip="Clear selection"
                     className="p-1 text-brand-text-muted hover:text-white rounded transition-colors"
                   >
                     <X className="h-3.5 w-3.5" />
@@ -890,7 +890,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                               )}
                             </div>
                             {display.trail && (
-                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5" title={hs.fullLabel}>
+                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5" data-tooltip={hs.fullLabel}>
                                 {display.trail}
                               </div>
                             )}
@@ -932,7 +932,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
             <span key={t.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#1a1816] border border-[#332f2a] rounded text-xs text-brand-text group hover:border-[#443e37] transition-colors">
               <TagIcon className="w-3 h-3 text-brand-gold/80" />
               <span>{t.name}</span>
-              <button type="button" onClick={() => handleRemoveTag(t.id)} className="text-brand-text-muted hover:text-white transition-colors ml-0.5" title={`Remove ${t.name}`}>
+              <button type="button" onClick={() => handleRemoveTag(t.id)} className="text-brand-text-muted hover:text-white transition-colors ml-0.5" data-tooltip={`Remove ${t.name}`}>
                 <X className="h-3 w-3" />
               </button>
             </span>
@@ -964,7 +964,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                 tabIndex={-1}
                 onClick={() => setIsTagDropdownOpen(prev => !prev)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-brand-text-muted hover:text-white transition-colors p-0.5"
-                title="Toggle tags list"
+                data-tooltip="Toggle tags list"
               >
                 <ChevronDown className={`w-4 h-4 transition-transform duration-150 ${isTagDropdownOpen ? 'rotate-180 text-brand-accent' : ''}`} />
               </button>
@@ -1138,7 +1138,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                         type="button"
                         onClick={() => setPreviewImage({ url: field.value, title: `${name || "Item"} - ${key}`, subtitle: "Custom Field Image" })}
                         className="group/img relative cursor-zoom-in"
-                        title="Click to preview full image"
+                        data-tooltip="Click to preview full image"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={field.value} alt={key} className="h-12 w-12 object-cover border border-[#332f2a] rounded group-hover/img:border-brand-accent group-hover/img:scale-105 transition-all duration-200" />
@@ -1169,7 +1169,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                               target="_blank" 
                               rel="noreferrer" 
                               className="text-xs font-semibold text-white hover:text-brand-accent underline truncate block"
-                              title={field.fileName || field.value}
+                              data-tooltip={field.fileName || field.value}
                             >
                               {field.fileName || field.value.split('/').pop()?.split('_').slice(2).join('_') || field.value.split('/').pop() || "Document"}
                             </a>

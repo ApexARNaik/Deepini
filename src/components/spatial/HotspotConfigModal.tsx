@@ -102,7 +102,7 @@ export function HotspotConfigModal({
                   type="button"
                   onClick={onRedrawShape}
                   className="px-3 py-2 text-xs font-bold text-cyan-400 hover:text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded transition-colors flex items-center gap-1.5"
-                  title="Redraw boundary points on the map"
+                  data-tooltip="Redraw boundary points on the map"
                 >
                   <Crop className="h-3.5 w-3.5" />
                   <span>Redraw Shape</span>
@@ -113,7 +113,7 @@ export function HotspotConfigModal({
                   type="button"
                   onClick={onInsertIntermediate}
                   className="px-3 py-2 text-xs font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors flex items-center gap-1.5"
-                  title="Insert an intermediate view between this hotspot and its child view"
+                  data-tooltip="Insert an intermediate view between this hotspot and its child view"
                 >
                   <Layers className="h-3.5 w-3.5" />
                   <span>Insert View In-Between</span>
@@ -124,7 +124,7 @@ export function HotspotConfigModal({
                   type="button"
                   onClick={onMoveHotspot}
                   className="px-3 py-2 text-xs font-bold text-purple-300 hover:text-purple-200 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded transition-colors flex items-center gap-1.5"
-                  title="Relocate this hotspot and all its contents to another view"
+                  data-tooltip="Relocate this hotspot and all its contents to another view"
                 >
                   <ArrowRightLeft className="h-3.5 w-3.5" />
                   <span>Move Location</span>

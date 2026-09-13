@@ -10,7 +10,8 @@ import {
   Loan, 
   calculateLoanDaysRemaining,
   getComponentProjectUsage,
-  ComponentProjectUsage
+  ComponentProjectUsage,
+  checkinComponent
 } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useParams, useRouter } from "next/navigation";
@@ -28,7 +29,8 @@ import {
   Calendar,
   FolderGit2,
   Lock,
-  Hammer
+  Hammer,
+  Loader2
 } from "lucide-react";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { LendModal } from "@/components/loans/LendModal";
@@ -41,9 +43,27 @@ export default function ComponentDetailPage() {
   const [activeLoans, setActiveLoans] = useState<Loan[]>([]);
   const [projectUsages, setProjectUsages] = useState<ComponentProjectUsage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [returningUsageId, setReturningUsageId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const [showLendModal, setShowLendModal] = useState(false);
   const [returnLoanItem, setReturnLoanItem] = useState<Loan | null>(null);
+
+  const handleReturnToOrigin = async (usage: ComponentProjectUsage) => {
+    const locName = usage.source_location_label || 'its original storage location';
+    if (!confirm(`Return ${usage.quantity} unit(s) from "${usage.project_name}" directly back to ${locName}?`)) {
+      return;
+    }
+    setReturningUsageId(usage.id);
+    try {
+      await checkinComponent(usage.id, usage.source_location_id);
+      loadData();
+    } catch (err: any) {
+      console.error("Failed to return component:", err);
+      alert("Failed to return component: " + (err.message || "Unknown error"));
+    } finally {
+      setReturningUsageId(null);
+    }
+  };
 
   const loadData = () => {
     if (typeof componentId !== 'string') return;
@@ -90,7 +110,7 @@ export default function ComponentDetailPage() {
                   type="button"
                   onClick={() => setPreviewImage({ url: component.photo_url!, title: component.name, subtitle: isPersonal ? "Personal Item Photo" : "Component Image" })}
                   className="w-full h-full relative group/photo cursor-zoom-in block"
-                  title="Click to view full image"
+                  data-tooltip="Click to view full image"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={component.photo_url} alt={component.name} className="w-full h-full object-cover group-hover/photo:scale-105 transition-transform duration-200" />
@@ -128,7 +148,7 @@ export default function ComponentDetailPage() {
               onClick={() => setShowLendModal(true)}
               disabled={component.totals.in_storage_qty <= 0}
               className="flex items-center px-4 py-2 bg-brand-gold/10 border border-brand-gold/30 text-brand-gold text-xs font-bold uppercase tracking-widest hover:bg-brand-gold/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title={component.totals.in_storage_qty <= 0 ? "No items in storage to lend" : "Lend this item"}
+              data-tooltip={component.totals.in_storage_qty <= 0 ? "No items in storage to lend" : "Lend this item"}
             >
               <Share2 className="h-3 w-3 mr-2" /> Lend
             </button>
@@ -270,7 +290,7 @@ export default function ComponentDetailPage() {
                           type="button"
                           onClick={() => setPreviewImage({ url: field.value, title: `${component.name} - ${key}`, subtitle: "Custom Field Image" })}
                           className="group/img mt-1 relative block cursor-zoom-in text-left"
-                          title="Click to view full image"
+                          data-tooltip="Click to view full image"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={field.value} alt={key} className="h-16 w-16 object-cover border border-[#332f2a] rounded group-hover/img:border-brand-accent group-hover/img:scale-105 transition-all duration-200" />
@@ -279,7 +299,7 @@ export default function ComponentDetailPage() {
                         <div className="mt-1 flex items-center justify-between p-2.5 bg-black/30 border border-[#332f2a] rounded">
                           <div className="flex items-center gap-2 min-w-0 pr-2">
                             <FileText className="h-4 w-4 text-brand-accent shrink-0" />
-                            <span className="text-xs text-white truncate" title={field.fileName || field.value}>
+                            <span className="text-xs text-white truncate" data-tooltip={field.fileName || field.value}>
                               {field.fileName || (typeof field.value === 'string' ? field.value.split('/').pop()?.split('_').slice(2).join('_') || field.value.split('/').pop() : 'Document')}
                             </span>
                           </div>
@@ -402,7 +422,7 @@ export default function ComponentDetailPage() {
                             <Link
                               href={`/rooms/${usage.source_room_id}?locateHotspot=${usage.source_location_id}`}
                               className="text-[10px] text-brand-accent hover:underline font-bold uppercase tracking-wider"
-                              title="Locate origin compartment on map"
+                              data-tooltip="Locate origin compartment on map"
                             >
                               Locate ↗
                             </Link>
@@ -424,7 +444,7 @@ export default function ComponentDetailPage() {
                               <Link
                                 href={`/rooms/${usage.project_location_room_id}?locateHotspot=${usage.project_location_id}`}
                                 className="text-[10px] text-amber-400 hover:underline font-bold uppercase tracking-wider"
-                                title="Locate build on room map"
+                                data-tooltip="Locate build on room map"
                               >
                                 Locate ↗
                               </Link>
@@ -445,6 +465,32 @@ export default function ComponentDetailPage() {
                           View Project ↗
                         </Link>
                       </div>
+
+                      {/* Return to Origin Button for Active Projects */}
+                      {!isArchived ? (
+                        <button
+                          type="button"
+                          disabled={returningUsageId === usage.id}
+                          onClick={() => handleReturnToOrigin(usage)}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-brand-accent/15 hover:bg-brand-accent/25 border border-brand-accent/40 text-brand-accent hover:text-white rounded text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                          data-tooltip={`Return ${usage.quantity} unit(s) directly to origin location: ${usage.source_location_label || 'Storage'}`}
+                        >
+                          {returningUsageId === usage.id ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Returning...
+                            </>
+                          ) : (
+                            <>
+                              <RotateCcw className="h-3.5 w-3.5" /> Return {usage.quantity} to Origin
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div className="text-[10px] text-amber-400/80 bg-amber-950/20 border border-amber-900/30 px-2.5 py-1.5 rounded flex items-center gap-1.5">
+                          <Lock className="h-3 w-3 shrink-0" />
+                          <span>Preserved in build. Reactivate project to return.</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

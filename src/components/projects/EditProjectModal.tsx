@@ -367,7 +367,7 @@ export function EditProjectModal({
                           handleHideTooltip();
                           setSelectedLocationId("");
                         }}
-                        title="Clear selection"
+                        data-tooltip="Clear selection"
                         className="p-1 text-brand-text-muted hover:text-white rounded transition-colors"
                       >
                         <X className="h-3.5 w-3.5" />

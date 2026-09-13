@@ -28,7 +28,7 @@ Deepini is a personal inventory and spatial tracking web application built for m
 - **Custom Fields & File Attachments**: Attach custom text, numbers, links, images, and document files (PDFs, PPT, Word, Excel, ZIP) directly to items with cloud storage, custom icon-enhanced field type dropdowns, and a full-screen image preview lightbox.
 - **Prioritized Relevance Search**: Six-tier relevance ranking prioritizes direct matches in item names first, then direct matches in tags, direct matches in notes, followed by in-between substring matches in names, tags, and notes (e.g. searching "es" places "ESP32" before "Resistors", and "Resistors" before items with notes mentioning "photoresistors").
 - **Inventory Page Toggle**: Fast switcher between `Components (X)` and `Personal (Y)` with tailored table columns and context-aware action buttons.
-- **Component In-Use Transparency**: Component detail pages feature an "In Projects" workspace detailing every active build and archived build using the component, quantities in use, the original compartment it was taken from with a 1-click "Locate Origin" map button, and the archived build location with a "Locate Build" map button.
+- **Component In-Use Transparency & Direct Return**: Component detail pages feature an "In Projects" workspace detailing every active build and archived build using the component, quantities in use, the original compartment it was taken from with a 1-click "Locate Origin" map button, a direct 1-click **"Return to Origin"** button to restore checked-out units back to inventory immediately, and the archived build location with a "Locate Build" map button.
 - **Physical Tracking Parity**: Personal items are tracked across the exact same spatial hierarchy as components, featuring full "Locate" button spotlighting.
 
 ### 3. Projects Check-Out, Lifecycle Phases & Physical Archiving
@@ -41,7 +41,7 @@ Deepini is a personal inventory and spatial tracking web application built for m
     - **Preserved in Build**: Components remain locked in the assembly and cannot be dismantled or checked in while archived. Reactivating to Active is required to dismantle.
     - **Spatial Navigation**: Dedicated location banner on the project page with a "Locate on Map" button linking directly into the room view with target spotlighting.
   - *(The redundant `completed` phase has been removed).*
-- Check items back in to their original or newly chosen locations with hierarchical breadcrumb location search.
+- **1-Click Return to Origin & Custom Check-In**: Active checkouts feature a direct 1-click **"Return to Origin"** button that immediately returns components to their recorded origin location, alongside an **"Other Location..."** button with hierarchical breadcrumb location search.
 - Deferred component deletion (`pending_delete`) prevents data loss when items are checked out.
 
 ### 4. Lending System, Dynamic Due Notifications & Origin Tracking
@@ -57,6 +57,7 @@ Deepini is a personal inventory and spatial tracking web application built for m
 - **Universal Themed Scrollbars**: Universal cross-browser scrollbar styling replacing default Windows white tracks with sleek dark bronze/copper indicators.
 - **Zero Native `<select>` Policy**: Every dropdown is an accessible, theme-unified component matching `#141211` background, `#191715` panels, and `#bc7353` copper accents.
 - **Custom Themed Up/Down Steppers (`ThemedNumberInput`)**: Universal replacement of browser/OS number input spin buttons with sleek dark-themed stacked arrow buttons (`ChevronUp`/`ChevronDown`), eliminating white OS boxes on Windows and providing smooth click-and-hold continuous stepping across all quantity, price, alert, and custom number inputs.
+- **Universal Custom Themed Tooltips (`GlobalTooltip`)**: Replaces default OS/browser tooltips (such as Windows native white-bordered boxes) with a bespoke, dark-luxury styled tooltip system (`#151311`/95 backdrop with blur, `#443e38` warm border, off-white typography, anchored micro pointer arrow, and dynamic boundary clamping with auto-flipping). Includes semantic style variants (e.g. `danger` with red border and crimson glow for delete operations), 120ms debounce timing, and runtime defense-in-depth sanitization preventing native `title` tooltips from ever rendering.
 
 ### 6. Offline-Ready PWA
 - Service Worker precaching app shell assets.

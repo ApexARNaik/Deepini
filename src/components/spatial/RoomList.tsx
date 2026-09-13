@@ -83,7 +83,8 @@ export function RoomList() {
                 handleDeleteRoom(room.id, room.name);
               }}
               className="p-2 text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 rounded-md transition-all opacity-0 group-hover:opacity-100 shrink-0"
-              title={`Delete room "${room.name}"`}
+              data-tooltip={`Delete room "${room.name}"`}
+              data-tooltip-variant="danger"
             >
               <Trash2 className="h-5 w-5" />
             </button>
@@ -110,7 +111,7 @@ export function RoomList() {
               type="submit" 
               disabled={isCreating || !newRoomName.trim()}
               className="bg-[#24211e] hover:bg-brand-accent hover:text-white disabled:opacity-50 text-brand-text p-2 rounded-sm transition-colors shrink-0"
-              title="Add Room"
+              data-tooltip="Add Room"
             >
               <Plus className="h-5 w-5" />
             </button>

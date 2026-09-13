@@ -164,7 +164,7 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
                           setPreviewImage({ url: c.photo_url!, title: c.name });
                         }}
                         className="h-10 w-10 relative group/img rounded overflow-hidden border border-[#332f2a] hover:border-brand-accent transition-all cursor-zoom-in block"
-                        title={`Click to view full image of ${c.name}`}
+                        data-tooltip={`Click to view full image of ${c.name}`}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={c.photo_url} alt={c.name} className="h-full w-full object-cover group-hover/img:scale-110 transition-transform duration-200" />
@@ -191,14 +191,14 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
                       c.totals.checked_out_qty > 0 ? (
                         <span 
                           className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-brand-accent/15 border border-brand-accent/30 text-brand-accent text-[11px] font-medium"
-                          title={`${c.totals.checked_out_qty} unit(s) currently in use in project builds`}
+                          data-tooltip={`${c.totals.checked_out_qty} unit(s) currently in use in project builds`}
                         >
                           <FolderGit2 className="h-3 w-3 shrink-0" /> In Projects ({c.totals.checked_out_qty})
                         </span>
                       ) : (c.totals.lent_qty || 0) > 0 ? (
                         <span 
                           className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-brand-gold/15 border border-brand-gold/30 text-brand-gold text-[11px] font-medium"
-                          title={`${c.totals.lent_qty} unit(s) currently on loan`}
+                          data-tooltip={`${c.totals.lent_qty} unit(s) currently on loan`}
                         >
                           <Share2 className="h-3 w-3 shrink-0" /> On Loan ({c.totals.lent_qty})
                         </span>
@@ -323,7 +323,8 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
                         onClick={(e) => handleDeleteClick(e, c)}
                         disabled={checkingId === c.id || isDeleting}
                         className="p-1.5 text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                        title={`Delete ${isPersonal ? 'personal item' : 'component'} "${c.name}"`}
+                        data-tooltip={`Delete ${isPersonal ? 'personal item' : 'component'} "${c.name}"`}
+                        data-tooltip-variant="danger"
                       >
                         {checkingId === c.id ? (
                           <Loader2 className="h-4 w-4 animate-spin text-brand-text-muted" />
@@ -494,7 +495,7 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
                 type="button"
                 onClick={() => setSelectedLocationItem(null)} 
                 className="text-brand-text-muted hover:text-white transition-colors p-1"
-                title="Close"
+                data-tooltip="Close"
               >
                 <X className="h-4 w-4" />
               </button>

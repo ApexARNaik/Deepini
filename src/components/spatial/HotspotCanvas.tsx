@@ -1061,7 +1061,7 @@ export function HotspotCanvas({
                     ? 'bg-brand-accent text-white shadow-sm' 
                     : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
               }`}
-              title={
+              data-tooltip={
                 drawMode === 'rectangle'
                   ? "Rectangle Mode Active (Click to switch to Polygon, or double-click to toggle)"
                   : "Polygon Tool (Double-click to activate Rectangle mode)"
@@ -1085,7 +1085,7 @@ export function HotspotCanvas({
                     ? 'bg-brand-accent text-white shadow-sm' 
                     : 'text-brand-text-muted hover:text-white hover:bg-[#252320]'
               }`}
-              title={
+              data-tooltip={
                 drawMode === 'arrow'
                   ? "Arrow Mode Active (Click to switch to Freehand, or double-click to toggle)"
                   : "Freehand Tool (Double-click to activate Arrow mode)"
@@ -1156,7 +1156,7 @@ export function HotspotCanvas({
                   type="button"
                   onClick={handleScaleToFitAll}
                   className="flex items-center gap-1 px-2.5 py-1 bg-[#252320] hover:bg-[#332f2a] text-sky-300 hover:text-white text-xs font-medium rounded border border-[#332f2a] transition-colors"
-                  title="Scale hotspots proportionally to fit canvas bounds"
+                  data-tooltip="Scale hotspots proportionally to fit canvas bounds"
                 >
                   <span>Fit to Canvas</span>
                 </button>
@@ -1164,7 +1164,7 @@ export function HotspotCanvas({
                   type="button"
                   onClick={handleCenterAll}
                   className="flex items-center gap-1 px-2.5 py-1 bg-[#252320] hover:bg-[#332f2a] text-sky-300 hover:text-white text-xs font-medium rounded border border-[#332f2a] transition-colors"
-                  title="Center all hotspots horizontally and vertically"
+                  data-tooltip="Center all hotspots horizontally and vertically"
                 >
                   <span>Center</span>
                 </button>
@@ -1172,7 +1172,7 @@ export function HotspotCanvas({
                   type="button"
                   onClick={handleApplyAdjustments}
                   className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                  title="Save new positions for all hotspots"
+                  data-tooltip="Save new positions for all hotspots"
                 >
                   <Check className="h-3.5 w-3.5" />
                   <span>Save Adjustments</span>
@@ -1252,7 +1252,7 @@ export function HotspotCanvas({
                         }
                       }}
                       className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                      title="Confirm rectangle hotspot (Enter)"
+                      data-tooltip="Confirm rectangle hotspot (Enter)"
                     >
                       <Check className="h-3.5 w-3.5" />
                       <span>Confirm Hotspot</span>
@@ -1267,7 +1267,7 @@ export function HotspotCanvas({
                         setIsDrawing(false);
                       }}
                       className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
-                      title="Cancel and redraw (Esc)"
+                      data-tooltip="Cancel and redraw (Esc)"
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                       <span>Redraw</span>
@@ -1303,7 +1303,7 @@ export function HotspotCanvas({
                           handleAdjustArrowWidth(-0.25);
                         }}
                         className="w-5 h-5 flex items-center justify-center rounded bg-[#332f2a] hover:bg-[#443f38] text-white text-xs font-bold transition-colors"
-                        title="Decrease arrow width (-)"
+                        data-tooltip="Decrease arrow width (-)"
                       >
                         -
                       </button>
@@ -1318,7 +1318,7 @@ export function HotspotCanvas({
                           handleAdjustArrowWidth(0.25);
                         }}
                         className="w-5 h-5 flex items-center justify-center rounded bg-[#332f2a] hover:bg-[#443f38] text-white text-xs font-bold transition-colors"
-                        title="Increase arrow width (+)"
+                        data-tooltip="Increase arrow width (+)"
                       >
                         +
                       </button>
@@ -1342,7 +1342,7 @@ export function HotspotCanvas({
                         }
                       }}
                       className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                      title="Confirm arrow hotspot (Enter)"
+                      data-tooltip="Confirm arrow hotspot (Enter)"
                     >
                       <Check className="h-3.5 w-3.5" />
                       <span>Confirm Hotspot</span>
@@ -1357,7 +1357,7 @@ export function HotspotCanvas({
                         setIsDrawing(false);
                       }}
                       className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
-                      title="Cancel and redraw (Esc)"
+                      data-tooltip="Cancel and redraw (Esc)"
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                       <span>Redraw</span>
@@ -1405,7 +1405,7 @@ export function HotspotCanvas({
                   ? 'bg-sky-600 text-white shadow-md' 
                   : 'text-sky-400 hover:text-sky-300 hover:bg-sky-500/15 disabled:opacity-30 disabled:pointer-events-none'
               }`}
-              title="Adjust Hotspots"
+              data-tooltip="Adjust Hotspots"
               aria-label="Adjust Hotspots"
             >
               <Sliders className="h-4 w-4" />
@@ -1425,7 +1425,7 @@ export function HotspotCanvas({
                   ? 'bg-amber-600 text-white shadow-md' 
                   : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/15'
               }`}
-              title="Edit Hotspot"
+              data-tooltip="Edit Hotspot"
               aria-label="Edit Hotspot"
             >
               <Edit2 className="h-4 w-4" />
@@ -1445,7 +1445,8 @@ export function HotspotCanvas({
                   ? 'bg-red-600 text-white shadow-md' 
                   : 'text-red-400 hover:text-red-300 hover:bg-red-500/15'
               }`}
-              title="Delete Hotspot"
+              data-tooltip="Delete Hotspot"
+              data-tooltip-variant="danger"
               aria-label="Delete Hotspot"
             >
               <Trash2 className="h-4 w-4" />
@@ -2059,7 +2060,7 @@ export function HotspotCanvas({
                   }
                 }}
                 className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                title="Confirm rectangle hotspot (Enter)"
+                data-tooltip="Confirm rectangle hotspot (Enter)"
               >
                 <Check className="h-3.5 w-3.5" />
                 <span>Confirm Hotspot</span>
@@ -2074,7 +2075,7 @@ export function HotspotCanvas({
                   setIsDrawing(false);
                 }}
                 className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
-                title="Cancel and redraw (Esc)"
+                data-tooltip="Cancel and redraw (Esc)"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 <span>Redraw</span>
@@ -2115,7 +2116,7 @@ export function HotspotCanvas({
                     handleAdjustArrowWidth(-0.25);
                   }}
                   className="w-5 h-5 flex items-center justify-center rounded bg-[#332f2a] hover:bg-[#443f38] text-white text-xs font-bold transition-colors"
-                  title="Decrease arrow width (-)"
+                  data-tooltip="Decrease arrow width (-)"
                 >
                   -
                 </button>
@@ -2130,7 +2131,7 @@ export function HotspotCanvas({
                     handleAdjustArrowWidth(0.25);
                   }}
                   className="w-5 h-5 flex items-center justify-center rounded bg-[#332f2a] hover:bg-[#443f38] text-white text-xs font-bold transition-colors"
-                  title="Increase arrow width (+)"
+                  data-tooltip="Increase arrow width (+)"
                 >
                   +
                 </button>
@@ -2156,7 +2157,7 @@ export function HotspotCanvas({
                   }
                 }}
                 className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition-colors"
-                title="Confirm arrow hotspot (Enter)"
+                data-tooltip="Confirm arrow hotspot (Enter)"
               >
                 <Check className="h-3.5 w-3.5" />
                 <span>Confirm Arrow</span>
@@ -2171,7 +2172,7 @@ export function HotspotCanvas({
                   setIsDrawing(false);
                 }}
                 className="flex items-center gap-1 px-2.5 py-1 bg-[#2a2724] hover:bg-[#383430] text-brand-text-muted hover:text-white text-xs font-medium rounded transition-colors"
-                title="Cancel and redraw (Esc)"
+                data-tooltip="Cancel and redraw (Esc)"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 <span>Redraw</span>

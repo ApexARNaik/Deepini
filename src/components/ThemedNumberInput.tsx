@@ -161,7 +161,7 @@ export function ThemedNumberInput({
             if (!disabled && !isUpDisabled) startStepping("up");
           }}
           className="flex-1 flex items-center justify-center border-b border-[#3a352e]/60 hover:bg-[#2c2823] active:bg-brand-accent/25 text-brand-text-muted hover:text-brand-accent disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-brand-text-muted disabled:cursor-not-allowed transition-colors"
-          title="Increase"
+          data-tooltip="Increase"
         >
           <ChevronUp className={`${iconSizeClass} stroke-[2.5]`} />
         </button>
@@ -174,7 +174,7 @@ export function ThemedNumberInput({
             if (!disabled && !isDownDisabled) startStepping("down");
           }}
           className="flex-1 flex items-center justify-center hover:bg-[#2c2823] active:bg-brand-accent/25 text-brand-text-muted hover:text-brand-accent disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-brand-text-muted disabled:cursor-not-allowed transition-colors"
-          title="Decrease"
+          data-tooltip="Decrease"
         >
           <ChevronDown className={`${iconSizeClass} stroke-[2.5]`} />
         </button>

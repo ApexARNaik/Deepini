@@ -151,7 +151,7 @@ export function CheckInModal({ item, onClose, onSuccess }: Props) {
                           <MapPin className="h-3.5 w-3.5 text-brand-gold/70 group-hover:text-brand-accent shrink-0 mt-0.5 transition-colors" />
                           <div className="min-w-0 flex-1">
                             <div className="font-semibold text-white truncate">{dest}</div>
-                            {trail && <div className="text-[11px] text-brand-text-muted truncate mt-0.5" title={loc.pathLabel}>{trail}</div>}
+                            {trail && <div className="text-[11px] text-brand-text-muted truncate mt-0.5" data-tooltip={loc.pathLabel}>{trail}</div>}
                           </div>
                         </button>
                       );

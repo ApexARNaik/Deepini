@@ -31,6 +31,7 @@ import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickVi
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
+import { GlobalTooltip } from "@/components/ui/GlobalTooltip";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -202,7 +203,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button 
               onClick={handleToggleSidebarPin}
               className="text-brand-text-muted hover:text-white transition-colors h-8 w-8 flex items-center justify-center rounded hover:bg-[#24211e] shrink-0"
-              title={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+              data-tooltip={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
             >
               {isSidebarPinned ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
             </button>
@@ -222,7 +223,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     ? "text-brand-accent bg-[#24211e]/50 border-l-2 border-brand-accent rounded-r" 
                     : "text-brand-text-muted hover:text-white hover:bg-[#24211e]/30 border-l-2 border-transparent"
                 }`}
-                title={!isSidebarExpanded ? item.name : undefined}
+                data-tooltip={!isSidebarExpanded ? item.name : undefined}
               >
                 <div className="w-6 flex justify-center shrink-0 mr-3">
                   <item.icon className={`h-5 w-5 ${isActive ? "text-brand-accent" : "text-brand-text-muted"}`} />
@@ -240,7 +241,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="relative">
             <button 
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              title="Profile Settings"
+              data-tooltip="Profile Settings"
               className="h-8 w-8 rounded bg-[#24211e] flex items-center justify-center hover:bg-[#333333] hover:text-brand-accent transition-colors border border-[#332f2a]"
             >
               <User className="h-4 w-4" />
@@ -276,7 +277,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button 
             ref={desktopNotifBtnRef}
             onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-            title="Notifications"
+            data-tooltip="Notifications"
             className="text-brand-text-muted hover:text-white transition-colors h-8 w-8 flex items-center justify-center relative rounded hover:bg-[#24211e]"
           >
             <Bell className="h-5 w-5" />
@@ -326,7 +327,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       setIsSearchOpen(false);
                     }}
                     className="text-brand-text-muted hover:text-white p-0.5 rounded transition-colors"
-                    title="Clear search"
+                    data-tooltip="Clear search"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -425,7 +426,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                       });
                                     }}
                                     className="h-10 w-10 rounded overflow-hidden border border-[#332f2a] hover:border-brand-accent shrink-0 bg-black/40 cursor-zoom-in group/img block"
-                                    title="Click to view full image"
+                                    data-tooltip="Click to view full image"
                                   >
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img
@@ -483,7 +484,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                     setQuickViewComponentId(comp.id);
                                     setIsSearchOpen(false);
                                   }}
-                                  title="Quick Preview"
+                                  data-tooltip="Quick Preview"
                                   className="p-1.5 text-brand-text-muted hover:text-brand-accent hover:bg-[#332f2a] rounded transition-colors"
                                 >
                                   <Eye className="h-4 w-4" />
@@ -495,7 +496,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                     setIsSearchOpen(false);
                                     router.push(`/inventory/${comp.id}`);
                                   }}
-                                  title="View Full Page"
+                                  data-tooltip="View Full Page"
                                   className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#332f2a] rounded transition-colors"
                                 >
                                   <ExternalLink className="h-4 w-4" />
@@ -529,7 +530,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button 
               ref={mobileNotifBtnRef}
               onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-              title="Notifications"
+              data-tooltip="Notifications"
               className="text-brand-text-muted hover:text-white transition-colors h-8 w-8 flex items-center justify-center relative rounded hover:bg-[#24211e]"
             >
               <Bell className="h-4 w-4" />
@@ -540,7 +541,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="relative">
               <button 
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                title="Profile Settings"
+                data-tooltip="Profile Settings"
                 className="h-8 w-8 rounded bg-[#24211e] flex items-center justify-center hover:bg-[#333333] hover:text-brand-accent transition-colors border border-[#332f2a]"
               >
                 <User className="h-4 w-4" />
@@ -643,6 +644,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           }}
         />
       )}
+
+      {/* Global Themed Tooltip Portal */}
+      <GlobalTooltip />
     </div>
   );
 }

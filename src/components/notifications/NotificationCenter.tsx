@@ -90,7 +90,7 @@ export function NotificationCenter({ isOpen, onClose, onReturnLoan, anchorRef }:
         <button 
           onClick={onClose}
           className="text-brand-text-muted hover:text-white p-1 rounded transition-colors"
-          title="Close notifications"
+          data-tooltip="Close notifications"
         >
           <X className="h-4 w-4" />
         </button>
@@ -159,7 +159,7 @@ export function NotificationCenter({ isOpen, onClose, onReturnLoan, anchorRef }:
                             onReturnLoan(notif.loan);
                           }}
                           className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/40 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition-colors shrink-0"
-                          title="Return this loan"
+                          data-tooltip="Return this loan"
                         >
                           <RotateCcw className="h-3 w-3" />
                           <span>Return</span>

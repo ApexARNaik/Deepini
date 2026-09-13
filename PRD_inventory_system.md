@@ -358,6 +358,7 @@ loans
 - **In-Use & Active Usage Transparency**:
   - Dedicated **"In Projects"** section showing every project (active build or archived build) currently using units of the component.
   - Displays the project name (with direct workspace link), project status badge (`Active Build` vs `Archived Build`), quantity checked out, and **Origin Storage Location** (where the unit was pulled from, with a 1-click `Locate` button to the room map).
+  - **1-Click Return to Origin from Component Page**: Active project usage entries feature a direct "Return [qty] to Origin" button (`RotateCcw` icon). Clicking it prompts confirmation and restores the checked-out units atomically to their recorded origin compartment without navigating away to the project workspace. For archived projects, components remain locked in build.
   - For archived projects, additionally displays where the physical build assembly is stored (`Build Stored At`) with a 1-click `Locate` button.
   - Dedicated **"Active Loans"** section displaying borrower details, origin location, and dynamic due date countdowns.
 - **Image Preview Lightbox**:
@@ -388,7 +389,10 @@ loans
   - **Removal of Completed Phase**: The redundant `completed` phase has been removed to maintain unambiguous physical inventory semantics.
 - **Project Editing**:
   - Full modal editing of Project Name, Description, Phase, and Physical Storage Location available from both the project cards on `/projects` and the detail workspace on `/projects/[projectId]`.
-- **Location Selector in Check-In**: Hierarchical breadcrumb location search with `.themed-scrollbar`.
+- **1-Click Return to Origin in Active Projects**:
+  - In the "Active Checkouts" ledger on `/projects/[projectId]`, each active checkout card provides a direct **"Return to Origin"** button (`RotateCcw` icon + origin location label) alongside the **"Other Location..."** check-in button.
+  - Clicking "Return to Origin" immediately restores the item back to the exact leaf compartment it was originally pulled from, without requiring the user to manually search and select the location from the dropdown.
+- **Location Selector in Check-In**: Hierarchical breadcrumb location search with `.themed-scrollbar` when returning to an alternative location.
 
 ### 5.6 Offline PWA Support
 
@@ -411,6 +415,21 @@ loans
   - Stacked vertical micro-buttons with Lucide `ChevronUp` and `ChevronDown` icons.
   - Global CSS rule (`-webkit-appearance: none`, `-moz-appearance: textfield`) eliminates default browser spin buttons everywhere.
   - Includes continuous stepping on mouse hold (300ms initial delay, 60ms rapid interval), boundary clamping (`min`/`max`), step decimal precision support (e.g. `0.01` for prices), and size presets (`sm`, `md`, `lg`) applied uniformly across location quantity adjusters, pricing, low-stock alerts, custom number fields, check-out quantities, and compartment drawers.
+- **Universal Custom Themed Tooltips (`GlobalTooltip` & `Tooltip`)**:
+  - Eliminates all default browser/operating system tooltips (such as Windows native high-contrast black boxes with white borders) in favor of a bespoke, dark-luxury styled tooltip system adhering strictly to Deepini's design language.
+  - **Visual Design**: Dark charcoal-black backdrop (`#151311`/95 with `backdrop-blur-md`), warm hairline borders (`#443e38`), crisp typography (`font-sans text-xs text-[#f2ede6] font-medium`), micro pointer arrow anchored to target, and subtle shadow (`shadow-2xl shadow-black/90`).
+  - **Context-Aware Style Variants**:
+    - `default`: Refined dark luxury styling with warm off-white typography and subtle bronze border.
+    - `danger`: High-visibility crimson border (`#7f1d1d`), crimson glow (`rgba(239,68,68,0.15)`), and light red text (`#fca5a5`) for destructive actions (e.g. Delete Hotspot, Delete Room, Delete View, Delete Component, Move into descendant blocker).
+    - `warning`: Amber accents for caution indicators.
+    - `accent`: Deepini copper accent (`#bc7353`) for prominent action hints.
+  - **Dynamic Viewport Clamping & Directional Auto-Flipping**: Smart layout engine measuring trigger element position and window boundaries. Automatically flips from top to bottom if close to top viewport edge, and adjusts horizontally to prevent truncation off the viewport edges.
+  - **Pointer Micro-Arrow**: Centered arrow triangle aligned with the trigger element while adjusting dynamically when the tooltip is clamped near screen edges.
+  - **Zero Browser Title Guarantee (Defense-in-Depth Sanitization)**:
+    - Runtime `MutationObserver` actively monitors DOM mutations across the entire document, stripping native `title="..."` attributes and converting them to `data-tooltip="..."` so native OS tooltips can never display.
+    - Global `pointerover` event capture intercepts any mouseover on an element with a `title` attribute, migrating it immediately before the browser tooltip timer can fire.
+    - Full project scan and systematic conversion of all native HTML `title="..."` to declarative `data-tooltip="..."` and `data-tooltip-variant="..."` attributes.
+  - **Interaction Polish**: 120ms debounce delay for comfortable hover scanning without flashing; auto-dismissal on scroll, wheel, escape key, or click.
 
 ### 5.8 Lending System, Dynamic Due Notifications & Origin Tracking
 
