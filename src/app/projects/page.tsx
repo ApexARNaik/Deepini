@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { Project, getProjects, createProject } from "@/lib/api";
+import { EditProjectModal } from "@/components/projects/EditProjectModal";
 import Link from "next/link";
-import { Plus, ChevronRight } from "lucide-react";
+import { Plus, ChevronRight, MapPin, Edit2 } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 
 export default function ProjectsPage() {
@@ -14,6 +15,7 @@ export default function ProjectsPage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
+  const [editingProject, setEditingProject] = useState<(Project & { active_count: number }) | null>(null);
 
   useEffect(() => {
     load();
@@ -56,7 +58,7 @@ export default function ProjectsPage() {
         {isOnline && (
           <button 
             onClick={() => setShowNewModal(true)}
-            className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors"
+            className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors shadow-sm"
           >
             <Plus className="h-4 w-4 mr-1" /> New Project
           </button>
@@ -73,20 +75,49 @@ export default function ProjectsPage() {
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {projects.map(p => (
             <Link key={p.id} href={`/projects/${p.id}`} className="block group">
-              <div className="bg-[#1a1816] border border-[#332f2a] hover:border-[#332f2a] rounded-lg p-6 transition-all duration-200 h-full flex flex-col">
-                <div className="flex justify-between items-start mb-4">
-                  <h2 className="font-bold text-lg text-white group-hover:text-brand-accent transition-colors">{p.name}</h2>
-                  <span className={`px-2 py-1 text-[9px] uppercase tracking-widest rounded-sm font-bold ${
-                    p.status === 'planning' ? 'bg-[#333] text-gray-300' :
-                    p.status === 'active' ? 'bg-brand-accent/20 text-brand-accent' :
-                    'bg-green-500/20 text-green-400'
+              <div className="bg-[#1a1816] border border-[#332f2a] hover:border-brand-accent/50 rounded-lg p-6 transition-all duration-200 h-full flex flex-col relative">
+                <div className="flex justify-between items-start mb-4 gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h2 className="font-bold text-lg text-white group-hover:text-brand-accent transition-colors truncate">{p.name}</h2>
+                    {isOnline && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setEditingProject(p);
+                        }}
+                        className="p-1 text-brand-text-muted hover:text-brand-accent hover:bg-[#25221d] rounded transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                        title="Edit project"
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <span className={`px-2.5 py-0.5 text-[9px] uppercase tracking-widest rounded-sm font-bold shrink-0 ${
+                    p.status === 'planning' 
+                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' :
+                    p.status === 'active' 
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' :
+                      'bg-zinc-800 text-zinc-300 border border-zinc-700'
                   }`}>
                     {p.status}
                   </span>
                 </div>
-                <p className="text-sm text-brand-text-muted flex-1 line-clamp-3 mb-6">
+                
+                <p className="text-sm text-brand-text-muted flex-1 line-clamp-3 mb-4">
                   {p.description || "No description provided."}
                 </p>
+
+                {p.status === 'archived' && (
+                  <div className="mb-4 pt-3 border-t border-[#2e2a25] flex items-center gap-1.5 text-xs text-amber-400/90 font-medium bg-amber-500/5 px-2.5 py-1.5 rounded border border-amber-500/20">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                    <span className="truncate" title={p.location_label || "Storage location assigned"}>
+                      {p.location_label || "Leaf Hotspot Assigned"}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex justify-between items-end border-t border-[#332f2a] pt-4 mt-auto">
                   <div>
                     <div className="text-2xl font-serif text-white leading-none mb-1">{p.active_count}</div>
@@ -107,11 +138,11 @@ export default function ProjectsPage() {
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <label className="block text-[10px] uppercase tracking-widest text-brand-text-muted mb-1">Project Name</label>
-                <input required autoFocus type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full bg-[#1a1816] border border-[#332f2a] p-2 text-white focus:border-brand-accent focus:outline-none" />
+                <input required autoFocus type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full bg-[#191715] border border-[#332f2a] p-2 text-white focus:border-brand-accent focus:outline-none rounded-sm" />
               </div>
               <div>
                 <label className="block text-[10px] uppercase tracking-widest text-brand-text-muted mb-1">Description</label>
-                <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} className="w-full h-24 bg-[#1a1816] border border-[#332f2a] p-2 text-white focus:border-brand-accent focus:outline-none resize-none" />
+                <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} className="w-full h-24 bg-[#191715] border border-[#332f2a] p-2 text-white focus:border-brand-accent focus:outline-none resize-none rounded-sm" />
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowNewModal(false)} className="px-4 py-2 text-xs text-brand-text-muted hover:text-white uppercase tracking-widest">Cancel</button>
@@ -120,6 +151,19 @@ export default function ProjectsPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {editingProject && (
+        <EditProjectModal
+          project={editingProject}
+          activeCount={editingProject.active_count}
+          isOpen={!!editingProject}
+          onClose={() => setEditingProject(null)}
+          onSuccess={() => {
+            setEditingProject(null);
+            load();
+          }}
+        />
       )}
     </div>
   );

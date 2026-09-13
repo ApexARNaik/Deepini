@@ -30,10 +30,17 @@ Deepini is a personal inventory and spatial tracking web application built for m
 - **Inventory Page Toggle**: Fast switcher between `Components (X)` and `Personal (Y)` with tailored table columns and context-aware action buttons.
 - **Physical Tracking Parity**: Personal items are tracked across the exact same spatial hierarchy as components, featuring full "Locate" button spotlighting.
 
-### 3. Projects Check-Out & Check-In Ledger
-- Pull components into active projects while tracking their source locations.
+### 3. Projects Check-Out, Lifecycle Phases & Physical Archiving
+- **Full Project Editing**: Edit project names, descriptions, and phases from both project cards and the project detail workspace.
+- **Strict Lifecycle State Machine**:
+  - **Planning Phase**: Strictly zero components in use. Projects start here; checking out any component automatically transitions the project to **Active**. Cannot return to Planning while active checkouts remain.
+  - **Active Phase**: Active development build. Components are checked out from inventory locations and in active use.
+  - **Archived Phase**: Represents a finished physical build assembly preserved in place.
+    - **Atomic Leaf Hotspot Assignment**: Archiving and physical location assignment are atomic; projects cannot be archived without referencing a valid leaf hotspot. Enforced via database RPC `archive_project` and API validation.
+    - **Preserved in Build**: Components remain locked in the assembly and cannot be dismantled or checked in while archived. Reactivating to Active is required to dismantle.
+    - **Spatial Navigation**: Dedicated location banner on the project page with a "Locate on Map" button linking directly into the room view with target spotlighting.
+  - *(The redundant `completed` phase has been removed).*
 - Check items back in to their original or newly chosen locations with hierarchical breadcrumb location search.
-- Custom color-coded project status dropdown (Planning, Active, Completed, Archived).
 - Deferred component deletion (`pending_delete`) prevents data loss when items are checked out.
 
 ### 4. UI Aesthetics, Form Controls & Themed Scrollbars
@@ -83,6 +90,7 @@ Run the migration scripts in the Supabase SQL Editor:
 2. `supabase/migrations/002_reorder_spatial_photos.sql`: Atomic view reordering RPC function.
 3. `supabase/migrations/003_add_item_type_to_components.sql`: Adds `item_type` column to `components`.
 4. `supabase/migrations/004_add_delete_hotspot_rpc.sql`: Recursive hotspot deletion RPC.
+5. `supabase/migrations/010_add_project_location_and_archive_rpc.sql`: Adds `location_id` column to projects and atomic `archive_project` RPC with leaf hotspot validation.
 
 *(Note: The application also includes client-side fallbacks, ensuring continuous operation even before remote database migrations are executed.)*
 

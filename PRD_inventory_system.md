@@ -192,7 +192,8 @@ GROUP BY c.id;
 projects
   id (uuid, pk)
   name (text, not null)
-  status (text, default 'planning')     -- planning | active | completed | archived
+  status (text, default 'planning')     -- 'planning' | 'active' | 'archived' ('completed' status removed)
+  location_id (uuid, fk -> spatial_hotspots.id, nullable) -- Required when status = 'archived', references leaf hotspot
   description (text, nullable)
   created_at, updated_at
 
@@ -316,12 +317,31 @@ project_components
 - **Image Preview Lightbox**:
   - Clicking item photo or custom field image opens a full-screen zoomable preview modal.
 
-### 5.5 Projects Check-Out & Check-In
+### 5.5 Projects Check-Out, Lifecycle Phases & Physical Archiving
 
-- Dedicated ledger tracking components pulled into projects.
+- Dedicated ledger tracking components pulled into projects and active builds.
 - Atomic deduction from `component_locations` upon checkout; atomic return to chosen location upon check-in.
 - Supports deferred component deletion (`pending_delete`) when items are currently checked out.
-- **Custom Project Status Dropdown**: Color-coded interactive status menu (Planning, Active, Completed, Archived) matching dark luxury design tokens.
+- **Project Lifecycle Phases & State Machine**:
+  - **Planning Phase**:
+    - Strictly zero components in use.
+    - Projects start in Planning phase.
+    - Checking out any component automatically transitions the project status to **Active** upon confirmation.
+    - A project cannot transition back to Planning if any active component checkouts exist.
+  - **Active Phase**:
+    - Represents an active development build where components are in use on the workbench.
+    - Components cannot be dismantled or checked in unless done through the project workspace.
+    - Supports new checkouts and partial/full check-ins.
+  - **Archived Phase**:
+    - Represents a finished or stored physical build assembly preserved in place.
+    - **Strict Atomic Storage Requirement**: The archive transition and `location_id` assignment are atomic. A project cannot transition to `archived` without selecting a valid physical storage location.
+    - **Leaf Hotspot Validation**: The storage location must reference a **leaf hotspot** (a physical shelf, bin, box, or compartment), not an intermediate view/room. Enforced at the database level via RPC `archive_project(p_project_id, p_location_id)` and client API validation.
+    - **Preserved in Assembly**: All checked-out components remain permanently attached to the archived build and cannot be reused or checked back in while archived. Check-in buttons are disabled/locked in the UI with a "Preserved in Build" status.
+    - **Reactivation**: If a user ever wishes to dismantle the build and return components to inventory, they must transition the project status back to **Active** first.
+    - **Spatial Navigation**: Archived projects render a prominent Physical Storage Location banner with breadcrumbs and a deep "Locate on Map" button that navigates directly to the room view, centers the viewport, and spotlights the compartment.
+  - **Removal of Completed Phase**: The redundant `completed` phase has been removed to maintain unambiguous physical inventory semantics.
+- **Project Editing**:
+  - Full modal editing of Project Name, Description, Phase, and Physical Storage Location available from both the project cards on `/projects` and the detail workspace on `/projects/[projectId]`.
 - **Location Selector in Check-In**: Hierarchical breadcrumb location search with `.themed-scrollbar`.
 
 ### 5.6 Offline PWA Support

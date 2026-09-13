@@ -613,9 +613,14 @@ export function buildLeafHotspotsHierarchy(
     }
 
     const fullLabel = chain.map(c => c.label).filter(Boolean).join(' → ');
+    const rootRoom = chain.find(c => roomMap.has(c.id));
+    const roomName = rootRoom?.label || (fullLabel.includes('→') ? fullLabel.split('→')[0].trim() : undefined);
+    const roomId = rootRoom?.id;
     return {
       ...hs,
-      fullLabel: fullLabel || hs.label || 'Unknown Location'
+      fullLabel: fullLabel || hs.label || 'Unknown Location',
+      roomId,
+      roomName
     };
   });
 
@@ -1437,9 +1442,13 @@ export async function insertIntermediateSpatialPhoto(params: {
 export interface Project {
   id: string;
   name: string;
-  status: 'planning' | 'active' | 'completed' | 'archived';
+  status: 'planning' | 'active' | 'archived';
   description: string | null;
+  location_id?: string | null;
+  location_label?: string | null;
+  location_room_id?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface ProjectComponent {
@@ -1455,13 +1464,53 @@ export interface ProjectComponent {
   source_hotspot?: SpatialHotspot;
 }
 
+export function extractProjectLocation(project: any): { cleanDescription: string; locationId: string | null } {
+  if (project.location_id) {
+    return {
+      cleanDescription: (project.description || '').replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim(),
+      locationId: project.location_id
+    };
+  }
+  const desc = project.description || '';
+  const match = desc.match(/<!--archive_location:([a-f0-9\-]+)-->/i);
+  if (match) {
+    return {
+      cleanDescription: desc.replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim(),
+      locationId: match[1]
+    };
+  }
+  return { cleanDescription: desc, locationId: null };
+}
+
+export function formatProjectDescriptionWithLocation(description: string | null | undefined, locationId: string | null | undefined): string {
+  const clean = (description || '').replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim();
+  if (locationId) {
+    return `${clean}${clean ? '\n\n' : ''}<!--archive_location:${locationId}-->`;
+  }
+  return clean;
+}
+
 export async function getProjects(): Promise<(Project & { active_count: number })[]> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
   if (typeof window !== 'undefined' && !navigator.onLine) {
     const allProj = await db.projects.orderBy('created_at').reverse().toArray();
     const allProjComps = await db.project_components.toArray();
     return allProj.map(p => {
       const active = allProjComps.filter(pc => pc.project_id === p.id && !pc.returned_at).reduce((acc, pc) => acc + pc.quantity, 0);
-      return { ...p, active_count: active };
+      const { cleanDescription, locationId } = extractProjectLocation(p);
+      const loc = locationId ? hotspotMap.get(locationId) : undefined;
+      const status: 'planning' | 'active' | 'archived' = (p.status as any) === 'completed' ? 'archived' : (p.status as any);
+      return {
+        ...p,
+        status,
+        description: cleanDescription,
+        location_id: locationId,
+        location_label: loc?.fullLabel || loc?.label,
+        location_room_id: loc?.roomId,
+        active_count: active
+      };
     });
   }
 
@@ -1470,26 +1519,176 @@ export async function getProjects(): Promise<(Project & { active_count: number }
   
   return data.map(p => {
     const active = p.project_components.filter((pc: any) => !pc.returned_at).reduce((acc: number, pc: any) => acc + pc.quantity, 0);
-    return { ...p, active_count: active };
+    const { cleanDescription, locationId } = extractProjectLocation(p);
+    const loc = locationId ? hotspotMap.get(locationId) : undefined;
+    const status: 'planning' | 'active' | 'archived' = p.status === 'completed' ? 'archived' : (p.status as any);
+    return {
+      ...p,
+      status,
+      description: cleanDescription,
+      location_id: locationId,
+      location_label: loc?.fullLabel || loc?.label,
+      location_room_id: loc?.roomId,
+      active_count: active
+    };
   });
 }
 
 export async function createProject(name: string, description: string = ''): Promise<Project> {
   const { data, error } = await supabase.from('projects').insert([{ name, description, status: 'planning' }]).select().single();
   if (error) throw error;
+  if (typeof window !== 'undefined') {
+    await db.projects.put(data);
+  }
   return data;
 }
 
-export async function updateProjectStatus(id: string, status: 'planning' | 'active' | 'completed' | 'archived'): Promise<Project> {
-  const { data, error } = await supabase.from('projects').update({ status }).eq('id', id).select().single();
-  if (error) throw error;
-  return data;
+export async function updateProject(
+  id: string,
+  updates: {
+    name?: string;
+    description?: string | null;
+    status?: 'planning' | 'active' | 'archived';
+    location_id?: string | null;
+  }
+): Promise<Project> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
+  // Strict Rule 1: The archive transition and location_id assignment must be atomic.
+  // A project must not become Archived without a valid storage location, and the location must reference a leaf hotspot.
+  if (updates.status === 'archived') {
+    if (!updates.location_id) {
+      throw new Error("A project cannot become Archived without a valid leaf storage location.");
+    }
+    const loc = hotspotMap.get(updates.location_id);
+    if (!loc || !loc.is_leaf) {
+      throw new Error("Project archive location must reference a valid leaf storage location.");
+    }
+  }
+
+  // Strict Rule 2: Planning phase means no components are being used.
+  if (updates.status === 'planning') {
+    const { items } = await getProjectDetails(id);
+    const activeItems = items.filter(i => !i.returned_at);
+    if (activeItems.length > 0) {
+      throw new Error(`Cannot transition to Planning phase: ${activeItems.length} active component(s) are currently in use. Check in all components first.`);
+    }
+  }
+
+  // Determine existing project data if needed for fallback description
+  let existingDesc: string | null | undefined = updates.description;
+  if (existingDesc === undefined) {
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      const p = await db.projects.get(id);
+      existingDesc = p?.description;
+    } else {
+      const { data: cur } = await supabase.from('projects').select('description').eq('id', id).single();
+      existingDesc = cur?.description;
+    }
+  }
+
+  // If moving away from archived, clear location_id
+  const finalLocationId = updates.status && updates.status !== 'archived' ? null : updates.location_id;
+
+  const payload: any = {
+    ...updates,
+    location_id: finalLocationId,
+    updated_at: new Date().toISOString()
+  };
+  Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+
+  let savedData: any = null;
+
+  // Try updating with location_id column in Supabase
+  const { data, error } = await supabase
+    .from('projects')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (!error && data) {
+    savedData = data;
+  } else if (error && (error.code === 'PGRST204' || error.message?.includes('location_id'))) {
+    // Column location_id not present yet in remote Supabase schema -> store in description fallback
+    const encodedDesc = formatProjectDescriptionWithLocation(existingDesc, finalLocationId);
+    const fallbackPayload: any = {
+      name: updates.name,
+      status: updates.status,
+      description: encodedDesc,
+      updated_at: new Date().toISOString()
+    };
+    Object.keys(fallbackPayload).forEach(k => fallbackPayload[k] === undefined && delete fallbackPayload[k]);
+
+    const { data: fbData, error: fbErr } = await supabase
+      .from('projects')
+      .update(fallbackPayload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (fbErr) throw fbErr;
+    savedData = { ...fbData, location_id: finalLocationId };
+  } else if (error) {
+    throw error;
+  }
+
+  if (typeof window !== 'undefined') {
+    await db.projects.update(id, {
+      ...updates,
+      location_id: finalLocationId,
+      status: updates.status as any
+    });
+  }
+
+  const { cleanDescription, locationId } = extractProjectLocation(savedData);
+  const loc = locationId ? hotspotMap.get(locationId) : undefined;
+
+  return {
+    ...savedData,
+    status: savedData.status,
+    description: cleanDescription,
+    location_id: locationId,
+    location_label: loc?.fullLabel || loc?.label,
+    location_room_id: loc?.roomId
+  };
+}
+
+export async function archiveProject(projectId: string, locationId: string): Promise<Project> {
+  // If remote RPC archive_project is available, attempt it first for strict database-level atomicity
+  try {
+    const { data, error } = await supabase.rpc('archive_project', {
+      p_project_id: projectId,
+      p_location_id: locationId
+    });
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.projects.update(projectId, { status: 'archived', location_id: locationId });
+      }
+      return (await getProjectDetails(projectId)).project;
+    }
+  } catch (e) {
+    // fallback to updateProject
+  }
+  return updateProject(projectId, { status: 'archived', location_id: locationId });
+}
+
+export async function updateProjectStatus(
+  id: string,
+  status: 'planning' | 'active' | 'archived',
+  locationId?: string | null
+): Promise<Project> {
+  return updateProject(id, { status, location_id: locationId });
 }
 
 export async function getProjectDetails(id: string): Promise<{ project: Project, items: ProjectComponent[] }> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
   if (typeof window !== 'undefined' && !navigator.onLine) {
-    const project = await db.projects.get(id);
-    if (!project) throw new Error("Project not found");
+    const rawProject = await db.projects.get(id);
+    if (!rawProject) throw new Error("Project not found");
     const rawItems = await db.project_components.where('project_id').equals(id).toArray();
     const items = await Promise.all(rawItems.map(async pc => {
       const component = await db.components.get(pc.component_id);
@@ -1497,19 +1696,51 @@ export async function getProjectDetails(id: string): Promise<{ project: Project,
       return { ...pc, component, source_hotspot };
     }));
     items.sort((a, b) => new Date(b.checked_out_at).getTime() - new Date(a.checked_out_at).getTime());
+    
+    const { cleanDescription, locationId } = extractProjectLocation(rawProject);
+    const loc = locationId ? hotspotMap.get(locationId) : undefined;
+    const status: 'planning' | 'active' | 'archived' = (rawProject.status as any) === 'completed' ? 'archived' : (rawProject.status as any);
+
+    const project: Project = {
+      ...rawProject,
+      status,
+      description: cleanDescription,
+      location_id: locationId,
+      location_label: loc?.fullLabel || loc?.label,
+      location_room_id: loc?.roomId
+    };
+
     return { project, items };
   }
 
-  const { data: project, error } = await supabase.from('projects').select('*').eq('id', id).single();
+  const { data: rawProject, error } = await supabase.from('projects').select('*').eq('id', id).single();
   if (error) throw error;
   
   const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components!project_components_component_id_fkey(*), source_hotspot:spatial_hotspots!fk_project_components_source_loc(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
   if (itemsErr) throw itemsErr;
-  
+
+  const { cleanDescription, locationId } = extractProjectLocation(rawProject);
+  const loc = locationId ? hotspotMap.get(locationId) : undefined;
+  const status: 'planning' | 'active' | 'archived' = rawProject.status === 'completed' ? 'archived' : (rawProject.status as any);
+
+  const project: Project = {
+    ...rawProject,
+    status,
+    description: cleanDescription,
+    location_id: locationId,
+    location_label: loc?.fullLabel || loc?.label,
+    location_room_id: loc?.roomId
+  };
+
   return { project, items };
 }
 
 export async function checkoutComponent(projectId: string, componentId: string, sourceLocationId: string, quantity: number): Promise<void> {
+  const { data: rawProject } = await supabase.from('projects').select('status').eq('id', projectId).single();
+  if (rawProject && rawProject.status === 'archived') {
+    throw new Error("Cannot check out components to an Archived project. Switch project to Active first.");
+  }
+
   const { error } = await supabase.rpc('checkout_component', {
     p_project_id: projectId,
     p_component_id: componentId,
@@ -1517,6 +1748,13 @@ export async function checkoutComponent(projectId: string, componentId: string, 
     p_quantity: quantity
   });
   if (error) throw error;
+
+  // Option A: Planning phase auto-transitions to Active upon checkout
+  if (rawProject && rawProject.status === 'planning') {
+    await updateProject(projectId, { status: 'active' }).catch(err => {
+      console.warn("Auto-transition to active warning:", err);
+    });
+  }
 }
 
 export async function checkinComponent(projectComponentId: string, returnLocationId: string): Promise<void> {
