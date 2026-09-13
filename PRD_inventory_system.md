@@ -27,19 +27,24 @@ This system solves both with two linked views of the same data:
 ### Goals (v1 & current)
 - **Hierarchical Spatial Storage Layout**: Recreate physical storage layouts as an interactive, photo-based, clickable hierarchy of arbitrary depth (Room → Perspective/Wall → Cupboard → Shelf → Drawer → Bin).
 - **Draggable View / Perspective Ordering**: Freely reorder root room perspective photos (views) via drag-and-drop or arrow buttons, with changes saved permanently to the database.
+- **Direct Compartment Locate & Visual Pinpointing**: Clicking "Locate" from any inventory item page or table row jumps directly to the containing perspective photo, automatically opens the compartment side drawer with the components list, smoothly auto-scrolls the viewport to center the target, and spotlights the physical compartment with an animated bouncing red marker (`MapPin` badge, pulsing beacon dot, and pulsing red boundary).
 - **Direct Item Assignment from Hotspots**: Click any leaf storage location to open a drawer, search inventory, and directly add/adjust components or personal items without entering map-edit mode.
+- **Pre-Selected Location Assignment**: Creating new components/items from a compartment drawer automatically passes the location ID to `/inventory/new?locationId=...` for instant pre-selection.
+- **Arrow-Shaped Hotspot Annotation**: Draw directional arrow hotspots with adjustable tail, tip, and width handles to point towards out-of-frame storage, shelves, or sub-regions.
+- **Hotspot Reshaping, Moving & Intermediate Views**: Redraw existing boundaries without data loss, relocate hotspots between perspectives, and insert intermediate photos into existing hierarchy branches.
+- **Multi-Level Undo/Redo Engine**: In-memory action history stack allowing instant undo of hotspot operations (create, delete, reshape, move, photo replace, intermediate insertion).
 - **Dual Inventory Support (Components & Personal Items)**:
   - **Components**: full technical specs (datasheet URLs, vendor links, price in INR, low-stock alert thresholds, custom spec fields).
   - **Personal Items**: streamlined, minimal data model (Item Name, Description, Photo, Tags, and Physical Storage Locations).
-- **Interactive Inventory Toggle**: Instant segmented switcher on `/inventory` between "Components" and "Personal" views with live counts and tailored table columns.
+- **Interactive Inventory Toggle & Location Tooltips**: Instant segmented switcher on `/inventory` between "Components" and "Personal" views with live counts, tailored table columns, direct location pills with "Locate" buttons, and custom glassmorphic storage path sequence tooltips (`Room → View → Box → Compartment`).
 - **Aggregated Inventory**: Maintain a flat inventory list aggregating quantities of every item across all physical locations and active project checkouts.
 - **Full-Text & Live Search**: Search across items (name, tags, notes/descriptions).
-- **Flexible Tagging**: Multi-tag system with usage-count autocomplete ranking.
-- **Ad-Hoc Custom Fields & File Attachments**: Per-component custom fields (text, number, link, image, and file uploads such as PDF, PPT, Word, Excel, ZIP), added ad hoc without fixed global schemas with direct Supabase storage uploads.
+- **Flexible Tagging & Bounded Dropdown**: Multi-tag system with usage-count autocomplete ranking and bounded scrollable dropdown with keyboard navigation.
+- **Ad-Hoc Custom Fields & File Attachments**: Per-item custom fields (text, number, link, image, and document uploads such as PDF, PPT, Word, Excel, ZIP), added ad hoc without fixed global schemas with direct Supabase storage uploads and full-screen image preview lightbox.
 - **Project Check-Out / Check-In Ledger**: Track partial quantities checked out to projects, recording source locations and return locations atomically.
 - **Low-Stock Alert Dashboard**: Visual in-app dashboard highlighting components falling at or below their low-stock thresholds.
 - **Offline Read/Browse (PWA)**: Service Worker + IndexedDB (Dexie.js) + Cache Storage API caching for offline browsing of rooms, photos, hotspots, and inventory lists.
-- **Multi-Room Support**: Independent trees for multiple physical rooms.
+- **Multi-Room Support**: Independent trees for multiple physical rooms with clean list action alignments.
 - **Zero-Cost Operation**: Built for free-tier hosting on Vercel and Supabase Postgres/Storage.
 
 ### Non-Goals — explicitly deferred
@@ -208,14 +213,19 @@ project_components
 
 ### 5.1 Spatial Hierarchy Navigation ("Room View")
 
-- **Room Selector**: Top-level switcher to switch rooms and create new rooms.
+- **Room Selector & Room List**: Top-level switcher and room management list with clean vertically centered action controls, room rename, view counts, and delete confirmations.
 - **Draggable View Ordering**:
   - The side-photo strip allows drag-and-drop reordering of perspectives.
   - Hover/focus controls offer one-click arrow buttons (`ChevronUp`/`ChevronDown` or `ChevronLeft`/`ChevronRight`).
   - Order persists atomically to Supabase via `reorder_spatial_photos` and syncs to Dexie.
-- **Hotspot Drawing**:
-  - **Freehand Tool**: continuous click-and-drag tracing.
-  - **Polygon Tool**: click-each-vertex lasso with automatic closing.
+- **Hotspot Drawing Tools**:
+  - **Freehand Tool**: Continuous click-and-drag tracing.
+  - **Polygon Tool**: Click-each-vertex lasso with automatic closing.
+  - **Arrow Tool**: Interactive directional arrow annotation with tail, tip, and width adjust handles for pointing to out-of-frame storage or directional sub-zones.
+  - **Reshape Tool (`Crop`)**: Redraw boundaries of existing hotspots while preserving child views and stored items.
+  - **Move Tool (`ArrowRightLeft`)**: Transfer a hotspot and its child tree to any other photo/perspective in the room.
+  - **Insert Intermediate View**: Splice an intermediate drill-down photo between a parent hotspot and its child view with automatic hierarchy rewiring.
+  - **Multi-Level Undo/Redo Engine**: In-memory action history stack (up to 50 operations) to undo/redo hotspot creation, deletion, reshaping, moving, photo replacements, and view insertions.
   - On save, choose:
     - *"This is a storage location"* (`is_leaf = true`). Opens side drawer immediately for assigning items.
     - *"This opens into more storage"* (`is_leaf = false`). Prompts drill-down photo upload.
@@ -226,17 +236,23 @@ project_components
   - **Inline Stepper**: Increment/decrement quantity (`-` / `+`) or enter numbers directly.
   - **Item Deletion**: `X` button removes the item from the location.
   - **Badges**: Personal items display a distinct `Personal` tag badge.
-  - **Direct New Item Link**: Quick link to `/inventory/new` for unregistered items.
+  - **Direct New Item Link**: Pre-selected link to `/inventory/new?locationId=[hotspotId]` for registering and assigning new items directly.
+  - **Visual Synchronization**: Opening a compartment drawer activates the bouncing red marker over that compartment on the canvas until dismissed.
 - **Hotspot Selection, Deletion & Management**:
   - **Extendable Hotspots Menu & Pinpointing**: To preserve 100% canvas width during edits without cluttering the screen with persistent sidebars, an extendable `Hotspots (X) ▾` dropdown button is positioned directly before the "Delete View" button in the top action bar. Clicking it opens a floating popover listing all hotspots on the active perspective with their type (*Storage Location* vs *Opens into Storage*) and quick `[Delete]` buttons. Clicking any hotspot row immediately highlights and pinpoints that specific hotspot on the canvas with a floating animated location badge (`MapPin` + Hotspot Name).
   - **Canvas Delete Tool**: In "Edit Map" mode, selecting the "Delete Hotspot" tool highlights all hotspots with dashed red outlines and allows clicking directly on any hotspot polygon on the map to delete it with confirmation.
   - **In-Drawer Hotspot Deletion**: In standard view mode, opening any storage location hotspot drawer reveals a trash icon in the header next to the close button for instant deletion.
   - **Recursive Safety**: Deletion unassigns all stored items and recursively purges child drill-down photos via `delete_hotspot_recursive(p_hotspot_id UUID)`.
 - **Hotspot Visual Effects & Highlighting**:
-  - **Normal / Default**: Translucent white wash (`rgba(255, 255, 255, 0.3)` fill, `rgba(255, 255, 255, 0.5)` stroke, `0.3` strokeWidth).
-  - **Hovered**: Translucent red wash (`rgba(239, 68, 68, 0.4)` fill, solid `#ef4444` stroke).
+  - **Normal / Default**: Soft sky-blue outline (`#7dd3fc`, `0.3` strokeWidth, subtle drop shadow `rgba(125,211,252,0.4)`).
+  - **Hovered**: Brightened blue outline (`#38bdf8`, `0.5` strokeWidth) with soft blue tint fill (`rgba(56, 189, 248, 0.35)` and `drop-shadow(0 0 6px rgba(56,189,248,0.75))`).
+  - **Arrow Hotspots**: Golden yellow / amber (`#eab308`/`#facc15`, fill `0.45` / `0.70`).
   - **Hover Reveal Tooltip**: Scrolling or hovering the mouse across any hotspot reveals a floating glassmorphism pill showing the hotspot's name and type (*Storage Location* with brand-accent dot vs *Opens into Storage* with amber dot). In Delete mode, the tooltip reveals `Delete "[label]"`. The badge dynamically tracks the cursor with smart edge-clamping ($8\% \le x \le 92\%$) and vertical boundary inversion at the top edge.
-  - **Highlighted / Located**: Active located hotspot receives a pulsing red highlight (`rgba(239, 68, 68, 0.2)` fill, solid `#ef4444` stroke, `0.6` strokeWidth, and continuous `animate-pulse` CSS keyframe oscillation) plus an animated location pin badge (`MapPin` + Hotspot Name).
+  - **Highlighted / Located Compartment**:
+    - Pulsing red boundary (`stroke="#ef4444"`, `0.5` strokeWidth, `animate-pulse`, fill `rgba(239, 68, 68, 0.2)`).
+    - Centered pulsing target beacon dot (`animate-ping`) with crisp white-bordered red center pin.
+    - Floating animated location badge (`MapPin` icon, white text, downward pointer arrow, `animate-bounce duration-1000`).
+    - Auto-scroll centering: canvas automatically scrolls to center the highlighted compartment in the viewport.
   - **Delete Mode**: Dashed red stroke (`2,2`) with `rgba(239, 68, 68, 0.22)` fill wash (`0.55` on hover).
 
 ### 5.2 Inventory Page & View Toggle
@@ -246,8 +262,12 @@ project_components
   - Dynamic route parameter sync (`/inventory?view=personal`).
   - Contextual header subtitle and dynamic action button (`+ Add Component` vs `+ Add Personal Item`).
 - **Contextual Inventory Table**:
-  - **Components View**: Img, Component Name, Tags, Quantity, Price (INR), Status (Low Stock Indicator), Actions (Delete & View).
-  - **Personal Items View**: Img, Item Name, Description, Tags, Quantity, Actions (Delete & View).
+  - **Components View**: Img, Component Name, Location, Tags, Quantity, Price (INR), Status (Low Stock Indicator), Actions (Delete & View).
+  - **Personal Items View**: Img, Item Name, Location, Description, Tags, Quantity, Actions (Delete & View).
+  - **Interactive Location Column**:
+    - Displays direct storage location pills with instant "Locate" button.
+    - Custom floating glassmorphic tooltip on hover displaying the complete hierarchical storage sequence (`Room → View → Box → Compartment`) with pointer arrow and highlighted target pill.
+    - Multi-location popup for items stored in multiple physical bins with individual Locate buttons.
   - **Direct Deletion & Location Safety**: Each item row features a direct delete button. Deletion requires explicit user confirmation. If an item is currently assigned to one or more physical storage locations, direct deletion is blocked and a prompt directs the user to open the edit page (`/inventory/[id]/edit`) to individually remove all location assignments first.
   - Contextual empty states (*"No personal items found."* vs *"No components found."*).
 
@@ -260,10 +280,14 @@ project_components
   - Completely hides technical fields: Price, Low-Stock Alert, Datasheet URL, Purchase URL, and Custom Specs Builder.
 - **Full Form for Components**:
   - Displays all technical specs, pricing, datasheets, custom specs builder, tags, and locations.
+- **Pre-Selected Location Support**:
+  - Accepts `locationId` query param (`/inventory/new?locationId=...`) and pre-assigns the selected storage location automatically with full breadcrumb resolution.
+- **Bounded Tag Selector**:
+  - Searchable tag input with bounded scrollable dropdown (`max-h-56 overflow-y-auto`) and keyboard navigation (`ArrowUp`/`ArrowDown`/`Enter`) preventing screen overflow.
 - **Custom Fields Builder**:
-  - Supports `text`, `number`, `link`, `image`, and `file`.
+  - Supports `text`, `number`, `link`, `image`, and `file` across both components and personal items.
   - **Direct File Attachments (`file` option)**: Directly uploads non-image documents (PDF, PowerPoint `.ppt`/`.pptx`, Word `.doc`/`.docx`, Excel `.xls`/`.xlsx`, `.zip`, `.txt`) to Supabase storage with live upload indicators, formatted file sizes, original filenames, and "Replace" options.
-  - **Image Attachments (`image` option)**: Direct upload of graphics and photos with thumbnail previews.
+  - **Image Attachments (`image` option)**: Direct upload of graphics and photos with thumbnail previews and full-screen lightbox.
 - **Physical Location Picker**:
   - Works identically for both item types: select physical leaf hotspot and specify initial quantity.
 
@@ -273,10 +297,12 @@ project_components
   - Distinct gold `"Personal Item"` badge next to title.
   - Clean display: Total Owned, In Storage, and Description notes.
   - Hides empty price, datasheet, and custom specs sections.
-  - Storage location card features a **"Locate"** button that jumps directly to the Room Map with the hotspot highlighted.
+  - Storage location card features a **"Locate"** button that navigates directly into the room, drills into the containing perspective photo, opens the compartment side drawer with the components list, and activates the bouncing red marker.
 - **Component Presentation**:
-  - Full technical resource links, price in INR (`₹`), low stock alert status, custom specs list, and location cards with "Locate" button.
+  - Full technical resource links, price in INR (`₹`), low stock alert status, custom specs list, and location cards with deep "Locate" button.
   - **Custom Specs Display**: Renders text, numbers, clickable links, image thumbnails, and attached documents (`file` type) with a document icon (`FileText`), filename, and direct `Open ↗` link.
+- **Image Preview Lightbox**:
+  - Clicking item photo or custom field image opens a full-screen zoomable preview modal.
 
 ### 5.5 Projects Check-Out / Check-In
 
@@ -298,9 +324,12 @@ project_components
 ```
 /                          → Dashboard: quick search, room links, low-stock overview, active projects
 /rooms/[roomId]            → Spatial Room View (photo hierarchy, hotspot canvas, contents drawer)
+                             Query params: ?locateHotspot=[hotspotId] (deep links to compartment & bounces marker)
 /inventory                 → Unified inventory with Components / Personal toggle & search
+                             Query params: ?view=components | ?view=personal
 /inventory/new             → Add Item Form (Component / Personal Item selector)
-/inventory/[componentId]   → Item Detail Page (stats, description/specs, storage locations with "Locate")
+                             Query params: ?locationId=[hotspotId] (pre-selects storage location)
+/inventory/[componentId]   → Item Detail Page (stats, description/specs, storage locations with deep "Locate")
 /inventory/[componentId]/edit → Edit Item Form
 /low-stock                 → Low-Stock alert dashboard
 /projects                  → Projects list & status

@@ -220,6 +220,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   }, []);
   // We'll highlight the specific hotspot if locating
   const [highlightedHotspotId, setHighlightedHotspotId] = useState<string | null>(null);
+  const isLocatingRef = useRef<string | null>(null);
+  const activeHighlightedHotspotId = highlightedHotspotId || selectedLeafHotspot?.id || null;
 
   useEffect(() => {
     loadRoomData();
@@ -232,7 +234,11 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       setHotspots([]);
     }
     setHotspotSearchFilter("");
-    setHighlightedHotspotId(null);
+    if (isLocatingRef.current) {
+      isLocatingRef.current = null;
+    } else {
+      setHighlightedHotspotId(null);
+    }
     setIsExtendedHotspotsView(false);
   }, [activePhotoId]);
 
@@ -246,17 +252,54 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       setPhotos(allPhotos);
       
       if (locateHotspotId) {
-        // Compute path and set state
+        isLocatingRef.current = locateHotspotId;
+
+        // 1. Fetch the target hotspot
+        const targetHs = await getHotspotById(locateHotspotId);
+
+        // 2. Compute path of photos to target hotspot
         const path = await getFullHotspotPath(locateHotspotId);
-        if (path.length > 0) {
-          // The last element is the leaf hotspot.
-          // The elements before it are photos and drill hotspots.
-          // The breadcrumb chain tracks PHOTOS. 
-          const photoNodes = path.filter(p => p.type === 'photo');
-          if (photoNodes.length > 0) {
-            setBreadcrumbChain(photoNodes.map(p => ({ id: p.id, label: p.label })));
-            setActivePhotoId(photoNodes[photoNodes.length - 1].id);
-            setHighlightedHotspotId(locateHotspotId);
+        const photoNodes = path.filter(p => p.type === 'photo');
+
+        let targetPhotoId = targetHs?.photo_id || (photoNodes.length > 0 ? photoNodes[photoNodes.length - 1].id : null);
+
+        if (photoNodes.length > 0) {
+          setBreadcrumbChain(photoNodes.map(p => ({ id: p.id, label: p.label })));
+          if (targetPhotoId) setActivePhotoId(targetPhotoId);
+        } else if (targetPhotoId) {
+          const ph = allPhotos.find(p => p.id === targetPhotoId);
+          if (ph) {
+            setBreadcrumbChain([{ id: ph.id, label: ph.label || 'View' }]);
+            setActivePhotoId(ph.id);
+          }
+        }
+
+        // 3. Load hotspots for this photo immediately
+        if (targetPhotoId) {
+          const photoHotspots = await getHotspotsForPhoto(targetPhotoId);
+          setHotspots(photoHotspots);
+        }
+
+        // 4. Highlight the target hotspot
+        setHighlightedHotspotId(locateHotspotId);
+
+        // 5. If it's a leaf hotspot (compartment), open the compartment drawer and fetch its components
+        if (targetHs && targetHs.is_leaf) {
+          setSelectedLeafHotspot(targetHs);
+          setIsAddingComponent(false);
+          setSearchQuery("");
+          try {
+            const [comps, inv] = await Promise.all([
+              getHotspotComponents(targetHs.id),
+              getInventory()
+            ]);
+            setLeafComponents(comps);
+            setAllInventory(inv);
+            if (comps.length === 0) {
+              setIsAddingComponent(true);
+            }
+          } catch (err) {
+            console.error("Failed to load components for located hotspot:", err);
           }
         }
       } else {
@@ -1064,6 +1107,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const handleHotspotClick = async (hotspot: SpatialHotspot) => {
     if (hotspot.is_leaf) {
       setSelectedLeafHotspot(hotspot);
+      setHighlightedHotspotId(hotspot.id);
       setIsAddingComponent(false);
       setSearchQuery("");
       try {
@@ -2013,7 +2057,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 imageUrl={activePhoto.image_url} 
                 hotspots={hotspots}
                 isEditing={isEditing}
-                highlightedHotspotId={highlightedHotspotId}
+                highlightedHotspotId={activeHighlightedHotspotId}
                 reshapingHotspot={reshapingHotspot}
                 movingHotspot={activeMoveSession ? { hotspot: activeMoveSession.hotspot, sourcePhotoId: activeMoveSession.sourcePhotoId } : null}
                 onCancelEdit={() => {
@@ -2324,7 +2368,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     </button>
                   </>
                 )}
-                <button onClick={() => setSelectedLeafHotspot(null)} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
+                <button onClick={() => { setSelectedLeafHotspot(null); setHighlightedHotspotId(null); }} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
                   <X className="h-5 w-5" />
                 </button>
               </div>

@@ -237,6 +237,28 @@ export function HotspotCanvas({
     }
   }, [movingHotspot]);
 
+  // When a hotspot is highlighted (e.g. locate button or leaf selection), smoothly center it in view
+  useEffect(() => {
+    if (!highlightedHotspotId || !containerRef.current) return;
+    const targetHs = hotspots.find(h => h.id === highlightedHotspotId);
+    if (!targetHs || !targetHs.shape_points || targetHs.shape_points.length === 0) return;
+
+    const parentContainer = containerRef.current.parentElement;
+    if (!parentContainer) return;
+
+    const avgX = targetHs.shape_points.reduce((acc, p) => acc + p.x, 0) / targetHs.shape_points.length;
+    const avgY = targetHs.shape_points.reduce((acc, p) => acc + p.y, 0) / targetHs.shape_points.length;
+
+    const targetLeft = avgX * containerRef.current.clientWidth - parentContainer.clientWidth / 2;
+    const targetTop = avgY * containerRef.current.clientHeight - parentContainer.clientHeight / 2;
+
+    parentContainer.scrollTo({
+      left: Math.max(0, targetLeft),
+      top: Math.max(0, targetTop),
+      behavior: 'smooth'
+    });
+  }, [highlightedHotspotId, hotspots]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isEditing || !isOnline) return;
@@ -2165,19 +2187,33 @@ export function HotspotCanvas({
           const avgY = hs.shape_points.reduce((acc, p) => acc + p.y, 0) / hs.shape_points.length;
           
           return (
-            <div
-              key={`highlight-badge-${hs.id}`}
-              style={{
-                left: `${avgX * 100}%`,
-                top: `${avgY * 100}%`
-              }}
-              className="absolute -translate-x-1/2 -translate-y-full -mt-2 z-30 pointer-events-none flex flex-col items-center animate-bounce duration-1000"
-            >
-              <div className="bg-red-600 text-white text-[11px] font-bold px-2.5 py-1 rounded shadow-xl border border-white/30 whitespace-nowrap flex items-center gap-1.5 backdrop-blur-xs">
-                <MapPin className="h-3.5 w-3.5 fill-white text-white" />
-                <span>{hs.label}</span>
+            <div key={`highlight-group-${hs.id}`}>
+              {/* Pulsing center target dot */}
+              <div
+                style={{
+                  left: `${avgX * 100}%`,
+                  top: `${avgY * 100}%`
+                }}
+                className="absolute -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none flex items-center justify-center"
+              >
+                <div className="w-4 h-4 rounded-full bg-red-500 animate-ping opacity-60" />
+                <div className="w-2.5 h-2.5 rounded-full bg-red-600 absolute shadow-md border-2 border-white" />
               </div>
-              <div className="w-2 h-2 bg-red-600 rotate-45 -mt-1 shadow" />
+
+              {/* Bouncing Map Pin & Badge */}
+              <div
+                style={{
+                  left: `${avgX * 100}%`,
+                  top: `${avgY * 100}%`
+                }}
+                className="absolute -translate-x-1/2 -translate-y-full -mt-2.5 z-30 pointer-events-none flex flex-col items-center animate-bounce duration-1000"
+              >
+                <div className="bg-red-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-md shadow-2xl border border-white/40 whitespace-nowrap flex items-center gap-1.5 ring-2 ring-red-500/50 backdrop-blur-xs">
+                  <MapPin className="h-3.5 w-3.5 fill-white text-white shrink-0" />
+                  <span>{hs.label}</span>
+                </div>
+                <div className="w-2.5 h-2.5 bg-red-600 rotate-45 -mt-1 shadow border-r border-b border-white/30" />
+              </div>
             </div>
           );
         })}

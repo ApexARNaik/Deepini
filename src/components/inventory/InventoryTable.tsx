@@ -65,7 +65,7 @@ export function InventoryTable({ components, viewMode = 'components', onComponen
         return;
       }
       const path = await getFullHotspotPath(loc.hotspot_id);
-      const roomNode = path.find(p => p.type === 'photo');
+      const roomNode = path.find(p => p.type === 'room') || path.find(p => p.type === 'photo');
       if (roomNode) {
         router.push(`/rooms/${roomNode.id}?locateHotspot=${loc.hotspot_id}`);
       } else {

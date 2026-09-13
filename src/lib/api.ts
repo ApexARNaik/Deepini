@@ -433,24 +433,52 @@ export async function getHotspotBreadcrumbPath(hotspotId: string): Promise<{ id:
 
 export async function getFullHotspotPath(hotspotId: string) {
   // Recursive fetch to root
-  const chain: { type: 'photo' | 'hotspot', id: string, label: string }[] = [];
+  const chain: { type: 'room' | 'photo' | 'hotspot', id: string, label: string }[] = [];
   let currentHotspotId: string | null = hotspotId;
+  const isOffline = typeof window !== 'undefined' && !navigator.onLine;
 
   while (currentHotspotId) {
-    const { data: hs }: any = await supabase.from("spatial_hotspots").select("*").eq("id", currentHotspotId).single();
+    let hs: any = null;
+    if (isOffline) {
+      hs = await db.spatial_hotspots.get(currentHotspotId);
+    } else {
+      const res = await supabase.from("spatial_hotspots").select("*").eq("id", currentHotspotId).maybeSingle();
+      hs = res.data;
+      if (!hs) {
+        hs = await db.spatial_hotspots.get(currentHotspotId);
+      }
+    }
     if (!hs) break;
     chain.unshift({ type: 'hotspot', id: hs.id, label: hs.label });
     
-    const { data: photo }: any = await supabase.from("spatial_photos").select("*").eq("id", hs.photo_id).single();
+    let photo: any = null;
+    if (isOffline) {
+      photo = await db.spatial_photos.get(hs.photo_id);
+    } else {
+      const res = await supabase.from("spatial_photos").select("*").eq("id", hs.photo_id).maybeSingle();
+      photo = res.data;
+      if (!photo) {
+        photo = await db.spatial_photos.get(hs.photo_id);
+      }
+    }
     if (!photo) break;
     chain.unshift({ type: 'photo', id: photo.id, label: photo.label || 'View' });
     
     if (photo.parent_hotspot_id) {
       currentHotspotId = photo.parent_hotspot_id;
     } else if (photo.room_id) {
-      const { data: room }: any = await supabase.from("rooms").select("name").eq("id", photo.room_id).single();
+      let room: any = null;
+      if (isOffline) {
+        room = await db.rooms.get(photo.room_id);
+      } else {
+        const res = await supabase.from("rooms").select("name").eq("id", photo.room_id).maybeSingle();
+        room = res.data;
+        if (!room) {
+          room = await db.rooms.get(photo.room_id);
+        }
+      }
       if (room?.name) {
-        chain.unshift({ type: 'photo', id: photo.room_id, label: room.name });
+        chain.unshift({ type: 'room', id: photo.room_id, label: room.name });
       }
       break;
     } else {

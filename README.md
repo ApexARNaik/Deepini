@@ -11,17 +11,23 @@ Deepini is a personal inventory and spatial tracking web application built for m
 
 ### 1. Photographic Spatial Map ("Room View")
 - **Hierarchical Drill-Down**: Create unbounded nested levels (`Room → View/Wall → Furniture → Shelf → Drawer → Container`).
+- **Deep "Locate" Navigation & Bouncing Pin**: Clicking "Locate" from any component page or inventory table row navigates directly to the target room and perspective, automatically opens the compartment drawer with stored items, centers the viewport, and spotlights the physical location with an animated bouncing red marker (`MapPin` badge, pulsing target beacon dot, and pulsing red boundary).
+- **Multi-Tool Hotspot Annotation**: Annotate storage containers using continuous freehand tracing, click-each-vertex polygonal lasso, or directional arrow annotations with adjustable tail, tip, and width handles.
+- **Reshape, Move & Intermediate Views**: Redraw boundaries of existing hotspots, move hotspots between perspective views, and insert intermediate drill-down photos into existing hierarchies without losing data.
+- **Multi-Level Undo/Redo Engine**: In-memory action history stack (up to 50 operations) supporting instant rollback of hotspot creation, deletion, reshaping, moving, photo replacements, and view insertions.
 - **Draggable View Reordering**: Drag and drop perspectives or use one-click arrow buttons to reorder views with permanent database persistence.
-- **Interactive Hotspot Canvas**: Annotate storage containers using continuous freehand tracing or click-each-vertex polygonal lasso tools.
 - **Direct Hotspot Contents Drawer**: Click any storage location to view stored items, adjust quantities with an inline stepper, or directly search and add components/belongings with a single click.
-- **Hotspot Deletion & Extendable Menu**: Delete individual hotspots either via the canvas Delete tool or via an extendable `Hotspots (X)` menu placed before "Delete View", keeping 100% canvas width available during edits.
+- **Hotspot Deletion & Extendable Menu**: Delete individual hotspots via the canvas Delete tool, in-drawer header button, or via an extendable `Hotspots (X)` popover placed before "Delete View", keeping 100% canvas width available during edits.
 
-### 2. Dual Item Model & Custom Fields
+### 2. Dual Item Model & Modern Inventory Experience
 - **Components**: Designed for technical electronics items with purchase sources, datasheet URLs, price in INR (`₹`), low-stock thresholds, and custom specs.
 - **Personal Items**: Streamlined model for tools, equipment, stationery, and belongings. Requires only Name, Description, Photo, Storage Locations, and Tags.
-- **Custom Fields & File Attachments**: Attach custom text, numbers, links, images, and document files (PDFs, PPT, Word, Excel, ZIP) directly to components with cloud storage.
+- **Interactive Location Column**: Inventory table features direct location pills with one-click "Locate" buttons and custom floating glassmorphic tooltips displaying the complete hierarchical storage sequence (`Room → View → Box → Compartment`).
+- **Pre-Selected Location Assignment**: Creating an item directly from a compartment drawer automatically passes and pre-assigns the location on `/inventory/new`.
+- **Bounded Tag Selector**: Clean searchable tag input with a bounded scrollable dropdown and keyboard navigation (`ArrowUp`/`ArrowDown`/`Enter`) preventing screen overflow.
+- **Custom Fields & File Attachments**: Attach custom text, numbers, links, images, and document files (PDFs, PPT, Word, Excel, ZIP) directly to items with cloud storage and a full-screen image preview lightbox.
 - **Inventory Page Toggle**: Fast switcher between `Components (X)` and `Personal (Y)` with tailored table columns and context-aware action buttons.
-- **Physical Tracking Parity**: Personal items are tracked across the exact same spatial hierarchy as components, featuring the "Locate" button to spotlight their physical storage location.
+- **Physical Tracking Parity**: Personal items are tracked across the exact same spatial hierarchy as components, featuring full "Locate" button spotlighting.
 
 ### 3. Projects Check-Out & Check-In Ledger
 - Pull components into active projects while tracking their source locations.
