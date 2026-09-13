@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
@@ -9,6 +9,7 @@ import { InsertIntermediateModal } from "./InsertIntermediateModal";
 import { MoveHotspotModal } from "./MoveHotspotModal";
 import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
+import { ThemedNumberInput } from "@/components/ThemedNumberInput";
 import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
@@ -2463,45 +2464,19 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
                         {/* Quantity Stepper */}
-                        <div className="flex items-center border border-[#332f2a] rounded overflow-hidden bg-[#141311]">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newQty = lc.quantity - 1;
-                              if (newQty <= 0) {
-                                handleUpdateLeafComponents(leafComponents.filter(c => c.component_id !== lc.component_id));
-                              } else {
-                                handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: newQty } : c));
-                              }
-                            }}
-                            className="px-1.5 py-0.5 text-brand-text-muted hover:text-white hover:bg-[#2a2a2a] transition-colors text-xs font-bold"
-                            title="Decrease quantity"
-                          >
-                            -
-                          </button>
-                          <input 
-                            type="number" 
-                            min="1" 
-                            value={lc.quantity}
-                            onChange={(e) => {
-                              const qty = parseInt(e.target.value, 10);
-                              if (!isNaN(qty) && qty > 0) {
-                                handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: qty } : c));
-                              }
-                            }}
-                            className="w-10 bg-transparent text-white text-xs text-center focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none font-mono font-bold"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: lc.quantity + 1 } : c));
-                            }}
-                            className="px-1.5 py-0.5 text-brand-text-muted hover:text-white hover:bg-[#2a2a2a] transition-colors text-xs font-bold"
-                            title="Increase quantity"
-                          >
-                            +
-                          </button>
-                        </div>
+                        <ThemedNumberInput
+                          size="sm"
+                          min={1}
+                          value={lc.quantity}
+                          onChange={(val) => {
+                            const qty = parseInt(val, 10);
+                            if (!isNaN(qty) && qty > 0) {
+                              handleUpdateLeafComponents(leafComponents.map(c => c.component_id === lc.component_id ? { ...c, quantity: qty } : c));
+                            }
+                          }}
+                          className="w-16 border-[#332f2a] bg-[#141311]"
+                          inputClassName="text-center font-mono font-bold text-xs"
+                        />
                         
                         <button 
                           type="button"
@@ -2544,58 +2519,58 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   </div>
                   
                   <div className="flex flex-col gap-1.5 max-h-60 overflow-y-auto themed-scrollbar pr-1">
-                    {allInventory
-                      .filter(c => !leafComponents.some(lc => lc.component_id === c.id))
-                      .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.tags?.some(t => t.name.toLowerCase().includes(searchQuery.toLowerCase())))
-                      .slice(0, 50)
-                      .map(c => (
-                      <button 
-                        key={c.id}
-                        type="button"
-                        onClick={() => {
-                          handleUpdateLeafComponents([...leafComponents, { component_id: c.id, quantity: 1, components: c }]);
-                          setSearchQuery("");
-                        }}
-                        className="flex items-center justify-between p-2.5 text-left bg-black/20 hover:bg-[#2a2825] border border-transparent hover:border-[#332f2a] rounded transition-colors group"
-                      >
-                        <div className="flex flex-col min-w-0 pr-2">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm text-brand-text group-hover:text-white font-medium truncate">{c.name}</span>
-                            {isPersonalItem(c) && (
-                              <span className="text-[8px] px-1 py-0.2 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
-                                Personal
-                              </span>
-                            )}
+                    {(() => {
+                      const matched = filterAndRankInventory(
+                        allInventory.filter(c => !leafComponents.some(lc => lc.component_id === c.id)),
+                        searchQuery
+                      );
+                      if (matched.length === 0) {
+                        return (
+                          <div className="text-center py-4 text-xs text-brand-text-muted border border-dashed border-[#332f2a] rounded">
+                            {searchQuery ? `No items match "${searchQuery}"` : "All inventory items are already in this location"}
                           </div>
-                          <span className="text-[10px] text-brand-text-muted">
-                            Total: {c.totals?.total_owned_qty ?? 0} | In storage: {c.totals?.in_storage_qty ?? 0}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span
-                            role="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setQuickViewComponentId(c.id);
-                            }}
-                            className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#332f2a] rounded transition-colors"
-                            title="Preview item details"
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                          </span>
-                          <div className="flex items-center gap-1 text-xs text-brand-accent font-bold px-2 py-1 bg-brand-accent/10 rounded group-hover:bg-brand-accent group-hover:text-white transition-colors">
-                            <Plus className="h-3.5 w-3.5" />
-                            <span>Add</span>
+                        );
+                      }
+                      return matched.slice(0, 50).map(c => (
+                        <button 
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            handleUpdateLeafComponents([...leafComponents, { component_id: c.id, quantity: 1, components: c }]);
+                            setSearchQuery("");
+                          }}
+                          className="flex items-center justify-between p-2.5 text-left bg-black/20 hover:bg-[#2a2825] border border-transparent hover:border-[#332f2a] rounded transition-colors group"
+                        >
+                          <div className="flex flex-col min-w-0 pr-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm text-brand-text group-hover:text-white font-medium truncate">{c.name}</span>
+                              {isPersonalItem(c) && (
+                                <span className="text-[8px] px-1 py-0.2 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
+                                  Personal
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-brand-text-muted">
+                              Total: {c.totals?.total_owned_qty ?? 0} | In storage: {c.totals?.in_storage_qty ?? 0}
+                            </span>
                           </div>
-                        </div>
-                      </button>
-                    ))}
-
-                    {allInventory.filter(c => !leafComponents.some(lc => lc.component_id === c.id)).filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
-                      <div className="text-center py-4 text-xs text-brand-text-muted border border-dashed border-[#332f2a] rounded">
-                        {searchQuery ? `No items match "${searchQuery}"` : "All inventory items are already in this location"}
-                      </div>
-                    )}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span
+                              role="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setQuickViewComponentId(c.id);
+                              }}
+                              className="p-1.5 text-brand-text-muted hover:text-white hover:bg-[#333] rounded transition-colors"
+                              title="Quick View Component"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </span>
+                            <Plus className="h-4 w-4 text-brand-accent group-hover:scale-110 transition-transform" />
+                          </div>
+                        </button>
+                      ));
+                    })()}
                   </div>
                 </div>
               )}

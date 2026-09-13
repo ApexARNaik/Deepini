@@ -268,7 +268,17 @@ project_components
     - Displays direct storage location pills with instant "Locate" button.
     - Custom floating glassmorphic tooltip on hover displaying the complete hierarchical storage sequence (`Room → View → Box → Compartment`) with pointer arrow and highlighted target pill.
     - Multi-location popup for items stored in multiple physical bins with individual Locate buttons.
-  - **Direct Deletion & Location Safety**: Each item row features a direct delete button. Deletion requires explicit user confirmation. If an item is currently assigned to one or more physical storage locations, direct deletion is blocked and a prompt directs the user to open the edit page (`/inventory/[id]/edit`) to individually remove all location assignments first.
+  - **Prioritized Relevance Search Engine**:
+    - Replaces flat alphabetical search with a 6-tier relevance ranking algorithm:
+      1. **Tier 1 (Direct Match in Names)**: Exact match, name starts with query, or word in name starts with query (e.g. searching "es" places "ESP32" and "NodeMCU ESP-12E" at the very top).
+      2. **Tier 2 (Direct Match in Tags)**: Exact tag match, tag starts with query, or word in tag starts with query (e.g. tag "ESP32").
+      3. **Tier 3 (Direct Match in Notes)**: Notes start with query or word in notes starts with query (e.g. notes starting with "ESD protected").
+      4. **Tier 4 (In-Between Match in Names)**: Query appears as a substring inside a word in item name (e.g. searching "es" matches "10k Resistor" and "Resistor Pack").
+      5. **Tier 5 (In-Between Match in Tags)**: Query appears as a substring inside a tag name (e.g. tag "Sensors").
+      6. **Tier 6 (In-Between Match in Notes)**: Query appears as a substring inside item notes (e.g. notes mentioning "photoresistor").
+    - Items within the same tier are sorted naturally using numeric collation.
+    - Multi-word search terms evaluate across tokens while preserving exact phrase priority.
+    - Applied uniformly across offline IndexedDB search, online Supabase inventory queries, and in-room compartment drawers.
   - Contextual empty states (*"No personal items found."* vs *"No components found."*).
 
 ### 5.3 Component & Personal Item Form
@@ -281,15 +291,17 @@ project_components
 - **Full Form for Components**:
   - Displays all technical specs, pricing, datasheets, custom specs builder, tags, and locations.
 - **Pre-Selected Location Support**:
-  - Accepts `locationId` query param (`/inventory/new?locationId=...`) and pre-assigns the selected storage location automatically with full breadcrumb resolution.
-- **Bounded Tag Selector**:
-  - Searchable tag input with bounded scrollable dropdown (`max-h-56 overflow-y-auto`) and keyboard navigation (`ArrowUp`/`ArrowDown`/`Enter`) preventing screen overflow.
+  - Accepts `locationId` query param (`/inventory/new?locationId=...`) and pre-assigns the selected storage location automatic- **Bounded Tag Selector**:
+  - Searchable tag input with bounded scrollable dropdown (`max-h-56 overflow-y-auto themed-scrollbar`) and keyboard navigation (`ArrowUp`/`ArrowDown`/`Enter`) preventing screen overflow.
 - **Custom Fields Builder**:
   - Supports `text`, `number`, `link`, `image`, and `file` across both components and personal items.
+  - **Custom Field Type Dropdown**: Replaced native select with an icon-enhanced custom popover menu (`Type`, `Hash`, `ExternalLink`, `ImageIcon`, `Paperclip`) styled in `#191715` with checkmarks and click-outside dismissal.
   - **Direct File Attachments (`file` option)**: Directly uploads non-image documents (PDF, PowerPoint `.ppt`/`.pptx`, Word `.doc`/`.docx`, Excel `.xls`/`.xlsx`, `.zip`, `.txt`) to Supabase storage with live upload indicators, formatted file sizes, original filenames, and "Replace" options.
   - **Image Attachments (`image` option)**: Direct upload of graphics and photos with thumbnail previews and full-screen lightbox.
-- **Physical Location Picker**:
-  - Works identically for both item types: select physical leaf hotspot and specify initial quantity.
+- **Searchable Physical Location Picker & Sequence Tooltips**:
+  - Replaces native OS `<select>` elements with a searchable, custom-styled dropdown with formatted breadcrumb hierarchies (`Room → View → Box → Compartment`), real-time path filtering, assigned location indicators, and full keyboard navigation (`ArrowUp`/`ArrowDown`/`Enter`/`Escape`).
+  - **Full-Width Popover Alignment**: Dropdown menu width dynamically matches the exact width of the parent trigger container (`absolute left-0 right-0 top-full mt-1.5 w-full`), eliminating awkward width cutoffs and gaps with adjacent quantity inputs.
+  - **Storage Sequence Hover Tooltip**: Hovering over any location option in the dropdown list, assigned location cards, or the trigger selector where long breadcrumb paths are truncated displays a floating glassmorphic tooltip (`#151311/95` background, `#443e38` border, directional pointer arrow, and pulsing destination crumb) revealing the full hierarchical storage sequence. Tooltip positions dynamically with fixed viewport coordinates and auto-dismisses on scroll.
 
 ### 5.4 Item Detail & Edit Pages
 
@@ -304,11 +316,13 @@ project_components
 - **Image Preview Lightbox**:
   - Clicking item photo or custom field image opens a full-screen zoomable preview modal.
 
-### 5.5 Projects Check-Out / Check-In
+### 5.5 Projects Check-Out & Check-In
 
 - Dedicated ledger tracking components pulled into projects.
 - Atomic deduction from `component_locations` upon checkout; atomic return to chosen location upon check-in.
 - Supports deferred component deletion (`pending_delete`) when items are currently checked out.
+- **Custom Project Status Dropdown**: Color-coded interactive status menu (Planning, Active, Completed, Archived) matching dark luxury design tokens.
+- **Location Selector in Check-In**: Hierarchical breadcrumb location search with `.themed-scrollbar`.
 
 ### 5.6 Offline PWA Support
 
@@ -316,6 +330,21 @@ project_components
 - Full IndexedDB mirror (Dexie.js) of rooms, photos, hotspots, components, and inventory.
 - Image caching in Cache Storage API.
 - Offline mode provides read-only browsing of spatial maps and inventory, showing an offline banner while disabling write operations.
+
+### 5.7 UI Aesthetics, Unified Dropdown & Custom Form Controls Design System
+
+- **Universal Themed Scrollbars**:
+  - Cross-browser custom scrollbar styling (`::-webkit-scrollbar`, `scrollbar-width`, `scrollbar-color`) applied globally across all scrollable containers and dropdowns, eliminating default OS/browser white tracks and silver scrollbars.
+  - Slim 6px rounded scrollbar thumb (`#38332d`, hover `#bc7353`) with dark background (`#141211`), plus `.themed-scrollbar` utility for popovers and dropdowns.
+- **Zero Native `<select>` Standard**:
+  - All select elements throughout the application (Storage Location Picker, Custom Field Type Selector, Project Status Dropdown) are custom-engineered interactive dropdowns adhering strictly to Deepini's dark luxury theme (`#141211` background, `#191715`/`#1a1816` panels, `#3a352e` borders, `#bc7353` copper accent, and gold badges).
+- **Consistent Popover Anatomy**:
+  - All dropdowns and popovers feature standardized border radiuses (`rounded-md`), deep shadows (`shadow-2xl shadow-black/90 ring-1 ring-black/50`), header status bars, formatted options with icons, active checkmarks, and click-outside dismissal.
+- **Universal Themed Number Inputs (`ThemedNumberInput`)**:
+  - Replaces default browser/OS spin buttons (which render as jarring white boxes with gray triangles on Windows/Chromium) with a custom, accessible stepper component styled with Deepini's dark luxury tokens (`#191715` background, `#3a352e` borders, and `#bc7353` copper hover accents).
+  - Stacked vertical micro-buttons with Lucide `ChevronUp` and `ChevronDown` icons.
+  - Global CSS rule (`-webkit-appearance: none`, `-moz-appearance: textfield`) eliminates default browser spin buttons everywhere.
+  - Includes continuous stepping on mouse hold (300ms initial delay, 60ms rapid interval), boundary clamping (`min`/`max`), step decimal precision support (e.g. `0.01` for prices), and size presets (`sm`, `md`, `lg`) applied uniformly across location quantity adjusters, pricing, low-stock alerts, custom number fields, check-out quantities, and compartment drawers.
 
 ---
 

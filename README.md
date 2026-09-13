@@ -24,22 +24,29 @@ Deepini is a personal inventory and spatial tracking web application built for m
 - **Personal Items**: Streamlined model for tools, equipment, stationery, and belongings. Requires only Name, Description, Photo, Storage Locations, and Tags.
 - **Interactive Location Column**: Inventory table features direct location pills with one-click "Locate" buttons and custom floating glassmorphic tooltips displaying the complete hierarchical storage sequence (`Room → View → Box → Compartment`).
 - **Pre-Selected Location Assignment**: Creating an item directly from a compartment drawer automatically passes and pre-assigns the location on `/inventory/new`.
-- **Bounded Tag Selector**: Clean searchable tag input with a bounded scrollable dropdown and keyboard navigation (`ArrowUp`/`ArrowDown`/`Enter`) preventing screen overflow.
-- **Custom Fields & File Attachments**: Attach custom text, numbers, links, images, and document files (PDFs, PPT, Word, Excel, ZIP) directly to items with cloud storage and a full-screen image preview lightbox.
+- **Searchable Location & Tag Pickers**: Replaced native browser selects with a custom searchable location dropdown featuring real-time path filtering, breadcrumbs, assigned status, full-width container alignment, and floating storage sequence hover tooltips displaying complete hierarchical paths (`Room → View → Box → Compartment`), alongside bounded tag selectors with keyboard navigation (`ArrowUp`/`ArrowDown`/`Enter`/`Escape`).
+- **Custom Fields & File Attachments**: Attach custom text, numbers, links, images, and document files (PDFs, PPT, Word, Excel, ZIP) directly to items with cloud storage, custom icon-enhanced field type dropdowns, and a full-screen image preview lightbox.
+- **Prioritized Relevance Search**: Six-tier relevance ranking prioritizes direct matches in item names first, then direct matches in tags, direct matches in notes, followed by in-between substring matches in names, tags, and notes (e.g. searching "es" places "ESP32" before "Resistors", and "Resistors" before items with notes mentioning "photoresistors").
 - **Inventory Page Toggle**: Fast switcher between `Components (X)` and `Personal (Y)` with tailored table columns and context-aware action buttons.
 - **Physical Tracking Parity**: Personal items are tracked across the exact same spatial hierarchy as components, featuring full "Locate" button spotlighting.
 
 ### 3. Projects Check-Out & Check-In Ledger
 - Pull components into active projects while tracking their source locations.
-- Check items back in to their original or newly chosen locations.
+- Check items back in to their original or newly chosen locations with hierarchical breadcrumb location search.
+- Custom color-coded project status dropdown (Planning, Active, Completed, Archived).
 - Deferred component deletion (`pending_delete`) prevents data loss when items are checked out.
 
-### 4. Offline-Ready PWA
+### 4. UI Aesthetics, Form Controls & Themed Scrollbars
+- **Universal Themed Scrollbars**: Universal cross-browser scrollbar styling replacing default Windows white tracks with sleek dark bronze/copper indicators.
+- **Zero Native `<select>` Policy**: Every dropdown is an accessible, theme-unified component matching `#141211` background, `#191715` panels, and `#bc7353` copper accents.
+- **Custom Themed Up/Down Steppers (`ThemedNumberInput`)**: Universal replacement of browser/OS number input spin buttons with sleek dark-themed stacked arrow buttons (`ChevronUp`/`ChevronDown`), eliminating white OS boxes on Windows and providing smooth click-and-hold continuous stepping across all quantity, price, alert, and custom number inputs.
+
+### 5. Offline-Ready PWA
 - Service Worker precaching app shell assets.
 - Complete IndexedDB mirror (Dexie.js) of rooms, photos, hotspots, and inventory items.
 - Offline read-only browsing of rooms, images, and inventory lists.
 
-### 5. Shared Password Gate
+### 6. Shared Password Gate
 - Client-side session password gate protecting the entire application without requiring user accounts or multi-tenant complexity.
 
 ---

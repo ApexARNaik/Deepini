@@ -6,6 +6,8 @@ import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploa
 import { X, Plus, UploadCloud, FileText, Maximize2, Tag as TagIcon, ChevronDown, MapPin, Search, Check, Type, Hash, ExternalLink, Image as ImageIcon, Paperclip } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import { ImagePreviewModal } from "./ImagePreviewModal";
+import { StorageSequenceTooltip, StorageTooltipData } from "@/components/spatial/StorageSequenceTooltip";
+import { ThemedNumberInput } from "@/components/ThemedNumberInput";
 
 interface Props {
   initialData?: Component;
@@ -115,6 +117,31 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [highlightedLocIndex, setHighlightedLocIndex] = useState(-1);
   const locationDropdownRef = useRef<HTMLDivElement>(null);
   const locationSearchInputRef = useRef<HTMLInputElement>(null);
+
+  // Storage Sequence Tooltip on hover
+  const [hoverTooltip, setHoverTooltip] = useState<StorageTooltipData | null>(null);
+
+  useEffect(() => {
+    if (!hoverTooltip) return;
+    const handleScroll = () => setHoverTooltip(null);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, [hoverTooltip]);
+
+  const handleShowTooltip = (
+    e: React.MouseEvent<HTMLElement>,
+    data: { fullLabel?: string; label?: string; roomName?: string; quantity?: number; customText?: string }
+  ) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHoverTooltip({
+      ...data,
+      targetRect: rect
+    });
+  };
+
+  const handleHideTooltip = () => {
+    setHoverTooltip(null);
+  };
 
   // Focus search input when location dropdown opens
   useEffect(() => {
@@ -636,23 +663,25 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                 <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
                   Price (INR)
                 </label>
-                <input
-                  type="number"
-                  step="0.01"
+                <ThemedNumberInput
+                  step={0.01}
+                  min={0}
                   value={price}
-                  onChange={e => setPrice(e.target.value)}
-                  className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
+                  onChange={setPrice}
+                  placeholder="0.00"
+                  className="w-full bg-brand-bg border border-[#332f2a]"
                 />
               </div>
               <div>
                 <label className="block text-[10px] tracking-widest text-brand-text-muted uppercase mb-2">
                   Low Stock Alert At
                 </label>
-                <input
-                  type="number"
+                <ThemedNumberInput
+                  min={0}
                   value={lowStock}
-                  onChange={e => setLowStock(e.target.value)}
-                  className="w-full bg-brand-bg border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
+                  onChange={setLowStock}
+                  placeholder="e.g. 5"
+                  className="w-full bg-brand-bg border border-[#332f2a]"
                 />
               </div>
             </div>
@@ -673,9 +702,19 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         {locations.length > 0 && (
           <div className="flex flex-col gap-2 mb-3">
             {locations.map(l => (
-              <div key={l.hotspot_id} className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] rounded">
-                <div className="text-sm text-white">{l.label}</div>
-                <div className="flex items-center gap-4">
+              <div 
+                key={l.hotspot_id} 
+                onMouseEnter={(e) => {
+                  handleShowTooltip(e, {
+                    fullLabel: l.label,
+                    quantity: l.quantity
+                  });
+                }}
+                onMouseLeave={handleHideTooltip}
+                className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] hover:border-[#4a443c] rounded transition-colors group/loc"
+              >
+                <div className="text-sm text-white truncate pr-2" title={l.label}>{l.label}</div>
+                <div className="flex items-center gap-4 shrink-0">
                   <div className="text-sm text-brand-text-muted">Qty: <span className="text-brand-accent font-bold">{l.quantity}</span></div>
                   <button type="button" onClick={() => handleRemoveLocation(l.hotspot_id)} className="text-brand-text-muted hover:text-red-400 transition-colors">
                     <X className="h-4 w-4" />
@@ -689,7 +728,20 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
           <div className="flex-1 relative" ref={locationDropdownRef}>
             <button
               type="button"
-              onClick={() => setIsLocationDropdownOpen(prev => !prev)}
+              onClick={() => {
+                handleHideTooltip();
+                setIsLocationDropdownOpen(prev => !prev);
+              }}
+              onMouseEnter={(e) => {
+                if (selectedHotspotObj) {
+                  handleShowTooltip(e, {
+                    fullLabel: selectedHotspotObj.fullLabel || selectedHotspotObj.label,
+                    label: selectedHotspotObj.label,
+                    roomName: selectedHotspotObj.roomName
+                  });
+                }
+              }}
+              onMouseLeave={handleHideTooltip}
               onKeyDown={(e) => {
                 if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
@@ -722,6 +774,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                   <span
                     onClick={(e) => {
                       e.stopPropagation();
+                      handleHideTooltip();
                       setSelectedHotspot("");
                     }}
                     title="Clear selection"
@@ -736,7 +789,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
 
             {/* Custom Location Dropdown Popover */}
             {isLocationDropdownOpen && (
-              <div className="absolute left-0 top-full mt-1.5 w-full sm:w-[32rem] max-w-[calc(100vw-2rem)] z-50 bg-[#191715] border border-[#3a352e] rounded-md shadow-2xl shadow-black/95 ring-1 ring-black/50 overflow-hidden flex flex-col">
+              <div className="absolute left-0 right-0 top-full mt-1.5 w-full z-50 bg-[#191715] border border-[#3a352e] rounded-md shadow-2xl shadow-black/95 ring-1 ring-black/50 overflow-hidden flex flex-col">
                 {/* Search Bar */}
                 <div className="p-2.5 bg-[#141210] border-b border-[#2e2a25] shrink-0">
                   <div className="relative">
@@ -805,10 +858,19 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                           id={`loc-opt-${idx}`}
                           type="button"
                           onClick={() => {
+                            handleHideTooltip();
                             setSelectedHotspot(hs.id);
                             setIsLocationDropdownOpen(false);
                           }}
-                          onMouseEnter={() => setHighlightedLocIndex(idx)}
+                          onMouseEnter={(e) => {
+                            setHighlightedLocIndex(idx);
+                            handleShowTooltip(e, {
+                              fullLabel: hs.fullLabel || hs.label,
+                              label: display.destination,
+                              roomName: hs.roomName || (hs.fullLabel ? hs.fullLabel.split('→')[0].trim() : undefined)
+                            });
+                          }}
+                          onMouseLeave={handleHideTooltip}
                           className={`w-full text-left px-3.5 py-2.5 text-xs flex items-start justify-between gap-3 transition-colors ${
                             isSelected
                               ? 'bg-brand-accent/20 border-l-2 border-brand-accent text-white font-medium'
@@ -828,7 +890,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                               )}
                             </div>
                             {display.trail && (
-                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5">
+                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5" title={hs.fullLabel}>
                                 {display.trail}
                               </div>
                             )}
@@ -845,12 +907,11 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
             )}
           </div>
           <div className="w-24">
-            <input
-              type="number"
-              min="1"
+            <ThemedNumberInput
+              min={1}
               value={locationQuantity}
-              onChange={e => setLocationQuantity(e.target.value)}
-              className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white focus:border-brand-accent focus:outline-none"
+              onChange={setLocationQuantity}
+              className="w-full bg-brand-bg border border-[#332f2a]"
             />
           </div>
           <button type="button" onClick={handleAddLocation} disabled={!selectedHotspot} className="px-4 py-2 bg-brand-accent text-white font-medium hover:bg-brand-accent-hover disabled:opacity-50">
@@ -1061,7 +1122,11 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                   <input type="text" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
                 )}
                 {field.type === 'number' && (
-                  <input type="number" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
+                  <ThemedNumberInput
+                    value={field.value}
+                    onChange={val => handleCustomFieldValueChange(key, val)}
+                    className="w-full bg-brand-bg border border-[#332f2a]"
+                  />
                 )}
                 {field.type === 'link' && (
                   <input type="url" value={field.value} onChange={e => handleCustomFieldValueChange(key, e.target.value)} className="w-full bg-brand-bg border border-[#332f2a] p-2 text-sm text-white" />
@@ -1284,6 +1349,9 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
         subtitle={previewImage?.subtitle}
         onClose={() => setPreviewImage(null)}
       />
+
+      {/* Floating Storage Sequence Tooltip */}
+      <StorageSequenceTooltip data={hoverTooltip} />
     </form>
   );
 }

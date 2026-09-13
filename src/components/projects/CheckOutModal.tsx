@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { getInventory, getComponentDetails, checkoutComponent, ComponentWithTotals, ComponentLocation } from "@/lib/api";
 import { Search, X, Package } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
+import { ThemedNumberInput } from "@/components/ThemedNumberInput";
 
 interface Props {
   projectId: string;
@@ -165,13 +166,12 @@ export function CheckOutModal({ projectId, onClose, onSuccess }: Props) {
                 <div className="flex items-end gap-4 bg-[#1a1816] p-4 border border-[#332f2a] rounded">
                   <div className="flex-1">
                     <label className="block text-[10px] uppercase tracking-widest text-brand-text-muted mb-2">Quantity to Check Out</label>
-                    <input 
-                      type="number" 
-                      min="1" 
+                    <ThemedNumberInput 
+                      min={1} 
                       max={selectedLoc.quantity} 
                       value={qty}
-                      onChange={e => setQty(e.target.value)}
-                      className="w-full bg-[#1a1816] border border-[#332f2a] p-3 text-white focus:border-brand-accent focus:outline-none"
+                      onChange={setQty}
+                      className="w-full bg-[#1a1816] border border-[#332f2a]"
                     />
                   </div>
                   <button type="submit" disabled={loading} className="px-8 py-3 bg-brand-accent text-white font-bold tracking-widest text-sm rounded-sm hover:bg-brand-accent-hover disabled:opacity-50">

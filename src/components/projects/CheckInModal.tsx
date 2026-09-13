@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { ProjectComponent, searchLeafHotspots, checkinComponent } from "@/lib/api";
 import { X, Search, MapPin } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
+import { StorageSequenceTooltip, StorageTooltipData } from "@/components/spatial/StorageSequenceTooltip";
 
 interface Props {
   item: ProjectComponent;
@@ -18,6 +19,29 @@ export function CheckInModal({ item, onClose, onSuccess }: Props) {
   const [locSearch, setLocSearch] = useState("");
   const debouncedLocSearch = useDebounce(locSearch, 300);
   const [locResults, setLocResults] = useState<{ id: string, pathLabel: string }[]>([]);
+  const [hoverTooltip, setHoverTooltip] = useState<StorageTooltipData | null>(null);
+
+  useEffect(() => {
+    if (!hoverTooltip) return;
+    const handleScroll = () => setHoverTooltip(null);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, [hoverTooltip]);
+
+  const handleShowTooltip = (
+    e: React.MouseEvent<HTMLElement>,
+    data: { fullLabel?: string; label?: string; roomName?: string; quantity?: number; customText?: string }
+  ) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHoverTooltip({
+      ...data,
+      targetRect: rect
+    });
+  };
+
+  const handleHideTooltip = () => {
+    setHoverTooltip(null);
+  };
   
   // By default, return to source location
   const [selectedLocId, setSelectedLocId] = useState(item.source_location_id);
@@ -110,13 +134,24 @@ export function CheckInModal({ item, onClose, onSuccess }: Props) {
                         <button 
                           key={loc.id} 
                           type="button"
-                          onClick={() => handleSelectLoc(loc.id, loc.pathLabel)}
+                          onClick={() => {
+                            handleHideTooltip();
+                            handleSelectLoc(loc.id, loc.pathLabel);
+                          }}
+                          onMouseEnter={(e) => {
+                            handleShowTooltip(e, {
+                              fullLabel: loc.pathLabel,
+                              label: dest,
+                              roomName: parts[0]
+                            });
+                          }}
+                          onMouseLeave={handleHideTooltip}
                           className="w-full text-left px-3.5 py-2.5 text-xs text-brand-text hover:bg-[#201d1a] hover:text-white transition-colors group flex items-start gap-2.5"
                         >
                           <MapPin className="h-3.5 w-3.5 text-brand-gold/70 group-hover:text-brand-accent shrink-0 mt-0.5 transition-colors" />
                           <div className="min-w-0 flex-1">
                             <div className="font-semibold text-white truncate">{dest}</div>
-                            {trail && <div className="text-[11px] text-brand-text-muted truncate mt-0.5">{trail}</div>}
+                            {trail && <div className="text-[11px] text-brand-text-muted truncate mt-0.5" title={loc.pathLabel}>{trail}</div>}
                           </div>
                         </button>
                       );
@@ -137,6 +172,8 @@ export function CheckInModal({ item, onClose, onSuccess }: Props) {
           </div>
         </form>
       </div>
+
+      <StorageSequenceTooltip data={hoverTooltip} />
     </div>
   );
 }

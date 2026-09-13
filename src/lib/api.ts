@@ -228,6 +228,98 @@ export function buildComponentLocationsMap(
   return map;
 }
 
+/**
+ * Calculates the match rank of an item against a search query.
+ * Lower score = higher priority.
+ *
+ * Tier 1 (10-12): Direct match in name (exact, name startsWith, or word startsWith)
+ * Tier 2 (20-22): Direct match in tags (exact, tag startsWith, or word startsWith)
+ * Tier 3 (30-31): Direct match in notes (notes startsWith, or word startsWith)
+ * Tier 4 (40-42): In-between match in name (query is substring inside a word)
+ * Tier 5 (50): In-between match in tags (query is substring inside a tag)
+ * Tier 6 (60): In-between match in notes (query is substring inside notes)
+ * Tier 999: No match (filtered out)
+ */
+export function getItemSearchScore(
+  item: { name: string; notes?: string | null; tags?: { name: string }[] },
+  search: string
+): number {
+  const q = search.toLowerCase().trim();
+  if (!q) return 0;
+
+  const name = (item.name || "").toLowerCase().trim();
+  const notes = (item.notes || "").toLowerCase().trim();
+  const tagNames = (item.tags || []).map(t => (t.name || "").toLowerCase().trim());
+
+  const splitWords = (text: string) => text.split(/[\s\-_\/,\.;:\(\)\[\]\{\}]+/).filter(Boolean);
+
+  const nameWords = splitWords(name);
+  const noteWords = splitWords(notes);
+  const tagWords = tagNames.flatMap(t => splitWords(t));
+
+  // 1. Direct match in Name
+  if (name === q) return 10;
+  if (name.startsWith(q)) return 11;
+  if (nameWords.some(w => w.startsWith(q))) return 12;
+
+  // 2. Direct match in Tags
+  if (tagNames.some(t => t === q)) return 20;
+  if (tagNames.some(t => t.startsWith(q))) return 21;
+  if (tagWords.some(w => w.startsWith(q))) return 22;
+
+  // 3. Direct match in Notes
+  if (notes.startsWith(q)) return 30;
+  if (noteWords.some(w => w.startsWith(q))) return 31;
+
+  // 4. In-between match in Name
+  if (name.includes(q)) return 40;
+
+  // 5. In-between match in Tags
+  if (tagNames.some(t => t.includes(q))) return 50;
+
+  // 6. In-between match in Notes
+  if (notes.includes(q)) return 60;
+
+  // Multi-word fallback: if query has multiple space-separated words, check if all words match
+  const queryTokens = q.split(/\s+/).filter(Boolean);
+  if (queryTokens.length > 1) {
+    const allTokensMatchName = queryTokens.every(token => name.includes(token));
+    if (allTokensMatchName) return 42;
+
+    const allTokensMatchAnywhere = queryTokens.every(token =>
+      name.includes(token) ||
+      notes.includes(token) ||
+      tagNames.some(t => t.includes(token))
+    );
+    if (allTokensMatchAnywhere) return 65;
+  }
+
+  return 999;
+}
+
+export function filterAndRankInventory<T extends { name: string; notes?: string | null; tags?: { name: string }[] }>(
+  items: T[],
+  search: string
+): T[] {
+  if (!search || !search.trim()) {
+    return [...items].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  }
+
+  const scored = items
+    .map(item => ({
+      item,
+      score: getItemSearchScore(item, search)
+    }))
+    .filter(({ score }) => score < 999);
+
+  scored.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return a.item.name.localeCompare(b.item.name, undefined, { numeric: true, sensitivity: 'base' });
+  });
+
+  return scored.map(({ item }) => item);
+}
+
 // Phase 4 Functions
 export async function getInventory(search: string = ""): Promise<ComponentWithTotals[]> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
@@ -248,7 +340,7 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
 
     let results = allComps.filter(c => !c.pending_delete);
     
-    return results.map(c => {
+    const mapped = results.map(c => {
       const cTags = allCompTags.filter(ct => ct.component_id === c.id).map(ct => tagMap.get(ct.tag_id)).filter(Boolean) as Tag[];
       return {
         ...c,
@@ -256,13 +348,9 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
         totals: totalsMap.get(c.id) || { component_id: c.id, in_storage_qty: 0, checked_out_qty: 0, total_owned_qty: 0 },
         locations: locationsMap.get(c.id) || []
       };
-    }).filter(c => {
-      if (!search) return true;
-      const s = search.toLowerCase();
-      return c.name.toLowerCase().includes(s) || 
-             (c.notes && c.notes.toLowerCase().includes(s)) ||
-             c.tags.some(t => t.name.toLowerCase().includes(s));
-    }).sort((a, b) => a.name.localeCompare(b.name));
+    });
+
+    return filterAndRankInventory(mapped, search);
   }
 
   const [compDataRes, totalsDataRes, compLocsRes, hsRes, phRes, rmRes] = await Promise.all([
@@ -295,16 +383,7 @@ export async function getInventory(search: string = ""): Promise<ComponentWithTo
     locations: locationsMap.get(c.id) || []
   }));
 
-  if (search) {
-    const s = search.toLowerCase();
-    results = results.filter(c => 
-      c.name.toLowerCase().includes(s) || 
-      (c.notes && c.notes.toLowerCase().includes(s)) ||
-      c.tags.some((t: any) => t.name.toLowerCase().includes(s))
-    );
-  }
-
-  return results;
+  return filterAndRankInventory(results, search);
 }
 
 export async function getLowStock(): Promise<ComponentWithTotals[]> {
