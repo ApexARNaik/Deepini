@@ -2,10 +2,20 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getProjectDetails, updateProjectStatus, Project, ProjectComponent } from "@/lib/api";
+import { 
+  getProjectDetails, 
+  updateProjectStatus, 
+  Project, 
+  ProjectComponent, 
+  getLoans, 
+  Loan, 
+  calculateLoanDaysRemaining 
+} from "@/lib/api";
 import { CheckOutModal } from "@/components/projects/CheckOutModal";
 import { CheckInModal } from "@/components/projects/CheckInModal";
 import { EditProjectModal } from "@/components/projects/EditProjectModal";
+import { LendModal } from "@/components/loans/LendModal";
+import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
 import { 
   ArrowLeft, 
   CheckCircle2, 
@@ -16,7 +26,11 @@ import {
   Check, 
   Edit2, 
   Lock,
-  ExternalLink
+  ExternalLink,
+  Share2,
+  RotateCcw,
+  User,
+  Calendar
 } from "lucide-react";
 import Link from "next/link";
 import { useNetworkState } from "@/hooks/useNetworkState";
@@ -38,11 +52,14 @@ export default function ProjectDetailPage() {
   
   const [project, setProject] = useState<Project | null>(null);
   const [items, setItems] = useState<ProjectComponent[]>([]);
+  const [activeLoan, setActiveLoan] = useState<Loan | null>(null);
   const [loading, setLoading] = useState(true);
   
   const [showCheckOut, setShowCheckOut] = useState(false);
   const [checkInItem, setCheckInItem] = useState<ProjectComponent | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showLendModal, setShowLendModal] = useState(false);
+  const [showReturnModal, setShowReturnModal] = useState(false);
   const [editInitialStatus, setEditInitialStatus] = useState<'planning' | 'active' | 'archived' | undefined>(undefined);
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
   const statusDropdownRef = useRef<HTMLDivElement>(null);
@@ -66,9 +83,13 @@ export default function ProjectDetailPage() {
     if (typeof projectId !== 'string') return;
     setLoading(true);
     try {
-      const data = await getProjectDetails(projectId);
+      const [data, loans] = await Promise.all([
+        getProjectDetails(projectId),
+        getLoans().then(all => all.find(l => l.project_id === projectId && !l.returned_at) || null).catch(() => null)
+      ]);
       setProject(data.project);
       setItems(data.items);
+      setActiveLoan(loans);
     } catch (err) {
       console.error(err);
     } finally {
@@ -197,12 +218,30 @@ export default function ProjectDetailPage() {
                 )}
               </div>
 
+              {activeLoan ? (
+                <button
+                  onClick={() => setShowReturnModal(true)}
+                  className="flex items-center px-4 py-2 bg-brand-gold/10 hover:bg-brand-gold/20 text-brand-gold border border-brand-gold/30 text-xs font-bold uppercase tracking-widest rounded-sm transition-colors"
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" /> Return Project
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowLendModal(true)}
+                  disabled={project.status === 'planning'}
+                  title={project.status === 'planning' ? "Cannot lend a project in Planning phase" : "Lend this project"}
+                  className="flex items-center px-3 py-2 bg-brand-gold/10 hover:bg-brand-gold/20 text-brand-gold border border-brand-gold/30 text-xs font-bold uppercase tracking-widest rounded-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Share2 className="h-3.5 w-3.5 mr-1.5" /> Lend
+                </button>
+              )}
+
               <button 
                 onClick={() => setShowCheckOut(true)}
-                disabled={isArchived}
-                title={isArchived ? "Archived projects cannot accept new checkouts. Change status to Active to checkout components." : undefined}
+                disabled={isArchived || !!activeLoan}
+                title={isArchived ? "Archived projects cannot accept new checkouts. Change status to Active to checkout components." : activeLoan ? "Project is currently on loan. Return project before adding checkouts." : undefined}
                 className={`flex items-center px-4 py-2 text-white text-xs font-bold uppercase tracking-widest rounded-sm transition-colors ${
-                  isArchived 
+                  isArchived || !!activeLoan
                     ? "bg-[#25221d] text-zinc-500 border border-[#332f2a] cursor-not-allowed" 
                     : "bg-brand-accent hover:bg-brand-accent-hover shadow-sm"
                 }`}
@@ -216,6 +255,74 @@ export default function ProjectDetailPage() {
 
       <div className="flex-1 overflow-y-auto themed-scrollbar p-6 space-y-8">
         
+        {/* On Loan Banner */}
+        {activeLoan && (() => {
+          const daysRemaining = calculateLoanDaysRemaining(activeLoan.due_date);
+          const isOverdue = daysRemaining != null && daysRemaining < 0;
+          const isDueTomorrow = daysRemaining === 1;
+          const isDueToday = daysRemaining === 0;
+
+          return (
+            <div className="bg-[#1a1816] border border-brand-gold/40 rounded-lg p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl shadow-black/40">
+              <div className="flex items-start gap-3.5">
+                <div className="h-10 w-10 rounded-md bg-brand-gold/10 border border-brand-gold/30 flex items-center justify-center shrink-0 mt-0.5">
+                  <Share2 className="h-5 w-5 text-brand-gold" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-brand-gold">Project Currently Lent Out</span>
+                    {isOverdue && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/60 border border-red-800/50 px-2 py-0.5 rounded">
+                        Overdue ({Math.abs(daysRemaining)}d)
+                      </span>
+                    )}
+                    {isDueToday && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400 bg-orange-950/60 border border-orange-800/50 px-2 py-0.5 rounded">
+                        Due Today
+                      </span>
+                    )}
+                    {isDueTomorrow && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-950/60 border border-amber-800/50 px-2 py-0.5 rounded">
+                        Due Tomorrow
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-white font-medium text-base mt-1 flex items-center gap-2">
+                    <User className="h-4 w-4 text-brand-gold" />
+                    <span>Lent to <strong className="text-brand-gold">{activeLoan.borrower_name}</strong></span>
+                    {activeLoan.borrower_contact && (
+                      <span className="text-xs text-brand-text-muted font-normal">({activeLoan.borrower_contact})</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-brand-text-muted mt-1.5">
+                    {activeLoan.due_date && (
+                      <span className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" /> Due: {activeLoan.due_date}
+                      </span>
+                    )}
+                    {activeLoan.source_location_label && (
+                      <span className="flex items-center gap-1">
+                        <MapPin className="h-3 w-3 text-brand-accent" /> Origin: {activeLoan.source_location_label}
+                      </span>
+                    )}
+                    {activeLoan.notes && (
+                      <span className="italic">&quot;{activeLoan.notes}&quot;</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="shrink-0">
+                <button
+                  onClick={() => setShowReturnModal(true)}
+                  className="w-full md:w-auto px-4 py-2.5 bg-brand-gold text-black font-bold text-xs uppercase tracking-widest rounded hover:bg-brand-gold/90 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-brand-gold/10"
+                >
+                  <RotateCcw className="h-4 w-4" /> Return Project
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Physical Storage Location Banner for Archived Projects */}
         {isArchived && (
           <div className="bg-[#1a1816] border border-amber-900/50 rounded-lg p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl shadow-black/40">
@@ -394,6 +501,30 @@ export default function ProjectDetailPage() {
             setProject(updated);
             setShowEditModal(false);
             setEditInitialStatus(undefined);
+            load();
+          }}
+        />
+      )}
+
+      {showLendModal && (
+        <LendModal
+          isOpen={showLendModal}
+          initialProjectId={project.id}
+          onClose={() => setShowLendModal(false)}
+          onSuccess={() => {
+            setShowLendModal(false);
+            load();
+          }}
+        />
+      )}
+
+      {showReturnModal && activeLoan && (
+        <ReturnLoanModal
+          isOpen={showReturnModal}
+          loan={activeLoan}
+          onClose={() => setShowReturnModal(false)}
+          onSuccess={() => {
+            setShowReturnModal(false);
             load();
           }}
         />

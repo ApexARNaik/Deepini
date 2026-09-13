@@ -22,18 +22,22 @@ import {
   Eye,
   ArrowRight,
   ExternalLink,
-  Lock
+  Lock,
+  Share2
 } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
-import { getInventory, getRooms, ComponentWithTotals, Room, isPersonalItem } from "@/lib/api";
+import { getInventory, getRooms, getLoanNotifications, ComponentWithTotals, Room, isPersonalItem, Loan } from "@/lib/api";
 import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
+import { NotificationCenter } from "@/components/notifications/NotificationCenter";
+import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Room Map", href: "/rooms", icon: Map },
   { name: "Inventory", href: "/inventory", icon: Archive },
   { name: "Projects", href: "/projects", icon: Compass },
+  { name: "Loans", href: "/loans", icon: Share2 },
   { name: "Low Stock", href: "/low-stock", icon: TriangleAlert },
 ];
 
@@ -55,6 +59,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [quickViewComponentId, setQuickViewComponentId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Notification & Loan Return state
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [unreadAlertCount, setUnreadAlertCount] = useState(0);
+  const [returnLoanItem, setReturnLoanItem] = useState<Loan | null>(null);
+  const desktopNotifBtnRef = useRef<HTMLButtonElement>(null);
+  const mobileNotifBtnRef = useRef<HTMLButtonElement>(null);
+
+  const refreshNotificationCount = () => {
+    getLoanNotifications().then(notifs => {
+      setUnreadAlertCount(notifs.length);
+    }).catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshNotificationCount();
+    const interval = setInterval(refreshNotificationCount, 30000);
+    return () => clearInterval(interval);
+  }, [pathname]);
 
   const debouncedSearch = useDebounce(searchQuery.trim(), 250);
 
@@ -251,11 +274,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           
           <button 
-            onClick={() => alert("No new notifications")}
+            ref={desktopNotifBtnRef}
+            onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
             title="Notifications"
-            className="text-brand-text-muted hover:text-white transition-colors h-8 w-8 flex items-center justify-center"
+            className="text-brand-text-muted hover:text-white transition-colors h-8 w-8 flex items-center justify-center relative rounded hover:bg-[#24211e]"
           >
             <Bell className="h-5 w-5" />
+            {unreadAlertCount > 0 && (
+              <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-brand-accent ring-2 ring-[#1a1816] animate-pulse" />
+            )}
           </button>
         </div>
       </div>
@@ -500,11 +527,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Mobile Profile & Notifications */}
           <div className="flex md:hidden items-center gap-3 ml-4">
             <button 
-              onClick={() => alert("No new notifications")}
+              ref={mobileNotifBtnRef}
+              onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
               title="Notifications"
-              className="text-brand-text-muted hover:text-white transition-colors h-8 w-8 flex items-center justify-center"
+              className="text-brand-text-muted hover:text-white transition-colors h-8 w-8 flex items-center justify-center relative rounded hover:bg-[#24211e]"
             >
               <Bell className="h-4 w-4" />
+              {unreadAlertCount > 0 && (
+                <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-brand-accent ring-2 ring-[#1a1816] animate-pulse" />
+              )}
             </button>
             <div className="relative">
               <button 
@@ -586,6 +617,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         subtitle={previewImage?.subtitle}
         onClose={() => setPreviewImage(null)}
       />
+
+      {/* Notification Center Popover */}
+      {isNotificationsOpen && (
+        <NotificationCenter
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+          anchorRef={desktopNotifBtnRef}
+          onReturnLoan={(loan) => {
+            setIsNotificationsOpen(false);
+            setReturnLoanItem(loan);
+          }}
+        />
+      )}
+
+      {/* Return Loan Modal */}
+      {returnLoanItem && (
+        <ReturnLoanModal
+          loan={returnLoanItem}
+          isOpen={!!returnLoanItem}
+          onClose={() => setReturnLoanItem(null)}
+          onSuccess={() => {
+            setReturnLoanItem(null);
+            refreshNotificationCount();
+          }}
+        />
+      )}
     </div>
   );
 }

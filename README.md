@@ -43,17 +43,26 @@ Deepini is a personal inventory and spatial tracking web application built for m
 - Check items back in to their original or newly chosen locations with hierarchical breadcrumb location search.
 - Deferred component deletion (`pending_delete`) prevents data loss when items are checked out.
 
-### 4. UI Aesthetics, Form Controls & Themed Scrollbars
+### 4. Lending System, Dynamic Due Notifications & Origin Tracking
+- **Lend Components & Projects**: Lend items or assembled projects with borrower name, contact details, notes, and expected return due dates.
+- **Strict Leaf Origin Tracking**: Mandatory assignment and recording of physical leaf storage locations (`is_leaf = true`) where items are pulled from, enforced at the database RPC and UI levels.
+- **Atomic Partial Quantity Lending**: Database RPC `lend_component` executes with row-level locking (`FOR UPDATE`) and stock validation to prevent overdrafts.
+- **Return to Original or Reorganized Location**: Returning defaulted to original location with badge, with ability to return to any valid leaf hotspot.
+- **Dynamic In-App Notifications**: Derives Due Tomorrow (1-day advance warning), Due Today, and Overdue alerts completely in-memory on the fly with zero persistent database notification records. Features interactive `NotificationCenter` popover directly in the app shell.
+- **Historical Record Preservation**: Foreign keys configured with `ON DELETE SET NULL` alongside immutable text snapshot columns (`component_name`, `project_name`, `source_location_label`, `returned_location_label`), ensuring full historical loan logs are never lost when components or projects are deleted.
+- **First-Class Loans Workspace (`/loans`)**: Full search, filtering (Active vs History, Components vs Projects, Due Soon/Overdue), and 1-click Return modals.
+
+### 5. UI Aesthetics, Form Controls & Themed Scrollbars
 - **Universal Themed Scrollbars**: Universal cross-browser scrollbar styling replacing default Windows white tracks with sleek dark bronze/copper indicators.
 - **Zero Native `<select>` Policy**: Every dropdown is an accessible, theme-unified component matching `#141211` background, `#191715` panels, and `#bc7353` copper accents.
 - **Custom Themed Up/Down Steppers (`ThemedNumberInput`)**: Universal replacement of browser/OS number input spin buttons with sleek dark-themed stacked arrow buttons (`ChevronUp`/`ChevronDown`), eliminating white OS boxes on Windows and providing smooth click-and-hold continuous stepping across all quantity, price, alert, and custom number inputs.
 
-### 5. Offline-Ready PWA
+### 6. Offline-Ready PWA
 - Service Worker precaching app shell assets.
 - Complete IndexedDB mirror (Dexie.js) of rooms, photos, hotspots, and inventory items.
 - Offline read-only browsing of rooms, images, and inventory lists.
 
-### 6. Shared Password Gate
+### 7. Shared Password Gate
 - Client-side session password gate protecting the entire application without requiring user accounts or multi-tenant complexity.
 
 ---
@@ -91,6 +100,7 @@ Run the migration scripts in the Supabase SQL Editor:
 3. `supabase/migrations/003_add_item_type_to_components.sql`: Adds `item_type` column to `components`.
 4. `supabase/migrations/004_add_delete_hotspot_rpc.sql`: Recursive hotspot deletion RPC.
 5. `supabase/migrations/010_add_project_location_and_archive_rpc.sql`: Adds `location_id` column to projects and atomic `archive_project` RPC with leaf hotspot validation.
+6. `supabase/migrations/011_add_loans_and_lending_system.sql`: Adds `loans` table, atomic lending RPCs (`lend_component`, `return_lent_component`, `lend_project`, `return_lent_project`), safe component deletion integration, and updated `component_totals` view.
 
 *(Note: The application also includes client-side fallbacks, ensuring continuous operation even before remote database migrations are executed.)*
 

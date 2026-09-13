@@ -177,8 +177,13 @@ SELECT
   coalesce(sum(cl.quantity), 0) AS in_storage_qty,
   coalesce((SELECT sum(pc.quantity) FROM project_components pc
             WHERE pc.component_id = c.id AND pc.returned_at IS NULL), 0) AS checked_out_qty,
-  coalesce(sum(cl.quantity), 0) + coalesce((SELECT sum(pc.quantity) FROM project_components pc
-            WHERE pc.component_id = c.id AND pc.returned_at IS NULL), 0) AS total_owned_qty
+  coalesce((SELECT sum(l.quantity) FROM loans l
+            WHERE l.component_id = c.id AND l.returned_at IS NULL), 0) AS lent_qty,
+  coalesce(sum(cl.quantity), 0) + 
+  coalesce((SELECT sum(pc.quantity) FROM project_components pc
+            WHERE pc.component_id = c.id AND pc.returned_at IS NULL), 0) +
+  coalesce((SELECT sum(l.quantity) FROM loans l
+            WHERE l.component_id = c.id AND l.returned_at IS NULL), 0) AS total_owned_qty
 FROM components c
 LEFT JOIN component_locations cl ON cl.component_id = c.id
 GROUP BY c.id;
@@ -207,6 +212,41 @@ project_components
   returned_at (timestamptz, nullable)
   returned_location_id (uuid, fk -> spatial_hotspots.id, nullable)
 ```
+
+---
+
+### 4.4 Loans & Lending System
+
+```
+loans
+  id (uuid, pk)
+  component_id (uuid, fk -> components.id, ON DELETE SET NULL, nullable)
+  project_id (uuid, fk -> projects.id, ON DELETE SET NULL, nullable)
+  borrower_name (text, not null)
+  borrower_contact (text, nullable)
+  quantity (int, not null, default 1, check quantity > 0)
+  due_date (date, nullable)
+  notes (text, nullable)
+  lent_at (timestamptz, default now())
+  returned_at (timestamptz, nullable)
+  source_location_id (uuid, fk -> spatial_hotspots.id, ON DELETE SET NULL, nullable)
+  returned_location_id (uuid, fk -> spatial_hotspots.id, ON DELETE SET NULL, nullable)
+  -- Snapshot columns to preserve historical records across deletions:
+  component_name (text, nullable)
+  project_name (text, nullable)
+  source_location_label (text, nullable)
+  returned_location_label (text, nullable)
+```
+
+#### Historical Record Preservation
+- Foreign keys specify `ON DELETE SET NULL`.
+- When an item or project is lent, immutable text snapshots of `component_name`, `project_name`, `source_location_label`, and `returned_location_label` are stored directly in the loan row.
+- If a component or project is later deleted, historical loan records are strictly preserved without cascading deletions or broken references.
+
+#### Origin Location & Atomic Operations
+- Loans strictly enforce valid leaf storage locations (`is_leaf = true`) at the database RPC level (`lend_component`, `lend_project`).
+- Partial component lending executes with row-level locking (`FOR UPDATE`) to prevent concurrent overdrafts.
+- Items may be returned to their original leaf location or a newly selected valid leaf location if the original location was reorganized.
 
 ---
 
@@ -366,6 +406,33 @@ project_components
   - Global CSS rule (`-webkit-appearance: none`, `-moz-appearance: textfield`) eliminates default browser spin buttons everywhere.
   - Includes continuous stepping on mouse hold (300ms initial delay, 60ms rapid interval), boundary clamping (`min`/`max`), step decimal precision support (e.g. `0.01` for prices), and size presets (`sm`, `md`, `lg`) applied uniformly across location quantity adjusters, pricing, low-stock alerts, custom number fields, check-out quantities, and compartment drawers.
 
+### 5.8 Lending System, Dynamic Due Notifications & Origin Tracking
+
+- **Component & Project Lending**:
+  - Dedicated workflow to lend components (with partial quantities) or entire projects (in Active or Archived phase) to colleagues or friends.
+  - Form collects Borrower Name (required), Contact (phone/email), Due Date, Notes, and Origin Location.
+- **Mandatory Leaf Origin Location Enforcement**:
+  - All loans strictly require selecting a physical leaf storage location where the item/build is retrieved from (`is_leaf = true`).
+  - Enforced at both database RPC level (`lend_component`, `lend_project`) and client UI validation.
+- **Atomic Partial Component Lending with Row-Level Locking**:
+  - `lend_component` RPC locks the source row with `FOR UPDATE`, validates available quantity, decrements stock atomically, and records the loan with text snapshots.
+- **Return to Original or New Leaf Location**:
+  - Returning a lent item or project defaults to its original leaf location with an `(Original Location)` badge.
+  - If the original compartment was deleted or reorganized, users can return the item to any other valid leaf hotspot.
+- **Dynamic In-App Notifications (Zero Persistent DB Rows)**:
+  - Notifications are generated in-memory on the fly by comparing `due_date` with the current local calendar day.
+  - **Due Tomorrow ($\Delta = 1$)**: High-visibility amber alert notifying the user 1 day before the return date.
+  - **Due Today ($\Delta = 0$)**: Orange alert for loans due today.
+  - **Overdue ($\Delta < 0$)**: Red urgent alert showing elapsed days overdue.
+  - Integrated into the desktop and mobile header `Bell` icon with an interactive `NotificationCenter` popover and quick "Return" action.
+- **Dedicated Loans Workspace (`/loans`)**:
+  - First-class navigation link in sidebar.
+  - Tabbed filtering for Active Loans vs Full Loan History.
+  - Filter pills for All, Components, Projects, and Due Soon/Overdue.
+  - Global Quick Lend modal and 1-click Return modals.
+- **Integration with Safe Deletion**:
+  - `delete_component_safe` and client fallbacks check both active project checkouts and active loans before deleting. If active loans exist, deletion is deferred with `pending_delete = true`.
+
 ---
 
 ## 6. Route Map
@@ -380,6 +447,7 @@ project_components
                              Query params: ?locationId=[hotspotId] (pre-selects storage location)
 /inventory/[componentId]   → Item Detail Page (stats, description/specs, storage locations with deep "Locate")
 /inventory/[componentId]/edit → Edit Item Form
+/loans                     → Loans workspace (active loans, historical ledger, filters, quick lend)
 /low-stock                 → Low-Stock alert dashboard
 /projects                  → Projects list & status
 /projects/[projectId]      → Project checkout/check-in workspace

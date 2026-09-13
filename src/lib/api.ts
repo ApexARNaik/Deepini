@@ -1464,6 +1464,60 @@ export interface ProjectComponent {
   source_hotspot?: SpatialHotspot;
 }
 
+export interface Loan {
+  id: string;
+  loan_type: 'component' | 'project';
+  component_id: string | null;
+  project_id: string | null;
+  source_location_id: string | null;
+  returned_location_id: string | null;
+  component_name?: string;
+  project_name?: string;
+  source_location_label?: string;
+  returned_location_label?: string;
+  quantity: number;
+  borrower_name: string;
+  borrower_contact?: string | null;
+  notes?: string | null;
+  lent_at: string;
+  due_date: string;
+  returned_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  // Resolved relations for UI convenience
+  component?: Component;
+  project?: Project;
+  source_hotspot?: any;
+  returned_hotspot?: any;
+}
+
+export interface LoanNotification {
+  id: string;
+  loanId: string;
+  type: 'due_tomorrow' | 'due_today' | 'overdue';
+  title: string;
+  message: string;
+  urgency: 'critical' | 'high' | 'medium';
+  daysRemaining: number;
+  loan: Loan;
+}
+
+export function calculateLoanDaysRemaining(dueDateStr: string): number {
+  if (!dueDateStr) return 0;
+  const parts = dueDateStr.split('T')[0].split('-');
+  const dueYear = parseInt(parts[0], 10);
+  const dueMonth = parseInt(parts[1], 10) - 1;
+  const dueDay = parseInt(parts[2], 10);
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDate = new Date(dueYear, dueMonth, dueDay);
+
+  const diffTime = dueDate.getTime() - today.getTime();
+  return Math.round(diffTime / (1000 * 60 * 60 * 24));
+}
+
+
 export function extractProjectLocation(project: any): { cleanDescription: string; locationId: string | null } {
   if (project.location_id) {
     return {
@@ -1802,7 +1856,24 @@ export async function getComponentLocationAssignments(componentId: string): Prom
 export async function deleteComponent(id: string): Promise<void> {
   const { error } = await supabase.rpc('delete_component_safe', { p_component_id: id });
   if (error) {
-    console.warn("RPC delete_component_safe error, falling back to direct delete:", error);
+    console.warn("RPC delete_component_safe error, falling back to client safe delete:", error);
+    const { data: activeProj } = await supabase.from('project_components').select('id').eq('component_id', id).is('returned_at', null);
+    let activeLoans: any[] | null = null;
+    try {
+      const res = await supabase.from('loans').select('id').eq('component_id', id).is('returned_at', null);
+      activeLoans = res.data;
+    } catch {}
+
+    if ((activeProj && activeProj.length > 0) || (activeLoans && activeLoans.length > 0)) {
+      await supabase.from('component_locations').delete().eq('component_id', id);
+      await supabase.from('components').update({ pending_delete: true }).eq('id', id);
+      if (typeof window !== 'undefined') {
+        await db.components.update(id, { pending_delete: true });
+        await db.component_locations.where('component_id').equals(id).delete();
+      }
+      return;
+    }
+
     await supabase.from('component_tags').delete().eq('component_id', id);
     await supabase.from('component_locations').delete().eq('component_id', id);
     const { error: delErr } = await supabase.from('components').delete().eq('id', id);
@@ -1917,3 +1988,465 @@ export async function searchLeafHotspots(query: string = ""): Promise<{ id: stri
   
   return results.slice(0, 50); // limit
 }
+
+// -------------------------------------------------------------
+// LENDING SYSTEM API & DYNAMIC NOTIFICATIONS
+// -------------------------------------------------------------
+
+export async function getLoans(): Promise<Loan[]> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
+
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const rawLoans = await db.loans.toArray().catch(() => []);
+    const [allComps, allProjs] = await Promise.all([
+      db.components.toArray().catch(() => []),
+      db.projects.toArray().catch(() => [])
+    ]);
+    const compMap = new Map<string, any>(allComps.map(c => [c.id, c]));
+    const projMap = new Map<string, any>(allProjs.map(p => [p.id, p]));
+
+    return rawLoans.map(loan => {
+      const src = loan.source_location_id ? hotspotMap.get(loan.source_location_id) : undefined;
+      const ret = loan.returned_location_id ? hotspotMap.get(loan.returned_location_id) : undefined;
+      const comp = loan.component_id ? compMap.get(loan.component_id) : undefined;
+      const proj = loan.project_id ? projMap.get(loan.project_id) : undefined;
+
+      return {
+        ...loan,
+        component_name: comp?.name || loan.component_name,
+        project_name: proj?.name || loan.project_name,
+        source_location_label: src?.fullLabel || src?.label || loan.source_location_label,
+        returned_location_label: ret?.fullLabel || ret?.label || loan.returned_location_label,
+        component: comp,
+        project: proj,
+        source_hotspot: src,
+        returned_hotspot: ret
+      };
+    }).sort((a, b) => new Date(b.lent_at).getTime() - new Date(a.lent_at).getTime());
+  }
+
+  // Online fetch with graceful fallback to Dexie if remote table is missing
+  try {
+    const { data, error } = await supabase
+      .from('loans')
+      .select('*, component:components(*), project:projects(*)')
+      .order('lent_at', { ascending: false });
+
+    if (!error && data) {
+      return data.map((loan: any) => {
+        const src = loan.source_location_id ? hotspotMap.get(loan.source_location_id) : undefined;
+        const ret = loan.returned_location_id ? hotspotMap.get(loan.returned_location_id) : undefined;
+
+        return {
+          ...loan,
+          component_name: loan.component?.name || loan.component_name,
+          project_name: loan.project?.name || loan.project_name,
+          source_location_label: src?.fullLabel || src?.label || loan.source_location_label,
+          returned_location_label: ret?.fullLabel || ret?.label || loan.returned_location_label,
+          source_hotspot: src,
+          returned_hotspot: ret
+        };
+      });
+    }
+  } catch (err) {
+    console.warn("Could not query loans from Supabase, falling back to local Dexie:", err);
+  }
+
+  // Fallback to local Dexie
+  if (typeof window !== 'undefined') {
+    const localLoans = await db.loans.toArray().catch(() => []);
+    return localLoans.sort((a, b) => new Date(b.lent_at).getTime() - new Date(a.lent_at).getTime());
+  }
+
+  return [];
+}
+
+export async function getActiveLoans(): Promise<Loan[]> {
+  const all = await getLoans();
+  return all.filter(l => !l.returned_at);
+}
+
+export async function lendComponent(params: {
+  componentId: string;
+  sourceLocationId: string;
+  quantity: number;
+  borrowerName: string;
+  borrowerContact?: string;
+  dueDate: string;
+  notes?: string;
+}): Promise<Loan> {
+  const { componentId, sourceLocationId, quantity, borrowerName, borrowerContact, dueDate, notes } = params;
+
+  if (quantity <= 0) throw new Error("Quantity must be greater than zero.");
+  if (!borrowerName.trim()) throw new Error("Borrower name is required.");
+  if (!dueDate) throw new Error("Return due date is required.");
+
+  // 1. Validate leaf source location
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const srcHotspot = leafHotspots.find(h => h.id === sourceLocationId);
+  if (!srcHotspot || !srcHotspot.is_leaf) {
+    throw new Error("Source location must reference a valid leaf storage location.");
+  }
+
+  // 2. Try remote RPC lend_component
+  try {
+    const { data, error } = await supabase.rpc('lend_component', {
+      p_component_id: componentId,
+      p_source_location_id: sourceLocationId,
+      p_quantity: quantity,
+      p_borrower_name: borrowerName.trim(),
+      p_borrower_contact: borrowerContact?.trim() || null,
+      p_due_date: dueDate,
+      p_notes: notes?.trim() || null
+    });
+
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.loans.put(data);
+        // Refresh local cache
+        const locs = await db.component_locations.where({ component_id: componentId, hotspot_id: sourceLocationId }).first();
+        if (locs) {
+          if (locs.quantity <= quantity) {
+            await db.component_locations.delete(locs.id);
+          } else {
+            await db.component_locations.update(locs.id, { quantity: locs.quantity - quantity });
+          }
+        }
+      }
+      return data;
+    }
+  } catch (rpcErr) {
+    console.warn("RPC lend_component failed, executing client fallback:", rpcErr);
+  }
+
+  // 3. Client Fallback
+  // Check location stock
+  let locRecord: any = null;
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    locRecord = await db.component_locations.where({ component_id: componentId, hotspot_id: sourceLocationId }).first();
+  } else {
+    const { data: locs } = await supabase
+      .from('component_locations')
+      .select('*')
+      .eq('component_id', componentId)
+      .eq('hotspot_id', sourceLocationId)
+      .single();
+    locRecord = locs;
+  }
+
+  if (!locRecord || locRecord.quantity < quantity) {
+    throw new Error(`Insufficient quantity in source location. Available: ${locRecord?.quantity || 0}`);
+  }
+
+  // Decrement storage
+  if (locRecord.quantity === quantity) {
+    await supabase.from('component_locations').delete().eq('id', locRecord.id);
+    if (typeof window !== 'undefined') await db.component_locations.delete(locRecord.id);
+  } else {
+    await supabase.from('component_locations').update({ quantity: locRecord.quantity - quantity }).eq('id', locRecord.id);
+    if (typeof window !== 'undefined') await db.component_locations.update(locRecord.id, { quantity: locRecord.quantity - quantity });
+  }
+
+  // Get component name snapshot
+  let compName = "Component";
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const comp = await db.components.get(componentId);
+    compName = comp?.name || compName;
+  } else {
+    const { data: comp } = await supabase.from('components').select('name').eq('id', componentId).single();
+    compName = comp?.name || compName;
+  }
+
+  const loanId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `loan-${Date.now()}`;
+  const newLoan: Loan = {
+    id: loanId,
+    loan_type: 'component',
+    component_id: componentId,
+    component_name: compName,
+    project_id: null,
+    source_location_id: sourceLocationId,
+    source_location_label: srcHotspot.fullLabel || srcHotspot.label,
+    returned_location_id: null,
+    quantity,
+    borrower_name: borrowerName.trim(),
+    borrower_contact: borrowerContact?.trim() || null,
+    notes: notes?.trim() || null,
+    lent_at: new Date().toISOString(),
+    due_date: dueDate,
+    returned_at: null
+  };
+
+  try {
+    await supabase.from('loans').insert([newLoan]);
+  } catch {}
+  if (typeof window !== 'undefined') {
+    await db.loans.put(newLoan);
+  }
+
+  return newLoan;
+}
+
+export async function returnLentComponent(loanId: string, returnLocationId: string): Promise<Loan> {
+  // Validate return location is a leaf hotspot
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const retHotspot = leafHotspots.find(h => h.id === returnLocationId);
+  if (!retHotspot || !retHotspot.is_leaf) {
+    throw new Error("Return location must reference a valid leaf storage location.");
+  }
+
+  // Try RPC
+  try {
+    const { data, error } = await supabase.rpc('return_lent_component', {
+      p_loan_id: loanId,
+      p_return_location_id: returnLocationId
+    });
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.loans.update(loanId, {
+          returned_at: data.returned_at,
+          returned_location_id: returnLocationId,
+          returned_location_label: retHotspot.fullLabel || retHotspot.label
+        });
+      }
+      return data;
+    }
+  } catch (rpcErr) {
+    console.warn("RPC return_lent_component failed, executing client fallback:", rpcErr);
+  }
+
+  // Fallback
+  let loan: any = null;
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    loan = await db.loans.get(loanId);
+  } else {
+    const { data } = await supabase.from('loans').select('*').eq('id', loanId).single();
+    loan = data;
+  }
+  if (!loan) throw new Error("Loan record not found.");
+
+  const now = new Date().toISOString();
+  if (loan.component_id) {
+    // Add quantity back to return location
+    const { data: existingLoc } = await supabase
+      .from('component_locations')
+      .select('*')
+      .eq('component_id', loan.component_id)
+      .eq('hotspot_id', returnLocationId)
+      .maybeSingle();
+
+    if (existingLoc) {
+      await supabase.from('component_locations').update({ quantity: existingLoc.quantity + loan.quantity }).eq('id', existingLoc.id);
+      if (typeof window !== 'undefined') {
+        await db.component_locations.update(existingLoc.id, { quantity: existingLoc.quantity + loan.quantity });
+      }
+    } else {
+      const newLocId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `loc-${Date.now()}`;
+      const locPayload = { id: newLocId, component_id: loan.component_id, hotspot_id: returnLocationId, quantity: loan.quantity };
+      try {
+        await supabase.from('component_locations').insert([locPayload]);
+      } catch {}
+      if (typeof window !== 'undefined') {
+        await db.component_locations.put(locPayload);
+      }
+    }
+  }
+
+  const updates = {
+    returned_at: now,
+    returned_location_id: returnLocationId,
+    returned_location_label: retHotspot.fullLabel || retHotspot.label
+  };
+
+  try {
+    await supabase.from('loans').update(updates).eq('id', loanId);
+  } catch {}
+  if (typeof window !== 'undefined') {
+    await db.loans.update(loanId, updates);
+  }
+
+  return { ...loan, ...updates };
+}
+
+export async function lendProject(params: {
+  projectId: string;
+  borrowerName: string;
+  borrowerContact?: string;
+  dueDate: string;
+  notes?: string;
+}): Promise<Loan> {
+  const { projectId, borrowerName, borrowerContact, dueDate, notes } = params;
+
+  if (!borrowerName.trim()) throw new Error("Borrower name is required.");
+  if (!dueDate) throw new Error("Return due date is required.");
+
+  // Fetch project details
+  const { project } = await getProjectDetails(projectId);
+  if (project.status === 'planning') {
+    throw new Error("Cannot lend a project in Planning phase (no physical build or components in use).");
+  }
+
+  // Try RPC
+  try {
+    const { data, error } = await supabase.rpc('lend_project', {
+      p_project_id: projectId,
+      p_borrower_name: borrowerName.trim(),
+      p_borrower_contact: borrowerContact?.trim() || null,
+      p_due_date: dueDate,
+      p_notes: notes?.trim() || null
+    });
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.loans.put(data);
+      }
+      return data;
+    }
+  } catch (rpcErr) {
+    console.warn("RPC lend_project failed, executing client fallback:", rpcErr);
+  }
+
+  const loanId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `loan-${Date.now()}`;
+  const newLoan: Loan = {
+    id: loanId,
+    loan_type: 'project',
+    project_id: projectId,
+    project_name: project.name,
+    component_id: null,
+    source_location_id: project.location_id || null,
+    source_location_label: project.location_label || undefined,
+    returned_location_id: null,
+    quantity: 1,
+    borrower_name: borrowerName.trim(),
+    borrower_contact: borrowerContact?.trim() || null,
+    notes: notes?.trim() || null,
+    lent_at: new Date().toISOString(),
+    due_date: dueDate,
+    returned_at: null
+  };
+
+  try {
+    await supabase.from('loans').insert([newLoan]);
+  } catch {}
+  if (typeof window !== 'undefined') {
+    await db.loans.put(newLoan);
+  }
+
+  return newLoan;
+}
+
+export async function returnLentProject(loanId: string, returnLocationId?: string): Promise<Loan> {
+  const leafHotspots = await getAllLeafHotspots().catch(() => []);
+  const retHotspot = returnLocationId ? leafHotspots.find(h => h.id === returnLocationId) : undefined;
+  if (returnLocationId && (!retHotspot || !retHotspot.is_leaf)) {
+    throw new Error("Return location must reference a valid leaf storage location.");
+  }
+
+  // Try RPC
+  try {
+    const { data, error } = await supabase.rpc('return_lent_project', {
+      p_loan_id: loanId,
+      p_return_location_id: returnLocationId || null
+    });
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        await db.loans.update(loanId, {
+          returned_at: data.returned_at,
+          returned_location_id: returnLocationId,
+          returned_location_label: retHotspot?.fullLabel || retHotspot?.label
+        });
+      }
+      return data;
+    }
+  } catch (rpcErr) {
+    console.warn("RPC return_lent_project failed, executing client fallback:", rpcErr);
+  }
+
+  const now = new Date().toISOString();
+  let loan: any = null;
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    loan = await db.loans.get(loanId);
+  } else {
+    const { data } = await supabase.from('loans').select('*').eq('id', loanId).single();
+    loan = data;
+  }
+  if (!loan) throw new Error("Loan record not found.");
+
+  if (loan.project_id && returnLocationId) {
+    await updateProject(loan.project_id, { location_id: returnLocationId });
+  }
+
+  const updates = {
+    returned_at: now,
+    returned_location_id: returnLocationId || null,
+    returned_location_label: retHotspot?.fullLabel || retHotspot?.label
+  };
+
+  try {
+    await supabase.from('loans').update(updates).eq('id', loanId);
+  } catch {}
+  if (typeof window !== 'undefined') {
+    await db.loans.update(loanId, updates);
+  }
+
+  return { ...loan, ...updates };
+}
+
+// -------------------------------------------------------------
+// DYNAMIC NOTIFICATION GENERATION (No persistent DB rows)
+// -------------------------------------------------------------
+
+export async function getLoanNotifications(): Promise<LoanNotification[]> {
+  const activeLoans = await getActiveLoans().catch(() => []);
+  const notifications: LoanNotification[] = [];
+
+  for (const loan of activeLoans) {
+    const daysRemaining = calculateLoanDaysRemaining(loan.due_date);
+    const itemName = loan.loan_type === 'project' 
+      ? (loan.project_name || loan.project?.name || 'Project')
+      : (loan.component_name || loan.component?.name || 'Component');
+
+    if (daysRemaining === 1) {
+      // Exactly 1 day before return date (User requirement)
+      notifications.push({
+        id: `notif-tomorrow-${loan.id}`,
+        loanId: loan.id,
+        type: 'due_tomorrow',
+        title: 'Due Tomorrow',
+        message: `${itemName} lent to ${loan.borrower_name} is due for return tomorrow.`,
+        urgency: 'medium',
+        daysRemaining,
+        loan
+      });
+    } else if (daysRemaining === 0) {
+      // Due today
+      notifications.push({
+        id: `notif-today-${loan.id}`,
+        loanId: loan.id,
+        type: 'due_today',
+        title: 'Due Today',
+        message: `${itemName} lent to ${loan.borrower_name} is due for return today!`,
+        urgency: 'high',
+        daysRemaining,
+        loan
+      });
+    } else if (daysRemaining < 0) {
+      // Overdue
+      const overdueDays = Math.abs(daysRemaining);
+      notifications.push({
+        id: `notif-overdue-${loan.id}`,
+        loanId: loan.id,
+        type: 'overdue',
+        title: `Overdue by ${overdueDays} day${overdueDays === 1 ? '' : 's'}`,
+        message: `${itemName} lent to ${loan.borrower_name} was due on ${new Date(loan.due_date).toLocaleDateString()}.`,
+        urgency: 'critical',
+        daysRemaining,
+        loan
+      });
+    }
+  }
+
+  // Sort by urgency: critical first, then high, then medium
+  const priorityOrder = { critical: 0, high: 1, medium: 2 };
+  return notifications.sort((a, b) => priorityOrder[a.urgency] - priorityOrder[b.urgency]);
+}
+

@@ -1,26 +1,39 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getComponentDetails, ComponentWithTotals, ComponentLocation, isPersonalItem } from "@/lib/api";
+import { getComponentDetails, ComponentWithTotals, ComponentLocation, isPersonalItem, getLoans, Loan, calculateLoanDaysRemaining } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Edit2, MapPin, ExternalLink, ArrowLeft, FileText, Maximize2 } from "lucide-react";
+import { Edit2, MapPin, ExternalLink, ArrowLeft, FileText, Maximize2, Share2, RotateCcw, User, Calendar } from "lucide-react";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
+import { LendModal } from "@/components/loans/LendModal";
+import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
 
 export default function ComponentDetailPage() {
   const { componentId } = useParams();
   const router = useRouter();
   const [data, setData] = useState<{ component: ComponentWithTotals, locations: ComponentLocation[] } | null>(null);
+  const [activeLoans, setActiveLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
+  const [showLendModal, setShowLendModal] = useState(false);
+  const [returnLoanItem, setReturnLoanItem] = useState<Loan | null>(null);
 
-  useEffect(() => {
+  const loadData = () => {
     if (typeof componentId !== 'string') return;
-    getComponentDetails(componentId).then(res => {
+    Promise.all([
+      getComponentDetails(componentId),
+      getLoans().then(all => all.filter(l => l.component_id === componentId && !l.returned_at)).catch(() => [] as Loan[])
+    ]).then(([res, loans]) => {
       setData(res);
+      setActiveLoans(loans);
       setLoading(false);
     }).catch(console.error);
+  };
+
+  useEffect(() => {
+    loadData();
   }, [componentId]);
 
   if (loading) return <div className="p-6 text-brand-text-muted">Loading...</div>;
@@ -83,12 +96,22 @@ export default function ComponentDetailPage() {
               </div>
             </div>
           </div>
-          <Link 
-            href={`/inventory/${component.id}/edit`}
-            className="flex items-center px-4 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text text-xs font-bold uppercase tracking-widest hover:border-[#4a443c] transition-colors"
-          >
-            <Edit2 className="h-3 w-3 mr-2" /> {isPersonal ? "Edit Item" : "Edit Component"}
-          </Link>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowLendModal(true)}
+              disabled={component.totals.in_storage_qty <= 0}
+              className="flex items-center px-4 py-2 bg-brand-gold/10 border border-brand-gold/30 text-brand-gold text-xs font-bold uppercase tracking-widest hover:bg-brand-gold/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title={component.totals.in_storage_qty <= 0 ? "No items in storage to lend" : "Lend this item"}
+            >
+              <Share2 className="h-3 w-3 mr-2" /> Lend
+            </button>
+            <Link 
+              href={`/inventory/${component.id}/edit`}
+              className="flex items-center px-4 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text text-xs font-bold uppercase tracking-widest hover:border-[#4a443c] transition-colors"
+            >
+              <Edit2 className="h-3 w-3 mr-2" /> {isPersonal ? "Edit Item" : "Edit Component"}
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -270,6 +293,97 @@ export default function ComponentDetailPage() {
               </div>
             )}
           </section>
+
+          {/* Active Loans Section */}
+          <section>
+            <div className="flex items-center justify-between border-b border-[#332f2a] pb-2 mb-4">
+              <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest">
+                Active Loans ({activeLoans.length})
+              </h2>
+              {activeLoans.length > 0 && (
+                <span className="text-[10px] text-brand-gold font-mono font-bold">
+                  {activeLoans.reduce((sum, l) => sum + l.quantity, 0)} lent out
+                </span>
+              )}
+            </div>
+            {activeLoans.length === 0 ? (
+              <div className="text-sm text-brand-text-muted italic bg-[#1a1816] p-4 rounded border border-[#332f2a]">
+                No active loans for this item.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {activeLoans.map(loan => {
+                  const daysRemaining = calculateLoanDaysRemaining(loan.due_date);
+                  const isOverdue = daysRemaining != null && daysRemaining < 0;
+                  const isDueTomorrow = daysRemaining === 1;
+                  const isDueToday = daysRemaining === 0;
+
+                  return (
+                    <div key={loan.id} className="bg-[#1a1816] border border-[#332f2a] rounded p-4 flex flex-col gap-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="text-white font-bold flex items-center gap-1.5">
+                            <User className="h-3.5 w-3.5 text-brand-gold" />
+                            <span>{loan.borrower_name}</span>
+                          </div>
+                          {loan.borrower_contact && (
+                            <div className="text-xs text-brand-text-muted mt-0.5">
+                              {loan.borrower_contact}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xl font-serif text-brand-gold leading-none">{loan.quantity}</div>
+                          <div className="text-[9px] text-brand-text-muted uppercase tracking-widest">Qty Lent</div>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-brand-text-muted flex items-center gap-1.5 bg-black/20 p-2 rounded border border-[#2a2622]">
+                        <MapPin className="h-3 w-3 text-brand-accent shrink-0" />
+                        <span className="truncate">From: {loan.source_location_label || "Source location"}</span>
+                      </div>
+
+                      {loan.due_date && (
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-brand-text-muted flex items-center gap-1">
+                            <Calendar className="h-3 w-3" /> Due {loan.due_date}
+                          </span>
+                          {isOverdue && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-950/40 border border-red-800/50 px-1.5 py-0.5 rounded">
+                              Overdue ({Math.abs(daysRemaining)}d)
+                            </span>
+                          )}
+                          {isDueToday && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400 bg-orange-950/40 border border-orange-800/50 px-1.5 py-0.5 rounded">
+                              Due Today
+                            </span>
+                          )}
+                          {isDueTomorrow && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-950/40 border border-amber-800/50 px-1.5 py-0.5 rounded">
+                              Due Tomorrow
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {loan.notes && (
+                        <div className="text-xs text-brand-text-muted italic border-l-2 border-[#332f2a] pl-2">
+                          &quot;{loan.notes}&quot;
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => setReturnLoanItem(loan)}
+                        className="w-full flex items-center justify-center px-4 py-2 bg-brand-gold/10 hover:bg-brand-gold/20 text-brand-gold border border-brand-gold/30 text-xs uppercase tracking-widest font-bold transition-colors"
+                      >
+                        <RotateCcw className="h-3 w-3 mr-2" /> Return Item
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </div>
       </div>
 
@@ -281,6 +395,32 @@ export default function ComponentDetailPage() {
         subtitle={previewImage?.subtitle}
         onClose={() => setPreviewImage(null)}
       />
+
+      {/* Lend Modal */}
+      {showLendModal && (
+        <LendModal
+          isOpen={showLendModal}
+          initialComponentId={component.id}
+          onClose={() => setShowLendModal(false)}
+          onSuccess={() => {
+            setShowLendModal(false);
+            loadData();
+          }}
+        />
+      )}
+
+      {/* Return Loan Modal */}
+      {returnLoanItem && (
+        <ReturnLoanModal
+          isOpen={!!returnLoanItem}
+          loan={returnLoanItem}
+          onClose={() => setReturnLoanItem(null)}
+          onSuccess={() => {
+            setReturnLoanItem(null);
+            loadData();
+          }}
+        />
+      )}
     </div>
   );
 }
