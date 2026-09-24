@@ -22,7 +22,7 @@ export default function EditComponentPage() {
   if (!data) return <div className="p-6 text-brand-text-muted">Item not found.</div>;
 
   return (
-    <div className="p-6 h-full overflow-y-auto">
+    <div className="w-full">
       <Suspense fallback={<div className="p-6 text-brand-text-muted">Loading form...</div>}>
         <ComponentForm initialData={data.component} initialTags={data.tags} initialLocations={data.locations} />
       </Suspense>

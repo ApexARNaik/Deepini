@@ -153,7 +153,7 @@ export default function ComponentDetailPage() {
               <Share2 className="h-3 w-3 mr-2" /> Lend
             </button>
             <Link 
-              href={`/inventory/${component.id}/edit`}
+              href={`/inventory/${component.id}/edit?returnTo=${encodeURIComponent(`/inventory/${component.id}`)}`}
               className="flex items-center px-4 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text text-xs font-bold uppercase tracking-widest hover:border-[#4a443c] transition-colors"
             >
               <Edit2 className="h-3 w-3 mr-2" /> {isPersonal ? "Edit Item" : "Edit Component"}

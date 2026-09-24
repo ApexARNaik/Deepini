@@ -2411,12 +2411,12 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                         <span>Add Components</span>
                       </button>
                       <Link
-                        href={`/inventory/new?locationId=${selectedLeafHotspot.id}`}
+                        href={`/inventory/new?locationId=${selectedLeafHotspot.id}&roomId=${roomId}&returnTo=${encodeURIComponent(`/rooms/${roomId}?locateHotspot=${selectedLeafHotspot.id}`)}`}
                         className="flex items-center gap-1 px-3 py-1.5 bg-brand-accent/15 hover:bg-brand-accent border border-brand-accent/40 hover:border-brand-accent text-brand-accent hover:text-white rounded text-xs font-medium transition-colors"
-                        data-tooltip="Create and assign new item to this location"
+                        data-tooltip="Create and assign new component to this location"
                       >
                         <Plus className="h-3.5 w-3.5" />
-                        <span>New Item</span>
+                        <span>Add New Component</span>
                       </Link>
                     </div>
                   )}
@@ -2502,11 +2502,11 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">Add Items to Location</div>
                     <Link 
-                      href={`/inventory/new?locationId=${selectedLeafHotspot.id}`} 
+                      href={`/inventory/new?locationId=${selectedLeafHotspot.id}&roomId=${roomId}&returnTo=${encodeURIComponent(`/rooms/${roomId}?locateHotspot=${selectedLeafHotspot.id}`)}`} 
                       className="text-[10px] text-brand-accent hover:underline flex items-center gap-1 font-semibold"
-                      data-tooltip="Create new item in inventory"
+                      data-tooltip="Create new component in inventory"
                     >
-                      <Plus className="h-3 w-3" /> New Item
+                      <Plus className="h-3 w-3" /> Add New Component
                     </Link>
                   </div>
                   
@@ -2630,6 +2630,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         isOpen={!!quickViewComponentId}
         onClose={() => setQuickViewComponentId(null)}
         currentHotspotId={selectedLeafHotspot?.id}
+        roomId={roomId}
       />
 
       {/* Full Image Preview Modal */}

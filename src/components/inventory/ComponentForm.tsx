@@ -22,6 +22,9 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   
   const typeParam = searchParams.get('type');
   const locationIdParam = searchParams.get('locationId') || searchParams.get('location');
+  const roomIdParam = searchParams.get('roomId');
+  const returnToParam = searchParams.get('returnTo');
+  const [sourceRoomId, setSourceRoomId] = useState<string | null>(roomIdParam || null);
   const isInitialPersonal = initialData ? isPersonalItem(initialData) : (typeParam === 'personal');
   const [itemType, setItemType] = useState<'component' | 'personal'>(isInitialPersonal ? 'personal' : 'component');
 
@@ -207,6 +210,10 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     if (!initialData && locationIdParam) {
       setSelectedHotspot(locationIdParam);
       getFullHotspotPath(locationIdParam).then((path) => {
+        const roomNode = path.find(p => p.type === 'room');
+        if (roomNode?.id) {
+          setSourceRoomId(roomNode.id);
+        }
         const fullLabel = path.map(p => p.label).filter(Boolean).join(' → ');
         if (fullLabel) {
           setLocations(prev => {
@@ -540,7 +547,28 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     }
     
     if (success) {
-      router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+      if (returnToParam) {
+        router.push(returnToParam);
+      } else if (locationIdParam) {
+        const targetRoomId = sourceRoomId || roomIdParam;
+        if (targetRoomId) {
+          router.push(`/rooms/${targetRoomId}?locateHotspot=${locationIdParam}`);
+        } else {
+          try {
+            const path = await getFullHotspotPath(locationIdParam);
+            const roomNode = path.find(p => p.type === 'room');
+            if (roomNode?.id) {
+              router.push(`/rooms/${roomNode.id}?locateHotspot=${locationIdParam}`);
+              return;
+            }
+          } catch (e) {
+            console.error("Failed to resolve room for return redirect:", e);
+          }
+          router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+        }
+      } else {
+        router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+      }
     }
   };
 
@@ -713,7 +741,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                 onMouseLeave={handleHideTooltip}
                 className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] hover:border-[#4a443c] rounded transition-colors group/loc"
               >
-                <div className="text-sm text-white truncate pr-2" data-tooltip={l.label}>{l.label}</div>
+                <div className="text-sm text-white truncate pr-2">{l.label}</div>
                 <div className="flex items-center gap-4 shrink-0">
                   <div className="text-sm text-brand-text-muted">Qty: <span className="text-brand-accent font-bold">{l.quantity}</span></div>
                   <button type="button" onClick={() => handleRemoveLocation(l.hotspot_id)} className="text-brand-text-muted hover:text-red-400 transition-colors">
@@ -890,7 +918,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                               )}
                             </div>
                             {display.trail && (
-                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5" data-tooltip={hs.fullLabel}>
+                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5">
                                 {display.trail}
                               </div>
                             )}
@@ -1300,7 +1328,11 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                     import('@/lib/api').then(({ deleteComponent }) => {
                       setLoading(true);
                       deleteComponent(initialData.id).then(() => {
-                        router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+                        if (returnToParam) {
+                          router.push(returnToParam);
+                        } else {
+                          router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+                        }
                       }).catch(err => {
                         console.error(err);
                         alert(`Failed to delete ${itemType === 'personal' ? 'personal item' : 'component'}`);
@@ -1316,7 +1348,19 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
             ) : <div/>}
 
             <div className="flex gap-4">
-              <button type="button" onClick={() => router.back()} className="px-6 py-2 text-brand-text-muted hover:text-white text-sm">
+              <button 
+                type="button" 
+                onClick={() => {
+                  if (returnToParam) {
+                    router.push(returnToParam);
+                  } else if (locationIdParam && (sourceRoomId || roomIdParam)) {
+                    router.push(`/rooms/${sourceRoomId || roomIdParam}?locateHotspot=${locationIdParam}`);
+                  } else {
+                    router.back();
+                  }
+                }} 
+                className="px-6 py-2 text-brand-text-muted hover:text-white text-sm"
+              >
                 Cancel
               </button>
               <button 

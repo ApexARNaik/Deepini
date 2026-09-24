@@ -12,13 +12,15 @@ interface ComponentQuickViewModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentHotspotId?: string | null;
+  roomId?: string;
 }
 
 export function ComponentQuickViewModal({
   componentId,
   isOpen,
   onClose,
-  currentHotspotId
+  currentHotspotId,
+  roomId
 }: ComponentQuickViewModalProps) {
   const [data, setData] = useState<{ component: ComponentWithTotals; locations: ComponentLocation[] } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,7 +104,9 @@ export function ComponentQuickViewModal({
           <div className="flex items-center gap-2 shrink-0">
             {component && (
               <Link
-                href={`/inventory/${component.id}/edit`}
+                href={roomId && currentHotspotId 
+                  ? `/inventory/${component.id}/edit?locationId=${currentHotspotId}&roomId=${roomId}&returnTo=${encodeURIComponent(`/rooms/${roomId}?locateHotspot=${currentHotspotId}`)}` 
+                  : `/inventory/${component.id}/edit`}
                 className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-[#252320] hover:bg-[#332f2a] text-brand-text hover:text-white border border-[#332f2a] rounded transition-colors"
                 data-tooltip="Edit component details"
               >

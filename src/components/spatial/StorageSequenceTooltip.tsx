@@ -1,6 +1,7 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { MapPin, ChevronRight, ExternalLink } from "lucide-react";
 
 export interface StorageTooltipData {
@@ -14,7 +15,13 @@ export interface StorageTooltipData {
 }
 
 export function StorageSequenceTooltip({ data }: { data: StorageTooltipData | null }) {
-  if (!data || typeof window === "undefined") return null;
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!data || !mounted || typeof window === "undefined") return null;
 
   const { targetRect, fullLabel, label, roomName, quantity, customText, footerHint } = data;
   const rawCrumbs = fullLabel ? fullLabel.split(" → ").map((s) => s.trim()).filter(Boolean) : [];
@@ -24,11 +31,12 @@ export function StorageSequenceTooltip({ data }: { data: StorageTooltipData | nu
   const targetCenterX = targetRect.left + targetRect.width / 2;
   const clampedX = Math.max(16, Math.min(window.innerWidth - tooltipWidth - 16, targetCenterX - tooltipWidth / 2));
 
-  const showBelow = targetRect.top < 160;
+  // If near top (e.g. under header < 190px), show below target; otherwise show above
+  const showBelow = targetRect.top < 190;
   const tooltipY = showBelow ? targetRect.bottom + 8 : targetRect.top - 8;
   const arrowLeft = Math.max(16, Math.min(tooltipWidth - 16, targetCenterX - clampedX));
 
-  return (
+  const content = (
     <div
       style={{
         position: "fixed",
@@ -119,4 +127,6 @@ export function StorageSequenceTooltip({ data }: { data: StorageTooltipData | nu
       </div>
     </div>
   );
+
+  return createPortal(content, document.body);
 }

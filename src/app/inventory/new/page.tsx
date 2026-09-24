@@ -3,7 +3,7 @@ import { ComponentForm } from "@/components/inventory/ComponentForm";
 
 export default function NewComponentPage() {
   return (
-    <div className="p-6 h-full overflow-y-auto">
+    <div className="w-full">
       <Suspense fallback={<div className="p-6 text-brand-text-muted">Loading form...</div>}>
         <ComponentForm />
       </Suspense>
