@@ -10,13 +10,15 @@ import {
   getLoans, 
   Loan, 
   calculateLoanDaysRemaining,
-  checkinComponent
+  checkinComponent,
+  getFullHotspotPath
 } from "@/lib/api";
 import { CheckOutModal } from "@/components/projects/CheckOutModal";
 import { CheckInModal } from "@/components/projects/CheckInModal";
 import { EditProjectModal } from "@/components/projects/EditProjectModal";
 import { LendModal } from "@/components/loans/LendModal";
 import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
+import { StorageSequenceTooltip, StorageTooltipData } from "@/components/spatial/StorageSequenceTooltip";
 import { 
   ArrowLeft, 
   CheckCircle2, 
@@ -65,7 +67,52 @@ export default function ProjectDetailPage() {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [editInitialStatus, setEditInitialStatus] = useState<'planning' | 'active' | 'archived' | undefined>(undefined);
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+  const [hoverTooltip, setHoverTooltip] = useState<StorageTooltipData | null>(null);
   const statusDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss hover tooltip on scroll
+  useEffect(() => {
+    if (!hoverTooltip) return;
+    const handleScroll = () => setHoverTooltip(null);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => window.removeEventListener("scroll", handleScroll, true);
+  }, [hoverTooltip]);
+
+  const handleShowTooltip = (
+    e: React.MouseEvent<HTMLElement>,
+    data: { fullLabel?: string; label?: string; roomName?: string; quantity?: number; footerHint?: string }
+  ) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHoverTooltip({
+      ...data,
+      targetRect: rect,
+    });
+  };
+
+  const handleHideTooltip = () => setHoverTooltip(null);
+
+  const handleNavigateToSource = async (item: ProjectComponent) => {
+    handleHideTooltip();
+    const roomId = (item as any).source_room_id || (item.source_hotspot as any)?.room_id || (item.source_hotspot as any)?.roomId;
+    const hotspotId = item.source_location_id;
+    if (roomId && hotspotId) {
+      router.push(`/rooms/${roomId}?locateHotspot=${hotspotId}`);
+      return;
+    }
+    if (hotspotId) {
+      try {
+        const path = await getFullHotspotPath(hotspotId);
+        const roomNode = path.find(p => p.type === 'room') || path.find(p => p.type === 'photo');
+        if (roomNode) {
+          router.push(`/rooms/${roomNode.id}?locateHotspot=${hotspotId}`);
+        } else {
+          router.push(`/rooms?locateHotspot=${hotspotId}`);
+        }
+      } catch {
+        router.push(`/rooms?locateHotspot=${hotspotId}`);
+      }
+    }
+  };
 
   const handleReturnToOrigin = async (item: ProjectComponent) => {
     const locName = item.source_hotspot?.label || 'its original storage location';
@@ -416,62 +463,95 @@ export default function ProjectDetailPage() {
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {activeItems.map(item => (
-                <div key={item.id} className="bg-[#1a1816] border border-brand-accent/30 rounded p-4 flex flex-col gap-4 relative overflow-hidden group">
+                <div key={item.id} className="bg-[#1a1816] border border-brand-accent/30 rounded p-4 flex flex-col justify-between gap-4 relative overflow-hidden group shadow-lg shadow-black/20">
                   <div className={`absolute top-0 left-0 w-1 h-full ${isArchived ? 'bg-zinc-600' : 'bg-brand-accent'}`} />
-                  <div className="flex gap-4 items-start pl-2">
+                  
+                  {/* Top: Photo, Name, and Quantity */}
+                  <div className="flex gap-3.5 items-start pl-2">
                     {item.component?.photo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={item.component.photo_url} alt="" className="h-12 w-12 object-cover rounded border border-[#332f2a]" />
+                      <img src={item.component.photo_url} alt="" className="h-12 w-12 object-cover rounded border border-[#332f2a] shrink-0" />
                     ) : (
-                      <div className="h-12 w-12 bg-[#222] rounded flex items-center justify-center text-[#555] text-[10px]">No Img</div>
+                      <div className="h-12 w-12 bg-[#222] rounded flex items-center justify-center text-[#555] text-[10px] shrink-0">No Img</div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <Link href={`/inventory/${item.component_id}`} className="font-bold text-white hover:text-brand-accent truncate block">{item.component?.name}</Link>
-                      <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mt-1">Checked out: {new Date(item.checked_out_at).toLocaleDateString()}</div>
+                      <Link href={`/inventory/${item.component_id}`} className="font-bold text-white hover:text-brand-accent truncate block text-sm">
+                        {item.component?.name}
+                      </Link>
+                      <div className="text-[10px] text-brand-text-muted uppercase tracking-widest mt-1">
+                        Checked out: {new Date(item.checked_out_at).toLocaleDateString()}
+                      </div>
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-xl font-serif text-white">{item.quantity}</div>
                       <div className="text-[9px] text-brand-text-muted uppercase tracking-widest">Units</div>
                     </div>
                   </div>
-                  <div className="flex justify-between items-center pl-2 pt-4 border-t border-[#332f2a]">
-                    <div className="flex items-center text-xs text-brand-text-muted">
-                      <MapPin className="h-3 w-3 mr-1" /> {item.source_hotspot?.label || 'Unknown Source'}
-                    </div>
-                    {isOnline && (
-                      isArchived ? (
+
+                  {/* Bottom: Location & Action Buttons */}
+                  <div className="pl-2 pt-3 border-t border-[#332f2a] flex flex-col gap-2.5">
+                    
+                    {/* Location Badge + Status */}
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => handleNavigateToSource(item)}
+                        onMouseEnter={(e) => {
+                          handleShowTooltip(e, {
+                            fullLabel: (item as any).source_location_label || (item.source_hotspot as any)?.fullLabel || item.source_hotspot?.label,
+                            label: item.source_hotspot?.label || 'Source Location',
+                            roomName: (item.source_hotspot as any)?.roomName || ((item as any).source_location_label?.includes('→') ? (item as any).source_location_label.split('→')[0].trim() : undefined),
+                            footerHint: "Click to open room map & highlight location"
+                          });
+                        }}
+                        onMouseLeave={handleHideTooltip}
+                        className="flex items-center gap-1.5 text-xs text-brand-text-muted hover:text-brand-gold transition-colors truncate text-left group/loc focus:outline-none min-w-0 flex-1"
+                        data-tooltip="View exact location on Room Map"
+                      >
+                        <MapPin className="h-3.5 w-3.5 text-brand-accent shrink-0 group-hover/loc:scale-110 transition-transform" />
+                        <span className="font-medium text-white/90 group-hover/loc:text-brand-gold group-hover/loc:underline truncate text-[11px]">
+                          {item.source_hotspot?.label || (item as any).source_location_label || 'Source Location'}
+                        </span>
+                        <ExternalLink className="h-3 w-3 text-brand-text-muted opacity-0 group-hover/loc:opacity-100 transition-opacity shrink-0" />
+                      </button>
+
+                      {isArchived && (
                         <span 
-                          className="px-2.5 py-1 bg-zinc-800/80 text-zinc-400 text-[10px] font-bold uppercase tracking-widest rounded border border-zinc-700/60 flex items-center gap-1 cursor-default"
+                          className="px-2 py-0.5 bg-zinc-800/80 text-zinc-400 text-[9px] font-bold uppercase tracking-widest rounded border border-zinc-700/60 flex items-center gap-1 shrink-0 cursor-default"
                           data-tooltip="Preserved in build. Transition project to Active to check in or dismantle."
                         >
-                          <Lock className="h-3 w-3 text-amber-500/80" /> Preserved
+                          <Lock className="h-2.5 w-2.5 text-amber-500/80" /> Preserved
                         </span>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <button 
-                            type="button"
-                            disabled={returningItemId === item.id}
-                            onClick={() => handleReturnToOrigin(item)}
-                            className="px-2.5 py-1 bg-brand-accent/20 hover:bg-brand-accent border border-brand-accent/40 text-brand-accent hover:text-white text-[10px] font-bold uppercase tracking-widest rounded transition-colors flex items-center gap-1 disabled:opacity-50"
-                            data-tooltip={`Return directly to origin: ${item.source_hotspot?.label || 'Source Location'}`}
-                          >
-                            {returningItemId === item.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <RotateCcw className="h-3 w-3" />
-                            )}
-                            <span>Return to Origin</span>
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => setCheckInItem(item)}
-                            className="px-2.5 py-1 bg-[#221f1b] hover:bg-[#2e2a25] border border-[#3a352e] text-zinc-400 hover:text-white text-[10px] font-bold uppercase tracking-widest rounded transition-colors"
-                            data-tooltip="Return to a different storage location"
-                          >
-                            Other Location...
-                          </button>
-                        </div>
-                      )
+                      )}
+                    </div>
+
+                    {/* Action Buttons: Uniform Height & Equal Width */}
+                    {isOnline && !isArchived && (
+                      <div className="flex items-center gap-2 w-full pt-0.5">
+                        <button 
+                          type="button"
+                          disabled={returningItemId === item.id}
+                          onClick={() => handleReturnToOrigin(item)}
+                          className="flex-1 h-8 px-2 bg-brand-accent/20 hover:bg-brand-accent border border-brand-accent/40 text-brand-accent hover:text-white text-[10px] font-bold uppercase tracking-wider rounded transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 whitespace-nowrap shadow-sm"
+                          data-tooltip={`Return directly to origin: ${item.source_hotspot?.label || 'Source Location'}`}
+                        >
+                          {returningItemId === item.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                          ) : (
+                            <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          <span className="truncate">Return to Origin</span>
+                        </button>
+
+                        <button 
+                          type="button"
+                          onClick={() => setCheckInItem(item)}
+                          className="flex-1 h-8 px-2 bg-[#221f1b] hover:bg-[#2e2a25] border border-[#3a352e] text-zinc-300 hover:text-white text-[10px] font-bold uppercase tracking-wider rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap shadow-sm"
+                          data-tooltip="Return to a different storage location"
+                        >
+                          <span className="truncate">Other Location...</span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -567,6 +647,9 @@ export default function ProjectDetailPage() {
           }}
         />
       )}
+
+      {/* Floating Storage Sequence Tooltip */}
+      <StorageSequenceTooltip data={hoverTooltip} />
 
     </div>
   );
