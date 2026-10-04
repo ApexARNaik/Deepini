@@ -218,6 +218,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
 
   useEffect(() => {
     getInventory().then(setAllInventory).catch(console.error);
+    return () => {
+      if (leafDebounceTimerRef.current) {
+        clearTimeout(leafDebounceTimerRef.current);
+      }
+      if (pendingLeafUpdatesRef.current) {
+        const task = pendingLeafUpdatesRef.current;
+        pendingLeafUpdatesRef.current = null;
+        updateHotspotComponents(task.hotspotId, task.updates).catch(console.error);
+      }
+    };
   }, []);
   // We'll highlight the specific hotspot if locating
   const [highlightedHotspotId, setHighlightedHotspotId] = useState<string | null>(null);
@@ -1141,18 +1151,36 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
     resetViewInteractionState();
   };
 
-  const handleUpdateLeafComponents = async (newComps: any[]) => {
+  const leafSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingLeafUpdatesRef = useRef<{ hotspotId: string; updates: { component_id: string; quantity: number }[] } | null>(null);
+  const leafDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleUpdateLeafComponents = (newComps: any[]) => {
     if (!selectedLeafHotspot) return;
+    const targetHotspotId = selectedLeafHotspot.id;
     setLeafComponents(newComps);
-    try {
-      await updateHotspotComponents(
-        selectedLeafHotspot.id, 
-        newComps.map(c => ({ component_id: c.component_id, quantity: c.quantity }))
-      );
-    } catch (err) {
-      console.error(err);
-      alert("Failed to update components");
+
+    const updates = newComps.map(c => ({ component_id: c.component_id, quantity: c.quantity }));
+    pendingLeafUpdatesRef.current = { hotspotId: targetHotspotId, updates };
+
+    if (leafDebounceTimerRef.current) {
+      clearTimeout(leafDebounceTimerRef.current);
     }
+
+    leafDebounceTimerRef.current = setTimeout(() => {
+      if (!pendingLeafUpdatesRef.current) return;
+      const currentTask = pendingLeafUpdatesRef.current;
+
+      leafSyncQueueRef.current = leafSyncQueueRef.current.then(async () => {
+        try {
+          await updateHotspotComponents(currentTask.hotspotId, currentTask.updates);
+        } catch (err) {
+          console.error("Failed to sync hotspot components:", err);
+        }
+      }).catch(err => {
+        console.error("Leaf sync queue error:", err);
+      });
+    }, 120);
   };
 
   const rootPhotos = photos

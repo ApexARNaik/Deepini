@@ -724,11 +724,62 @@ export async function getHotspotComponents(hotspotId: string) {
 }
 
 export async function updateHotspotComponents(hotspotId: string, updates: { component_id: string, quantity: number }[]) {
-  await supabase.from('component_locations').delete().eq('hotspot_id', hotspotId);
-  if (updates.length > 0) {
-    const inserts = updates.map(u => ({ hotspot_id: hotspotId, component_id: u.component_id, quantity: u.quantity }));
-    const { error } = await supabase.from('component_locations').insert(inserts);
+  if (updates.length === 0) {
+    const { error } = await supabase.from('component_locations').delete().eq('hotspot_id', hotspotId);
+    if (error) throw new Error(error.message || "Failed to clear hotspot components");
+  } else {
+    // 1. Remove components that are no longer assigned to this hotspot
+    const activeComponentIds = updates.map(u => u.component_id);
+    const { data: existing } = await supabase
+      .from('component_locations')
+      .select('id, component_id')
+      .eq('hotspot_id', hotspotId);
+
+    const toDelete = (existing || [])
+      .filter(e => !activeComponentIds.includes(e.component_id))
+      .map(e => e.id);
+
+    if (toDelete.length > 0) {
+      const { error: delErr } = await supabase
+        .from('component_locations')
+        .delete()
+        .in('id', toDelete);
+      if (delErr) console.warn("Error removing unassigned component locations:", delErr);
+    }
+
+    // 2. Upsert existing/new records atomically with conflict resolution
+    const upserts = updates.map(u => ({
+      hotspot_id: hotspotId,
+      component_id: u.component_id,
+      quantity: u.quantity,
+      updated_at: new Date().toISOString()
+    }));
+
+    const { error } = await supabase
+      .from('component_locations')
+      .upsert(upserts, { onConflict: 'component_id,hotspot_id' });
     if (error) throw new Error(error.message || "Failed to update hotspot components");
+  }
+
+  // 3. Keep local Dexie offline database synchronized
+  if (typeof window !== 'undefined') {
+    try {
+      await db.component_locations.where('hotspot_id').equals(hotspotId).delete();
+      if (updates.length > 0) {
+        await db.component_locations.bulkPut(
+          updates.map(u => ({
+            id: `${hotspotId}_${u.component_id}`,
+            hotspot_id: hotspotId,
+            component_id: u.component_id,
+            quantity: u.quantity,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }))
+        );
+      }
+    } catch (dbErr) {
+      console.warn("Offline DB update error for component_locations:", dbErr);
+    }
   }
 }
 
