@@ -1087,6 +1087,8 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                         id={`tag-opt-${idx}`}
                         onMouseDown={(e) => {
                           e.preventDefault();
+                        }}
+                        onClick={() => {
                           handleSelectTagOption(opt);
                         }}
                         onMouseEnter={() => setHighlightedTagIndex(idx)}
@@ -1094,11 +1096,15 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                           isHighlighted ? 'bg-[#2a2622] text-white' : 'text-brand-text hover:bg-[#201d1a] hover:text-white'
                         }`}
                       >
-                        <span className="flex items-center gap-2 truncate">
+                        <span className="flex items-center gap-2 truncate flex-1 min-w-0">
                           <TagIcon className={`w-3.5 h-3.5 shrink-0 ${isHighlighted ? 'text-brand-accent' : 'text-brand-gold/70'}`} />
                           <span className="truncate">{opt.tag.name}</span>
                         </span>
-                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <div 
+                          className="flex items-center gap-2 shrink-0 ml-2" 
+                          onClick={(e) => e.stopPropagation()} 
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
                           {opt.tag.usage_count ? (
                             <span className="text-[10px] text-brand-text-muted">
                               {opt.tag.usage_count} uses
@@ -1106,7 +1112,12 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                           ) : null}
                           <button
                             type="button"
-                            onClick={(e) => handleQuickDeleteTag(e, opt.tag)}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                            }}
+                            onClick={(e) => {
+                              handleQuickDeleteTag(e, opt.tag);
+                            }}
                             className="p-1 text-brand-text-muted hover:text-rose-400 hover:bg-rose-950/40 rounded transition-colors opacity-0 group-hover/opt:opacity-100"
                             data-tooltip={`Delete "${opt.tag.name}" permanently`}
                           >

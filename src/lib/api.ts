@@ -1721,6 +1721,11 @@ export async function getProjects(): Promise<(Project & { active_count: number }
   });
 }
 
+export async function getProjectsForHotspot(hotspotId: string): Promise<(Project & { active_count: number })[]> {
+  const allProjects = await getProjects();
+  return allProjects.filter(p => p.status === 'archived' && p.location_id === hotspotId);
+}
+
 export async function createProject(name: string, description: string = ''): Promise<Project> {
   const { data, error } = await supabase.from('projects').insert([{ name, description, status: 'planning' }]).select().single();
   if (error) throw error;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot, Project, getProjectsForHotspot } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
@@ -10,7 +10,7 @@ import { MoveHotspotModal } from "./MoveHotspotModal";
 import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { ThemedNumberInput } from "@/components/ThemedNumberInput";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, FolderArchive, ExternalLink, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -209,6 +209,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   // Side Drawer State
   const [selectedLeafHotspot, setSelectedLeafHotspot] = useState<SpatialHotspot | null>(null);
   const [leafComponents, setLeafComponents] = useState<any[]>([]);
+  const [leafProjects, setLeafProjects] = useState<(Project & { active_count?: number })[]>([]);
   const [allInventory, setAllInventory] = useState<ComponentWithTotals[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddingComponent, setIsAddingComponent] = useState(false);
@@ -294,19 +295,21 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         // 4. Highlight the target hotspot
         setHighlightedHotspotId(locateHotspotId);
 
-        // 5. If it's a leaf hotspot (compartment), open the compartment drawer and fetch its components
+        // 5. If it's a leaf hotspot (compartment), open the compartment drawer and fetch its components and archived projects
         if (targetHs && targetHs.is_leaf) {
           setSelectedLeafHotspot(targetHs);
           setIsAddingComponent(false);
           setSearchQuery("");
           try {
-            const [comps, inv] = await Promise.all([
+            const [comps, inv, projs] = await Promise.all([
               getHotspotComponents(targetHs.id),
-              getInventory()
+              getInventory(),
+              getProjectsForHotspot(targetHs.id).catch(() => [])
             ]);
             setLeafComponents(comps);
             setAllInventory(inv);
-            if (comps.length === 0) {
+            setLeafProjects(projs);
+            if (comps.length === 0 && projs.length === 0) {
               setIsAddingComponent(true);
             }
           } catch (err) {
@@ -1122,13 +1125,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       setIsAddingComponent(false);
       setSearchQuery("");
       try {
-        const [comps, inv] = await Promise.all([
+        const [comps, inv, projs] = await Promise.all([
           getHotspotComponents(hotspot.id),
-          getInventory()
+          getInventory(),
+          getProjectsForHotspot(hotspot.id).catch(() => [])
         ]);
         setLeafComponents(comps);
         setAllInventory(inv);
-        if (comps.length === 0) {
+        setLeafProjects(projs);
+        if (comps.length === 0 && projs.length === 0) {
           setIsAddingComponent(true);
         }
       } catch (err) {
@@ -2401,7 +2406,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     </button>
                   </>
                 )}
-                <button onClick={() => { setSelectedLeafHotspot(null); setHighlightedHotspotId(null); }} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
+                <button onClick={() => { setSelectedLeafHotspot(null); setHighlightedHotspotId(null); setLeafProjects([]); }} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -2425,7 +2430,54 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 </button>
               </div>
 
-              {leafComponents.length === 0 ? (
+              {/* Archived Projects Section */}
+              {leafProjects.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-brand-gold mb-2">
+                    <FolderArchive className="h-3.5 w-3.5" />
+                    <span>Archived Projects ({leafProjects.length})</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {leafProjects.map(proj => (
+                      <Link
+                        key={proj.id}
+                        href={`/projects/${proj.id}`}
+                        className="flex items-center justify-between bg-black/40 border border-brand-gold/30 hover:border-brand-gold/70 p-3 rounded group transition-all"
+                        data-tooltip="Click to view archived project details"
+                      >
+                        <div className="flex flex-col min-w-0 flex-1 mr-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-white group-hover:text-brand-gold transition-colors truncate">
+                              {proj.name}
+                            </span>
+                            <span className="text-[9px] px-1.5 py-0.5 bg-brand-gold/15 border border-brand-gold/40 text-brand-gold rounded uppercase font-bold tracking-wider shrink-0">
+                              Archived
+                            </span>
+                          </div>
+                          {proj.description && (
+                            <p className="text-xs text-brand-text-muted truncate mt-0.5 group-hover:text-brand-text transition-colors">
+                              {proj.description}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-3 mt-1.5 text-[10px] text-brand-text-muted">
+                            <span>{proj.active_count ?? 0} active components</span>
+                          </div>
+                        </div>
+                        <ExternalLink className="h-4 w-4 text-brand-text-muted group-hover:text-brand-gold transition-colors shrink-0" />
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Components Section Header if projects also exist */}
+              {leafProjects.length > 0 && (
+                <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-brand-text-muted mb-2 pt-2 border-t border-[#332f2a]">
+                  <span>Components ({leafComponents.length})</span>
+                </div>
+              )}
+
+              {leafComponents.length === 0 && leafProjects.length === 0 ? (
                 <div className="text-sm text-brand-text-muted text-center py-6 border border-dashed border-[#332f2a] rounded flex flex-col items-center gap-2">
                   <span>This location is empty.</span>
                   {!isAddingComponent && (
@@ -2448,6 +2500,10 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       </Link>
                     </div>
                   )}
+                </div>
+              ) : leafComponents.length === 0 ? (
+                <div className="text-xs text-brand-text-muted text-center py-4 border border-dashed border-[#332f2a] rounded mb-3">
+                  No individual components stored in this compartment.
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
