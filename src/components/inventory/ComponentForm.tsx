@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, getFullHotspotPath, isPersonalItem } from "@/lib/api";
-import { X, Plus, UploadCloud, FileText, Maximize2, Tag as TagIcon, ChevronDown, MapPin, Search, Check, Type, Hash, ExternalLink, Image as ImageIcon, Paperclip } from "lucide-react";
+import { Component, Tag, getTags, upsertTag, deleteTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, getFullHotspotPath, isPersonalItem } from "@/lib/api";
+import { X, Plus, UploadCloud, FileText, Maximize2, Tag as TagIcon, ChevronDown, MapPin, Search, Check, Type, Hash, ExternalLink, Image as ImageIcon, Paperclip, Trash2, SlidersHorizontal } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import { ImagePreviewModal } from "./ImagePreviewModal";
+import { TagManagerModal } from "./TagManagerModal";
 import { StorageSequenceTooltip, StorageTooltipData } from "@/components/spatial/StorageSequenceTooltip";
 import { ThemedNumberInput } from "@/components/ThemedNumberInput";
 
@@ -43,6 +44,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [tagInput, setTagInput] = useState("");
   const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
   const [highlightedTagIndex, setHighlightedTagIndex] = useState(-1);
+  const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
 
@@ -331,6 +333,27 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
       setIsTagDropdownOpen(false);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const refreshAvailableTags = () => {
+    getTags().then(fetched => {
+      setAvailableTags(fetched);
+      setTags(prev => prev.filter(t => fetched.some(f => f.id === t.id)));
+    }).catch(console.error);
+  };
+
+  const handleQuickDeleteTag = async (e: React.MouseEvent, tagToDelete: Tag) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (window.confirm(`Delete tag "${tagToDelete.name}" permanently from database?`)) {
+      try {
+        await deleteTag(tagToDelete.id);
+        setAvailableTags(prev => prev.filter(t => t.id !== tagToDelete.id));
+        setTags(prev => prev.filter(t => t.id !== tagToDelete.id));
+      } catch (err) {
+        console.error("Failed to delete tag:", err);
+      }
     }
   };
 
@@ -1005,6 +1028,14 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
             >
               Add
             </button>
+            <button
+              type="button"
+              onClick={() => setIsTagManagerOpen(true)}
+              className="px-2.5 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text-muted hover:text-brand-accent hover:bg-[#25221e] text-sm font-medium transition-colors rounded-sm flex items-center justify-center"
+              data-tooltip="Manage All Tags"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Proper Custom Dropdown */}
@@ -1051,16 +1082,15 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                     }
 
                     return (
-                      <button
+                      <div
                         key={opt.tag.id}
                         id={`tag-opt-${idx}`}
-                        type="button"
                         onMouseDown={(e) => {
                           e.preventDefault();
                           handleSelectTagOption(opt);
                         }}
                         onMouseEnter={() => setHighlightedTagIndex(idx)}
-                        className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${
+                        className={`w-full px-3 py-2 text-xs flex items-center justify-between transition-colors cursor-pointer group/opt ${
                           isHighlighted ? 'bg-[#2a2622] text-white' : 'text-brand-text hover:bg-[#201d1a] hover:text-white'
                         }`}
                       >
@@ -1068,15 +1098,41 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                           <TagIcon className={`w-3.5 h-3.5 shrink-0 ${isHighlighted ? 'text-brand-accent' : 'text-brand-gold/70'}`} />
                           <span className="truncate">{opt.tag.name}</span>
                         </span>
-                        {opt.tag.usage_count ? (
-                          <span className="text-[10px] text-brand-text-muted shrink-0 ml-2">
-                            {opt.tag.usage_count} uses
-                          </span>
-                        ) : null}
-                      </button>
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          {opt.tag.usage_count ? (
+                            <span className="text-[10px] text-brand-text-muted">
+                              {opt.tag.usage_count} uses
+                            </span>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={(e) => handleQuickDeleteTag(e, opt.tag)}
+                            className="p-1 text-brand-text-muted hover:text-rose-400 hover:bg-rose-950/40 rounded transition-colors opacity-0 group-hover/opt:opacity-100"
+                            data-tooltip={`Delete "${opt.tag.name}" permanently`}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
                     );
                   })
                 )}
+              </div>
+
+              {/* Dropdown footer: Manage tags */}
+              <div className="p-1.5 bg-[#12110f] border-t border-[#2e2a25]">
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setIsTagDropdownOpen(false);
+                    setIsTagManagerOpen(true);
+                  }}
+                  className="w-full text-center py-1.5 px-2 rounded text-[11px] font-medium text-brand-text-muted hover:text-white hover:bg-[#201d1a] flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <SlidersHorizontal className="h-3 w-3 text-brand-accent" />
+                  <span>Manage all tags...</span>
+                </button>
               </div>
             </div>
           )}
@@ -1396,6 +1452,13 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
 
       {/* Floating Storage Sequence Tooltip */}
       <StorageSequenceTooltip data={hoverTooltip} />
+
+      {/* Tag Manager Modal */}
+      <TagManagerModal
+        isOpen={isTagManagerOpen}
+        onClose={() => setIsTagManagerOpen(false)}
+        onTagsChanged={refreshAvailableTags}
+      />
     </form>
   );
 }

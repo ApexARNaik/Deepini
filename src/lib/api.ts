@@ -393,19 +393,74 @@ export async function getLowStock(): Promise<ComponentWithTotals[]> {
 }
 
 export async function getTags(): Promise<Tag[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const all = await db.tags.toArray();
+    return all.sort((a, b) => (b.usage_count || 0) - (a.usage_count || 0));
+  }
   const { data, error } = await supabase.from("tags").select("*").order("usage_count", { ascending: false });
   if (error) throw error;
+  if (typeof window !== 'undefined' && data) {
+    db.tags.bulkPut(data).catch(() => {});
+  }
   return data as Tag[];
 }
 
 export async function upsertTag(name: string): Promise<Tag> {
+  const trimmed = name.trim();
   // check if exists
-  const { data: existing } = await supabase.from("tags").select("*").eq("name", name).maybeSingle();
-  if (existing) return existing;
-  const { data, error } = await supabase.from("tags").insert([{ name }]).select().single();
-  if (error) throw error;
+  const { data: existing } = await supabase.from("tags").select("*").ilike("name", trimmed).maybeSingle();
+  if (existing) {
+    if (typeof window !== 'undefined') {
+      await db.tags.put(existing).catch(() => {});
+    }
+    return existing;
+  }
+  const { data, error } = await supabase.from("tags").insert([{ name: trimmed }]).select().single();
+  if (error) {
+    const { data: fallback } = await supabase.from("tags").select("*").ilike("name", trimmed).maybeSingle();
+    if (fallback) return fallback;
+    throw error;
+  }
+  if (typeof window !== 'undefined' && data) {
+    await db.tags.put(data).catch(() => {});
+  }
   return data as Tag;
 }
+
+export async function deleteTag(id: string): Promise<void> {
+  const { error: relError } = await supabase.from("component_tags").delete().eq("tag_id", id);
+  if (relError) {
+    console.warn("Could not delete from component_tags:", relError);
+  }
+  const { error } = await supabase.from("tags").delete().eq("id", id);
+  if (error) throw error;
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.tags.delete(id);
+      await db.component_tags.where('tag_id').equals(id).delete();
+    } catch (dbErr) {
+      console.warn("Offline db cleanup error on tag delete:", dbErr);
+    }
+  }
+}
+
+export async function updateTag(id: string, name: string): Promise<Tag> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Tag name cannot be empty");
+  const { data, error } = await supabase.from("tags").update({ name: trimmed }).eq("id", id).select().single();
+  if (error) throw error;
+
+  if (typeof window !== 'undefined' && data) {
+    try {
+      await db.tags.update(id, { name: trimmed });
+    } catch (dbErr) {
+      console.warn("Offline db tag update error:", dbErr);
+    }
+  }
+  return data as Tag;
+}
+
 
 export async function getComponentDetails(id: string): Promise<{ component: ComponentWithTotals, locations: ComponentLocation[] }> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
