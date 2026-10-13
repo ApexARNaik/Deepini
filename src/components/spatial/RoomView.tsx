@@ -2647,8 +2647,12 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                           className="flex flex-col flex-1 min-w-0 cursor-pointer group/item"
                           data-tooltip="Click to view item details"
                         >
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm text-white font-medium truncate group-hover/item:text-brand-accent transition-colors">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span 
+                              className="text-sm text-white font-medium truncate block max-w-full flex-1 min-w-0 group-hover/item:text-brand-accent transition-colors"
+                              data-tooltip={lc.components?.name || "Unknown Item"}
+                              data-tooltip-only-overflow=""
+                            >
                               {lc.components?.name || "Unknown Item"}
                             </span>
                             {isPersonalItem(lc.components) && (
@@ -2780,8 +2784,14 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                           className="flex items-center justify-between p-2.5 text-left bg-black/20 hover:bg-[#2a2825] border border-transparent hover:border-[#332f2a] rounded transition-colors group"
                         >
                           <div className="flex flex-col min-w-0 pr-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm text-brand-text group-hover:text-white font-medium truncate">{c.name}</span>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span 
+                                className="text-sm text-brand-text group-hover:text-white font-medium truncate block max-w-full flex-1 min-w-0"
+                                data-tooltip={c.name}
+                                data-tooltip-only-overflow=""
+                              >
+                                {c.name}
+                              </span>
                               {isPersonalItem(c) && (
                                 <span className="text-[8px] px-1 py-0.2 bg-brand-gold/10 border border-brand-gold/40 text-brand-gold rounded uppercase tracking-wider font-semibold shrink-0">
                                   Personal

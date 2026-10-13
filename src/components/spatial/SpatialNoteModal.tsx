@@ -267,7 +267,13 @@ export function SpatialNoteModal({
                       >
                         <div className="flex items-center gap-2 min-w-0 pr-2">
                           <Package className={`h-3.5 w-3.5 shrink-0 ${isSelected ? "text-brand-accent" : "text-brand-text-muted"}`} />
-                          <span className="truncate">{c.name}</span>
+                          <span 
+                            className="truncate block max-w-full flex-1 min-w-0"
+                            data-tooltip={c.name}
+                            data-tooltip-only-overflow=""
+                          >
+                            {c.name}
+                          </span>
                           {personal && (
                             <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-mono shrink-0">
                               Personal
