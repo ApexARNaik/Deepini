@@ -223,12 +223,12 @@ export function ReturnLoanModal({ loan, isOpen, onClose, onSuccess }: Props) {
                 }}
                 className={`w-full bg-[#141211] border ${
                   isDropdownOpen ? "border-brand-accent ring-1 ring-brand-accent/50" : "border-[#3a352e] hover:border-[#4a443c]"
-                } p-2.5 rounded-md text-left flex items-center justify-between text-xs transition-colors`}
+                } p-2.5 rounded-md text-left flex items-center justify-between text-xs transition-colors min-w-0`}
               >
-                <div className="flex items-center gap-2 min-w-0 pr-2">
+                <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
                   <MapPin className="h-4 w-4 text-brand-accent shrink-0" />
                   {selectedHotspotObj ? (
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="text-white font-medium truncate">
                         {selectedDisplay.destination}
                         {selectedHotspotObj.id === loan.source_location_id && (
@@ -238,11 +238,13 @@ export function ReturnLoanModal({ loan, isOpen, onClose, onSuccess }: Props) {
                         )}
                       </div>
                       {selectedDisplay.trail && (
-                        <div className="text-[10px] text-brand-text-muted truncate">{selectedDisplay.trail}</div>
+                        <div className="text-[10px] text-brand-text-muted truncate min-w-0" title={selectedDisplay.trail}>
+                          {selectedDisplay.trail}
+                        </div>
                       )}
                     </div>
                   ) : (
-                    <span className="text-brand-text-muted">Select a storage location...</span>
+                    <span className="text-brand-text-muted truncate">Select a storage location...</span>
                   )}
                 </div>
                 <ChevronDown className={`h-4 w-4 text-brand-text-muted shrink-0 transition-transform duration-200 ${isDropdownOpen ? "rotate-180 text-brand-accent" : ""}`} />

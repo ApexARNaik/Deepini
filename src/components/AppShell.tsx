@@ -23,7 +23,8 @@ import {
   ArrowRight,
   ExternalLink,
   Lock,
-  Share2
+  Share2,
+  Tag as TagIcon
 } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { getInventory, getRooms, getLoanNotifications, ComponentWithTotals, Room, isPersonalItem, Loan } from "@/lib/api";
@@ -31,6 +32,7 @@ import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickVi
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
+import { TagManagerModal } from "@/components/inventory/TagManagerModal";
 import { GlobalTooltip } from "@/components/ui/GlobalTooltip";
 
 const navigation = [
@@ -65,6 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [unreadAlertCount, setUnreadAlertCount] = useState(0);
   const [returnLoanItem, setReturnLoanItem] = useState<Loan | null>(null);
+  const [isGlobalTagManagerOpen, setIsGlobalTagManagerOpen] = useState(false);
   const desktopNotifBtnRef = useRef<HTMLButtonElement>(null);
   const mobileNotifBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -259,6 +262,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <div className="py-1 flex flex-col" role="menu" aria-orientation="vertical">
                     <button
                       onClick={() => {
+                        setIsDropdownOpen(false);
+                        setIsGlobalTagManagerOpen(true);
+                      }}
+                      className="w-full text-left px-3.5 py-2 text-xs font-medium text-brand-text hover:bg-[#201d1a] hover:text-brand-accent flex items-center gap-2 transition-colors border-b border-[#26231f]"
+                      role="menuitem"
+                    >
+                      <TagIcon className="h-3.5 w-3.5 text-brand-gold/80" />
+                      <span>Manage Tags</span>
+                    </button>
+                    <button
+                      onClick={() => {
                         sessionStorage.removeItem("unlocked");
                         window.location.reload();
                       }}
@@ -289,7 +303,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-brand-bg relative">
+      <div className="flex-1 flex flex-col overflow-hidden bg-brand-bg relative min-w-0">
         {/* Top Header */}
         <header className="h-16 md:h-20 shrink-0 flex items-center justify-between px-4 md:px-8 border-b border-[#332f2a] bg-brand-bg relative z-30">
           <div ref={searchContainerRef} className="flex-1 max-w-2xl relative">
@@ -559,6 +573,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <div className="py-1 flex flex-col" role="menu" aria-orientation="vertical">
                       <button
                         onClick={() => {
+                          setIsDropdownOpen(false);
+                          setIsGlobalTagManagerOpen(true);
+                        }}
+                        className="w-full text-left px-3.5 py-2 text-xs font-medium text-brand-text hover:bg-[#201d1a] hover:text-brand-accent flex items-center gap-2 transition-colors border-b border-[#26231f]"
+                        role="menuitem"
+                      >
+                        <TagIcon className="h-3.5 w-3.5 text-brand-gold/80" />
+                        <span>Manage Tags</span>
+                      </button>
+                      <button
+                        onClick={() => {
                           sessionStorage.removeItem("unlocked");
                           window.location.reload();
                         }}
@@ -577,7 +602,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12 pb-24 md:pb-8 lg:pb-12">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 p-4 md:p-8 lg:p-12 pb-24 md:pb-8 lg:pb-12">
           {children}
         </main>
 
@@ -644,6 +669,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           }}
         />
       )}
+
+      {/* Global Tag Manager Modal */}
+      <TagManagerModal
+        isOpen={isGlobalTagManagerOpen}
+        onClose={() => setIsGlobalTagManagerOpen(false)}
+      />
 
       {/* Global Themed Tooltip Portal */}
       <GlobalTooltip />

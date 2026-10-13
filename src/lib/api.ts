@@ -393,19 +393,74 @@ export async function getLowStock(): Promise<ComponentWithTotals[]> {
 }
 
 export async function getTags(): Promise<Tag[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const all = await db.tags.toArray();
+    return all.sort((a, b) => (b.usage_count || 0) - (a.usage_count || 0));
+  }
   const { data, error } = await supabase.from("tags").select("*").order("usage_count", { ascending: false });
   if (error) throw error;
+  if (typeof window !== 'undefined' && data) {
+    db.tags.bulkPut(data).catch(() => {});
+  }
   return data as Tag[];
 }
 
 export async function upsertTag(name: string): Promise<Tag> {
+  const trimmed = name.trim();
   // check if exists
-  const { data: existing } = await supabase.from("tags").select("*").eq("name", name).maybeSingle();
-  if (existing) return existing;
-  const { data, error } = await supabase.from("tags").insert([{ name }]).select().single();
-  if (error) throw error;
+  const { data: existing } = await supabase.from("tags").select("*").ilike("name", trimmed).maybeSingle();
+  if (existing) {
+    if (typeof window !== 'undefined') {
+      await db.tags.put(existing).catch(() => {});
+    }
+    return existing;
+  }
+  const { data, error } = await supabase.from("tags").insert([{ name: trimmed }]).select().single();
+  if (error) {
+    const { data: fallback } = await supabase.from("tags").select("*").ilike("name", trimmed).maybeSingle();
+    if (fallback) return fallback;
+    throw error;
+  }
+  if (typeof window !== 'undefined' && data) {
+    await db.tags.put(data).catch(() => {});
+  }
   return data as Tag;
 }
+
+export async function deleteTag(id: string): Promise<void> {
+  const { error: relError } = await supabase.from("component_tags").delete().eq("tag_id", id);
+  if (relError) {
+    console.warn("Could not delete from component_tags:", relError);
+  }
+  const { error } = await supabase.from("tags").delete().eq("id", id);
+  if (error) throw error;
+
+  if (typeof window !== 'undefined') {
+    try {
+      await db.tags.delete(id);
+      await db.component_tags.where('tag_id').equals(id).delete();
+    } catch (dbErr) {
+      console.warn("Offline db cleanup error on tag delete:", dbErr);
+    }
+  }
+}
+
+export async function updateTag(id: string, name: string): Promise<Tag> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Tag name cannot be empty");
+  const { data, error } = await supabase.from("tags").update({ name: trimmed }).eq("id", id).select().single();
+  if (error) throw error;
+
+  if (typeof window !== 'undefined' && data) {
+    try {
+      await db.tags.update(id, { name: trimmed });
+    } catch (dbErr) {
+      console.warn("Offline db tag update error:", dbErr);
+    }
+  }
+  return data as Tag;
+}
+
 
 export async function getComponentDetails(id: string): Promise<{ component: ComponentWithTotals, locations: ComponentLocation[] }> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
@@ -669,11 +724,62 @@ export async function getHotspotComponents(hotspotId: string) {
 }
 
 export async function updateHotspotComponents(hotspotId: string, updates: { component_id: string, quantity: number }[]) {
-  await supabase.from('component_locations').delete().eq('hotspot_id', hotspotId);
-  if (updates.length > 0) {
-    const inserts = updates.map(u => ({ hotspot_id: hotspotId, component_id: u.component_id, quantity: u.quantity }));
-    const { error } = await supabase.from('component_locations').insert(inserts);
+  if (updates.length === 0) {
+    const { error } = await supabase.from('component_locations').delete().eq('hotspot_id', hotspotId);
+    if (error) throw new Error(error.message || "Failed to clear hotspot components");
+  } else {
+    // 1. Remove components that are no longer assigned to this hotspot
+    const activeComponentIds = updates.map(u => u.component_id);
+    const { data: existing } = await supabase
+      .from('component_locations')
+      .select('id, component_id')
+      .eq('hotspot_id', hotspotId);
+
+    const toDelete = (existing || [])
+      .filter(e => !activeComponentIds.includes(e.component_id))
+      .map(e => e.id);
+
+    if (toDelete.length > 0) {
+      const { error: delErr } = await supabase
+        .from('component_locations')
+        .delete()
+        .in('id', toDelete);
+      if (delErr) console.warn("Error removing unassigned component locations:", delErr);
+    }
+
+    // 2. Upsert existing/new records atomically with conflict resolution
+    const upserts = updates.map(u => ({
+      hotspot_id: hotspotId,
+      component_id: u.component_id,
+      quantity: u.quantity,
+      updated_at: new Date().toISOString()
+    }));
+
+    const { error } = await supabase
+      .from('component_locations')
+      .upsert(upserts, { onConflict: 'component_id,hotspot_id' });
     if (error) throw new Error(error.message || "Failed to update hotspot components");
+  }
+
+  // 3. Keep local Dexie offline database synchronized
+  if (typeof window !== 'undefined') {
+    try {
+      await db.component_locations.where('hotspot_id').equals(hotspotId).delete();
+      if (updates.length > 0) {
+        await db.component_locations.bulkPut(
+          updates.map(u => ({
+            id: `${hotspotId}_${u.component_id}`,
+            hotspot_id: hotspotId,
+            component_id: u.component_id,
+            quantity: u.quantity,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }))
+        );
+      }
+    } catch (dbErr) {
+      console.warn("Offline DB update error for component_locations:", dbErr);
+    }
   }
 }
 
@@ -1446,6 +1552,7 @@ export interface Project {
   status: 'planning' | 'active' | 'archived';
   description: string | null;
   location_id?: string | null;
+  last_archived_location_id?: string | null;
   location_label?: string | null;
   location_room_id?: string | null;
   created_at: string;
@@ -1519,28 +1626,51 @@ export function calculateLoanDaysRemaining(dueDateStr: string): number {
 }
 
 
-export function extractProjectLocation(project: any): { cleanDescription: string; locationId: string | null } {
-  if (project.location_id) {
-    return {
-      cleanDescription: (project.description || '').replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim(),
-      locationId: project.location_id
-    };
+export function extractProjectLocation(project: any): { cleanDescription: string; locationId: string | null; lastLocationId: string | null } {
+  let locationId = project.location_id || null;
+  let lastLocationId = project.last_archived_location_id || project.last_location_id || null;
+  let desc = project.description || '';
+
+  const lastMatch = desc.match(/<!--last_archive_location:([a-f0-9\-]+)-->/i);
+  if (lastMatch) {
+    lastLocationId = lastLocationId || lastMatch[1];
+    desc = desc.replace(/<!--last_archive_location:[a-f0-9\-]+-->\s*/gi, '').trim();
   }
-  const desc = project.description || '';
-  const match = desc.match(/<!--archive_location:([a-f0-9\-]+)-->/i);
-  if (match) {
-    return {
-      cleanDescription: desc.replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim(),
-      locationId: match[1]
-    };
+
+  const currMatch = desc.match(/<!--archive_location:([a-f0-9\-]+)-->/i);
+  if (currMatch) {
+    locationId = locationId || currMatch[1];
+    desc = desc.replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim();
   }
-  return { cleanDescription: desc, locationId: null };
+
+  if (locationId) {
+    lastLocationId = locationId;
+  }
+
+  return { cleanDescription: desc, locationId, lastLocationId };
 }
 
-export function formatProjectDescriptionWithLocation(description: string | null | undefined, locationId: string | null | undefined): string {
-  const clean = (description || '').replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '').trim();
+export function formatProjectDescriptionWithLocation(
+  description: string | null | undefined, 
+  locationId: string | null | undefined,
+  lastLocationId?: string | null | undefined
+): string {
+  let clean = (description || '')
+    .replace(/<!--archive_location:[a-f0-9\-]+-->\s*/gi, '')
+    .replace(/<!--last_archive_location:[a-f0-9\-]+-->\s*/gi, '')
+    .trim();
+  
+  const tags: string[] = [];
   if (locationId) {
-    return `${clean}${clean ? '\n\n' : ''}<!--archive_location:${locationId}-->`;
+    tags.push(`<!--archive_location:${locationId}-->`);
+  }
+  const effectiveLast = lastLocationId || locationId;
+  if (effectiveLast) {
+    tags.push(`<!--last_archive_location:${effectiveLast}-->`);
+  }
+
+  if (tags.length > 0) {
+    return `${clean}${clean ? '\n\n' : ''}${tags.join('\n')}`;
   }
   return clean;
 }
@@ -1554,7 +1684,7 @@ export async function getProjects(): Promise<(Project & { active_count: number }
     const allProjComps = await db.project_components.toArray();
     return allProj.map(p => {
       const active = allProjComps.filter(pc => pc.project_id === p.id && !pc.returned_at).reduce((acc, pc) => acc + pc.quantity, 0);
-      const { cleanDescription, locationId } = extractProjectLocation(p);
+      const { cleanDescription, locationId, lastLocationId } = extractProjectLocation(p);
       const loc = locationId ? hotspotMap.get(locationId) : undefined;
       const status: 'planning' | 'active' | 'archived' = (p.status as any) === 'completed' ? 'archived' : (p.status as any);
       return {
@@ -1562,6 +1692,7 @@ export async function getProjects(): Promise<(Project & { active_count: number }
         status,
         description: cleanDescription,
         location_id: locationId,
+        last_archived_location_id: lastLocationId,
         location_label: loc?.fullLabel || loc?.label,
         location_room_id: loc?.roomId,
         active_count: active
@@ -1574,7 +1705,7 @@ export async function getProjects(): Promise<(Project & { active_count: number }
   
   return data.map(p => {
     const active = p.project_components.filter((pc: any) => !pc.returned_at).reduce((acc: number, pc: any) => acc + pc.quantity, 0);
-    const { cleanDescription, locationId } = extractProjectLocation(p);
+    const { cleanDescription, locationId, lastLocationId } = extractProjectLocation(p);
     const loc = locationId ? hotspotMap.get(locationId) : undefined;
     const status: 'planning' | 'active' | 'archived' = p.status === 'completed' ? 'archived' : (p.status as any);
     return {
@@ -1582,11 +1713,17 @@ export async function getProjects(): Promise<(Project & { active_count: number }
       status,
       description: cleanDescription,
       location_id: locationId,
+      last_archived_location_id: lastLocationId,
       location_label: loc?.fullLabel || loc?.label,
       location_room_id: loc?.roomId,
       active_count: active
     };
   });
+}
+
+export async function getProjectsForHotspot(hotspotId: string): Promise<(Project & { active_count: number })[]> {
+  const allProjects = await getProjects();
+  return allProjects.filter(p => p.status === 'archived' && p.location_id === hotspotId);
 }
 
 export async function createProject(name: string, description: string = ''): Promise<Project> {
@@ -1611,7 +1748,6 @@ export async function updateProject(
   const hotspotMap = new Map<string, any>(leafHotspots.map(h => [h.id, h]));
 
   // Strict Rule 1: The archive transition and location_id assignment must be atomic.
-  // A project must not become Archived without a valid storage location, and the location must reference a leaf hotspot.
   if (updates.status === 'archived') {
     if (!updates.location_id) {
       throw new Error("A project cannot become Archived without a valid leaf storage location.");
@@ -1631,23 +1767,27 @@ export async function updateProject(
     }
   }
 
-  // Determine existing project data if needed for fallback description
-  let existingDesc: string | null | undefined = updates.description;
-  if (existingDesc === undefined) {
-    if (typeof window !== 'undefined' && !navigator.onLine) {
-      const p = await db.projects.get(id);
-      existingDesc = p?.description;
-    } else {
-      const { data: cur } = await supabase.from('projects').select('description').eq('id', id).single();
-      existingDesc = cur?.description;
-    }
+  // Fetch existing project data to preserve description and previous archived location
+  let existingProject: any = null;
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    existingProject = await db.projects.get(id);
+  } else {
+    const { data: cur } = await supabase.from('projects').select('*').eq('id', id).maybeSingle();
+    existingProject = cur;
   }
 
-  // If moving away from archived, clear location_id
-  const finalLocationId = updates.status && updates.status !== 'archived' ? null : updates.location_id;
+  const { cleanDescription: existingCleanDesc, locationId: existingLocId, lastLocationId: existingLastLocId } = extractProjectLocation(existingProject || {});
+
+  // If moving away from archived, clear location_id, but preserve last_archived_location_id
+  const finalLocationId = updates.status && updates.status !== 'archived' ? null : (updates.location_id !== undefined ? updates.location_id : existingLocId);
+  const finalLastLocationId = updates.status === 'archived' && updates.location_id ? updates.location_id : (existingLastLocId || existingLocId || null);
+
+  const baseDesc = updates.description !== undefined ? (updates.description || '') : existingCleanDesc;
+  const encodedDesc = formatProjectDescriptionWithLocation(baseDesc, finalLocationId, finalLastLocationId);
 
   const payload: any = {
     ...updates,
+    description: encodedDesc,
     location_id: finalLocationId,
     updated_at: new Date().toISOString()
   };
@@ -1666,8 +1806,6 @@ export async function updateProject(
   if (!error && data) {
     savedData = data;
   } else if (error && (error.code === 'PGRST204' || error.message?.includes('location_id'))) {
-    // Column location_id not present yet in remote Supabase schema -> store in description fallback
-    const encodedDesc = formatProjectDescriptionWithLocation(existingDesc, finalLocationId);
     const fallbackPayload: any = {
       name: updates.name,
       status: updates.status,
@@ -1692,12 +1830,13 @@ export async function updateProject(
   if (typeof window !== 'undefined') {
     await db.projects.update(id, {
       ...updates,
+      description: encodedDesc,
       location_id: finalLocationId,
       status: updates.status as any
     });
   }
 
-  const { cleanDescription, locationId } = extractProjectLocation(savedData);
+  const { cleanDescription, locationId, lastLocationId } = extractProjectLocation(savedData);
   const loc = locationId ? hotspotMap.get(locationId) : undefined;
 
   return {
@@ -1705,6 +1844,7 @@ export async function updateProject(
     status: savedData.status,
     description: cleanDescription,
     location_id: locationId,
+    last_archived_location_id: lastLocationId || finalLastLocationId,
     location_label: loc?.fullLabel || loc?.label,
     location_room_id: loc?.roomId
   };
@@ -1748,7 +1888,19 @@ export async function getProjectDetails(id: string): Promise<{ project: Project,
     const items = await Promise.all(rawItems.map(async pc => {
       const component = await db.components.get(pc.component_id);
       const source_hotspot = await db.spatial_hotspots.get(pc.source_location_id);
-      return { ...pc, component, source_hotspot };
+      const loc = hotspotMap.get(pc.source_location_id);
+      return {
+        ...pc,
+        component,
+        source_location_label: loc?.fullLabel || source_hotspot?.label || 'Source Location',
+        source_room_id: loc?.roomId,
+        source_hotspot: source_hotspot ? {
+          ...source_hotspot,
+          fullLabel: loc?.fullLabel || source_hotspot?.label,
+          roomName: loc?.roomName,
+          roomId: loc?.roomId
+        } : loc
+      };
     }));
     items.sort((a, b) => new Date(b.checked_out_at).getTime() - new Date(a.checked_out_at).getTime());
     
@@ -1771,8 +1923,23 @@ export async function getProjectDetails(id: string): Promise<{ project: Project,
   const { data: rawProject, error } = await supabase.from('projects').select('*').eq('id', id).single();
   if (error) throw error;
   
-  const { data: items, error: itemsErr } = await supabase.from('project_components').select('*, component:components!project_components_component_id_fkey(*), source_hotspot:spatial_hotspots!fk_project_components_source_loc(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
+  const { data: rawItems, error: itemsErr } = await supabase.from('project_components').select('*, component:components!project_components_component_id_fkey(*), source_hotspot:spatial_hotspots!fk_project_components_source_loc(*)').eq('project_id', id).order('checked_out_at', { ascending: false });
   if (itemsErr) throw itemsErr;
+
+  const items = (rawItems || []).map((pc: any) => {
+    const loc = hotspotMap.get(pc.source_location_id);
+    return {
+      ...pc,
+      source_location_label: loc?.fullLabel || pc.source_hotspot?.label || 'Source Location',
+      source_room_id: loc?.roomId || pc.source_hotspot?.room_id,
+      source_hotspot: pc.source_hotspot ? {
+        ...pc.source_hotspot,
+        fullLabel: loc?.fullLabel || pc.source_hotspot?.label,
+        roomName: loc?.roomName,
+        roomId: loc?.roomId
+      } : loc
+    };
+  });
 
   const { cleanDescription, locationId } = extractProjectLocation(rawProject);
   const loc = locationId ? hotspotMap.get(locationId) : undefined;

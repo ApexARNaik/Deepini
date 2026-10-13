@@ -127,5 +127,33 @@ npm run start
 
 ---
 
+## Automated Database Backups
+
+Deepini includes a scheduled GitHub Actions workflow (`.github/workflows/monthly-backup.yml`) that automatically backs up your entire Supabase PostgreSQL database on the **1st of every month** at 00:00 UTC (and can also be triggered manually anytime).
+
+### Setup Instructions:
+1. **Find your Supabase Connection String**:
+   - Go to your [Supabase Dashboard](https://supabase.com/dashboard) → **Project Settings** → **Database**.
+   - Under **Connection string**, select **URI** (looks like `postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres`).
+2. **Add the Secret to GitHub**:
+   - In your GitHub repository, go to **Settings** → **Secrets and variables** → **Actions**.
+   - Click **New repository secret**.
+   - Name: `SUPABASE_DB_URL`
+   - Value: Paste your Supabase URI (make sure your actual database password is included in place of `[YOUR-PASSWORD]`).
+3. **Run or View Backups**:
+   - Backups execute automatically on the 1st of every month.
+   - To run a backup on-demand: Go to **Actions** → **Monthly Database Backup** → **Run workflow**.
+   - Each backup generates:
+     - A permanent **GitHub Release** tagged `backup-YYYY-MM-DD` containing the compressed `.sql.gz` dump.
+     - A downloadable workflow **Artifact** (retained for 90 days).
+
+### How to Restore from a Backup:
+```bash
+# Decompress and restore to your Supabase database:
+gunzip -c deepini-backup-YYYY-MM-DD.sql.gz | psql "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres"
+```
+
+---
+
 ## License
 MIT License. Created for personal workshop and inventory tracking.

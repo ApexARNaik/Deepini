@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Component, Tag, getTags, upsertTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, getFullHotspotPath, isPersonalItem } from "@/lib/api";
-import { X, Plus, UploadCloud, FileText, Maximize2, Tag as TagIcon, ChevronDown, MapPin, Search, Check, Type, Hash, ExternalLink, Image as ImageIcon, Paperclip } from "lucide-react";
+import { Component, Tag, getTags, upsertTag, deleteTag, upsertComponent, uploadImage, uploadFile, getAllLeafHotspots, getFullHotspotPath, isPersonalItem } from "@/lib/api";
+import { X, Plus, UploadCloud, FileText, Maximize2, Tag as TagIcon, ChevronDown, MapPin, Search, Check, Type, Hash, ExternalLink, Image as ImageIcon, Paperclip, Trash2, SlidersHorizontal } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import { ImagePreviewModal } from "./ImagePreviewModal";
+import { TagManagerModal } from "./TagManagerModal";
 import { StorageSequenceTooltip, StorageTooltipData } from "@/components/spatial/StorageSequenceTooltip";
 import { ThemedNumberInput } from "@/components/ThemedNumberInput";
 
@@ -22,6 +23,9 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   
   const typeParam = searchParams.get('type');
   const locationIdParam = searchParams.get('locationId') || searchParams.get('location');
+  const roomIdParam = searchParams.get('roomId');
+  const returnToParam = searchParams.get('returnTo');
+  const [sourceRoomId, setSourceRoomId] = useState<string | null>(roomIdParam || null);
   const isInitialPersonal = initialData ? isPersonalItem(initialData) : (typeParam === 'personal');
   const [itemType, setItemType] = useState<'component' | 'personal'>(isInitialPersonal ? 'personal' : 'component');
 
@@ -40,6 +44,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   const [tagInput, setTagInput] = useState("");
   const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
   const [highlightedTagIndex, setHighlightedTagIndex] = useState(-1);
+  const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
 
@@ -207,6 +212,10 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     if (!initialData && locationIdParam) {
       setSelectedHotspot(locationIdParam);
       getFullHotspotPath(locationIdParam).then((path) => {
+        const roomNode = path.find(p => p.type === 'room');
+        if (roomNode?.id) {
+          setSourceRoomId(roomNode.id);
+        }
         const fullLabel = path.map(p => p.label).filter(Boolean).join(' → ');
         if (fullLabel) {
           setLocations(prev => {
@@ -324,6 +333,27 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
       setIsTagDropdownOpen(false);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const refreshAvailableTags = () => {
+    getTags().then(fetched => {
+      setAvailableTags(fetched);
+      setTags(prev => prev.filter(t => fetched.some(f => f.id === t.id)));
+    }).catch(console.error);
+  };
+
+  const handleQuickDeleteTag = async (e: React.MouseEvent, tagToDelete: Tag) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (window.confirm(`Delete tag "${tagToDelete.name}" permanently from database?`)) {
+      try {
+        await deleteTag(tagToDelete.id);
+        setAvailableTags(prev => prev.filter(t => t.id !== tagToDelete.id));
+        setTags(prev => prev.filter(t => t.id !== tagToDelete.id));
+      } catch (err) {
+        console.error("Failed to delete tag:", err);
+      }
     }
   };
 
@@ -540,17 +570,38 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
     }
     
     if (success) {
-      router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+      if (returnToParam) {
+        router.push(returnToParam);
+      } else if (locationIdParam) {
+        const targetRoomId = sourceRoomId || roomIdParam;
+        if (targetRoomId) {
+          router.push(`/rooms/${targetRoomId}?locateHotspot=${locationIdParam}`);
+        } else {
+          try {
+            const path = await getFullHotspotPath(locationIdParam);
+            const roomNode = path.find(p => p.type === 'room');
+            if (roomNode?.id) {
+              router.push(`/rooms/${roomNode.id}?locateHotspot=${locationIdParam}`);
+              return;
+            }
+          } catch (e) {
+            console.error("Failed to resolve room for return redirect:", e);
+          }
+          router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+        }
+      } else {
+        router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+      }
     }
   };
 
   return (
-    <form onSubmit={onSubmit} className="max-w-4xl mx-auto space-y-8 pb-20">
-      <fieldset disabled={!isOnline} className="space-y-8">
+    <form onSubmit={onSubmit} className="max-w-4xl mx-auto space-y-8 pb-20 w-full min-w-0">
+      <fieldset disabled={!isOnline} className="space-y-8 min-w-0">
       
       {/* Header & Item Type Selector */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#332f2a]">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#332f2a] min-w-0">
+        <div className="min-w-0">
           <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white mb-1">
             {initialData 
               ? `Edit ${itemType === 'personal' ? 'Personal Item' : 'Component'}` 
@@ -700,32 +751,60 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
           Assign this {itemType === 'personal' ? 'item' : 'component'} to a physical location or container on the room map.
         </p>
         {locations.length > 0 && (
-          <div className="flex flex-col gap-2 mb-3">
-            {locations.map(l => (
-              <div 
-                key={l.hotspot_id} 
-                onMouseEnter={(e) => {
-                  handleShowTooltip(e, {
-                    fullLabel: l.label,
-                    quantity: l.quantity
-                  });
-                }}
-                onMouseLeave={handleHideTooltip}
-                className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] hover:border-[#4a443c] rounded transition-colors group/loc"
-              >
-                <div className="text-sm text-white truncate pr-2" data-tooltip={l.label}>{l.label}</div>
-                <div className="flex items-center gap-4 shrink-0">
-                  <div className="text-sm text-brand-text-muted">Qty: <span className="text-brand-accent font-bold">{l.quantity}</span></div>
-                  <button type="button" onClick={() => handleRemoveLocation(l.hotspot_id)} className="text-brand-text-muted hover:text-red-400 transition-colors">
-                    <X className="h-4 w-4" />
-                  </button>
+          <div className="flex flex-col gap-2 mb-3 min-w-0">
+            {locations.map(l => {
+              const display = getHotspotDisplay({ fullLabel: l.label, label: l.label });
+              return (
+                <div 
+                  key={l.hotspot_id} 
+                  onMouseEnter={(e) => {
+                    handleShowTooltip(e, {
+                      fullLabel: l.label,
+                      quantity: l.quantity
+                    });
+                  }}
+                  onMouseLeave={handleHideTooltip}
+                  className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] hover:border-[#4a443c] rounded transition-colors group/loc min-w-0 gap-3"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
+                    <MapPin className="h-4 w-4 text-brand-accent shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      {display.trail ? (
+                        <div className="flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-2 min-w-0">
+                          <span className="text-sm font-semibold text-white truncate shrink-0 max-w-[200px] sm:max-w-[260px]">
+                            {display.destination}
+                          </span>
+                          <span className="text-xs text-brand-text-muted truncate min-w-0" title={l.label}>
+                            ({display.trail})
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-white font-medium truncate min-w-0" title={l.label}>
+                          {l.label}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0">
+                    <div className="text-sm text-brand-text-muted whitespace-nowrap">
+                      Qty: <span className="text-brand-accent font-bold">{l.quantity}</span>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={() => handleRemoveLocation(l.hotspot_id)} 
+                      className="text-brand-text-muted hover:text-red-400 transition-colors p-1"
+                      title="Remove location"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
-        <div className="flex gap-2 items-end">
-          <div className="flex-1 relative" ref={locationDropdownRef}>
+        <div className="flex gap-2 items-end min-w-0">
+          <div className="flex-1 min-w-0 relative" ref={locationDropdownRef}>
             <button
               type="button"
               onClick={() => {
@@ -750,23 +829,23 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               }}
               className={`w-full bg-[#191715] border ${
                 isLocationDropdownOpen ? 'border-brand-accent ring-1 ring-brand-accent/50' : 'border-[#3a352e] hover:border-[#4a443c]'
-              } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none focus:border-brand-accent`}
+              } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none focus:border-brand-accent min-w-0`}
             >
-              <div className="flex items-center gap-2.5 min-w-0 pr-2">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
                 <MapPin className={`h-4 w-4 shrink-0 ${selectedHotspotObj ? 'text-brand-accent' : 'text-brand-text-muted'}`} />
                 {selectedHotspotObj ? (
-                  <div className="flex items-baseline gap-2 min-w-0 truncate">
-                    <span className="text-white font-medium truncate">
+                  <div className="flex items-baseline gap-2 min-w-0 flex-1">
+                    <span className="text-white font-medium truncate shrink-0 max-w-[180px] sm:max-w-[240px]">
                       {getHotspotDisplay(selectedHotspotObj).destination}
                     </span>
                     {getHotspotDisplay(selectedHotspotObj).trail && (
-                      <span className="text-[11px] text-brand-text-muted truncate hidden sm:inline">
+                      <span className="text-[11px] text-brand-text-muted truncate min-w-0 hidden sm:inline" title={getHotspotDisplay(selectedHotspotObj).trail}>
                         ({getHotspotDisplay(selectedHotspotObj).trail})
                       </span>
                     )}
                   </div>
                 ) : (
-                  <span className="text-brand-text-muted">Select a location on the map...</span>
+                  <span className="text-brand-text-muted truncate">Select a location on the map...</span>
                 )}
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -890,7 +969,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                               )}
                             </div>
                             {display.trail && (
-                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5" data-tooltip={hs.fullLabel}>
+                              <div className="text-[11px] text-brand-text-muted truncate ml-5.5 mt-0.5">
                                 {display.trail}
                               </div>
                             )}
@@ -906,7 +985,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               </div>
             )}
           </div>
-          <div className="w-24">
+          <div className="w-24 shrink-0">
             <ThemedNumberInput
               min={1}
               value={locationQuantity}
@@ -914,7 +993,12 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               className="w-full bg-brand-bg border border-[#332f2a]"
             />
           </div>
-          <button type="button" onClick={handleAddLocation} disabled={!selectedHotspot} className="px-4 py-2 bg-brand-accent text-white font-medium hover:bg-brand-accent-hover disabled:opacity-50">
+          <button 
+            type="button" 
+            onClick={handleAddLocation} 
+            disabled={!selectedHotspot} 
+            className="px-4 py-2 bg-brand-accent text-white font-medium hover:bg-brand-accent-hover disabled:opacity-50 shrink-0"
+          >
             Add
           </button>
         </div>
@@ -977,6 +1061,14 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
             >
               Add
             </button>
+            <button
+              type="button"
+              onClick={() => setIsTagManagerOpen(true)}
+              className="px-2.5 py-2 bg-[#1a1816] border border-[#332f2a] text-brand-text-muted hover:text-brand-accent hover:bg-[#25221e] text-sm font-medium transition-colors rounded-sm flex items-center justify-center"
+              data-tooltip="Manage All Tags"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Proper Custom Dropdown */}
@@ -1023,32 +1115,68 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                     }
 
                     return (
-                      <button
+                      <div
                         key={opt.tag.id}
                         id={`tag-opt-${idx}`}
-                        type="button"
                         onMouseDown={(e) => {
                           e.preventDefault();
+                        }}
+                        onClick={() => {
                           handleSelectTagOption(opt);
                         }}
                         onMouseEnter={() => setHighlightedTagIndex(idx)}
-                        className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between transition-colors ${
+                        className={`w-full px-3 py-2 text-xs flex items-center justify-between transition-colors cursor-pointer group/opt ${
                           isHighlighted ? 'bg-[#2a2622] text-white' : 'text-brand-text hover:bg-[#201d1a] hover:text-white'
                         }`}
                       >
-                        <span className="flex items-center gap-2 truncate">
+                        <span className="flex items-center gap-2 truncate flex-1 min-w-0">
                           <TagIcon className={`w-3.5 h-3.5 shrink-0 ${isHighlighted ? 'text-brand-accent' : 'text-brand-gold/70'}`} />
                           <span className="truncate">{opt.tag.name}</span>
                         </span>
-                        {opt.tag.usage_count ? (
-                          <span className="text-[10px] text-brand-text-muted shrink-0 ml-2">
-                            {opt.tag.usage_count} uses
-                          </span>
-                        ) : null}
-                      </button>
+                        <div 
+                          className="flex items-center gap-2 shrink-0 ml-2" 
+                          onClick={(e) => e.stopPropagation()} 
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
+                          {opt.tag.usage_count ? (
+                            <span className="text-[10px] text-brand-text-muted">
+                              {opt.tag.usage_count} uses
+                            </span>
+                          ) : null}
+                          <button
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                            }}
+                            onClick={(e) => {
+                              handleQuickDeleteTag(e, opt.tag);
+                            }}
+                            className="p-1 text-brand-text-muted hover:text-rose-400 hover:bg-rose-950/40 rounded transition-colors opacity-0 group-hover/opt:opacity-100"
+                            data-tooltip={`Delete "${opt.tag.name}" permanently`}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
                     );
                   })
                 )}
+              </div>
+
+              {/* Dropdown footer: Manage tags */}
+              <div className="p-1.5 bg-[#12110f] border-t border-[#2e2a25]">
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setIsTagDropdownOpen(false);
+                    setIsTagManagerOpen(true);
+                  }}
+                  className="w-full text-center py-1.5 px-2 rounded text-[11px] font-medium text-brand-text-muted hover:text-white hover:bg-[#201d1a] flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <SlidersHorizontal className="h-3 w-3 text-brand-accent" />
+                  <span>Manage all tags...</span>
+                </button>
               </div>
             </div>
           )}
@@ -1300,7 +1428,11 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
                     import('@/lib/api').then(({ deleteComponent }) => {
                       setLoading(true);
                       deleteComponent(initialData.id).then(() => {
-                        router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+                        if (returnToParam) {
+                          router.push(returnToParam);
+                        } else {
+                          router.push(`/inventory?view=${itemType === 'personal' ? 'personal' : 'components'}`);
+                        }
                       }).catch(err => {
                         console.error(err);
                         alert(`Failed to delete ${itemType === 'personal' ? 'personal item' : 'component'}`);
@@ -1316,7 +1448,19 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
             ) : <div/>}
 
             <div className="flex gap-4">
-              <button type="button" onClick={() => router.back()} className="px-6 py-2 text-brand-text-muted hover:text-white text-sm">
+              <button 
+                type="button" 
+                onClick={() => {
+                  if (returnToParam) {
+                    router.push(returnToParam);
+                  } else if (locationIdParam && (sourceRoomId || roomIdParam)) {
+                    router.push(`/rooms/${sourceRoomId || roomIdParam}?locateHotspot=${locationIdParam}`);
+                  } else {
+                    router.back();
+                  }
+                }} 
+                className="px-6 py-2 text-brand-text-muted hover:text-white text-sm"
+              >
                 Cancel
               </button>
               <button 
@@ -1352,6 +1496,13 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
 
       {/* Floating Storage Sequence Tooltip */}
       <StorageSequenceTooltip data={hoverTooltip} />
+
+      {/* Tag Manager Modal */}
+      <TagManagerModal
+        isOpen={isTagManagerOpen}
+        onClose={() => setIsTagManagerOpen(false)}
+        onTagsChanged={refreshAvailableTags}
+      />
     </form>
   );
 }

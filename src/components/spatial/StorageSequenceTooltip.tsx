@@ -1,6 +1,7 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { MapPin, ChevronRight, ExternalLink } from "lucide-react";
 
 export interface StorageTooltipData {
@@ -14,7 +15,13 @@ export interface StorageTooltipData {
 }
 
 export function StorageSequenceTooltip({ data }: { data: StorageTooltipData | null }) {
-  if (!data || typeof window === "undefined") return null;
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!data || !mounted || typeof window === "undefined") return null;
 
   const { targetRect, fullLabel, label, roomName, quantity, customText, footerHint } = data;
   const rawCrumbs = fullLabel ? fullLabel.split(" → ").map((s) => s.trim()).filter(Boolean) : [];
@@ -24,11 +31,12 @@ export function StorageSequenceTooltip({ data }: { data: StorageTooltipData | nu
   const targetCenterX = targetRect.left + targetRect.width / 2;
   const clampedX = Math.max(16, Math.min(window.innerWidth - tooltipWidth - 16, targetCenterX - tooltipWidth / 2));
 
-  const showBelow = targetRect.top < 160;
+  // If near top (e.g. under header < 190px), show below target; otherwise show above
+  const showBelow = targetRect.top < 190;
   const tooltipY = showBelow ? targetRect.bottom + 8 : targetRect.top - 8;
   const arrowLeft = Math.max(16, Math.min(tooltipWidth - 16, targetCenterX - clampedX));
 
-  return (
+  const content = (
     <div
       style={{
         position: "fixed",
@@ -82,16 +90,18 @@ export function StorageSequenceTooltip({ data }: { data: StorageTooltipData | nu
                       <ChevronRight className="h-3 w-3 text-brand-gold/50 mx-0.5 shrink-0" />
                     )}
                     <span
-                      className={`px-2 py-0.5 rounded text-xs transition-colors ${
+                      className={`px-2 py-0.5 rounded text-xs transition-colors max-w-full ${
                         isTarget
                           ? "bg-brand-accent/25 text-white font-bold border border-brand-accent/60 shadow-[0_0_10px_rgba(188,115,83,0.3)] inline-flex items-center gap-1.5"
-                          : "text-brand-text-muted bg-[#201d1a] border border-[#2d2822]"
+                          : "text-brand-text-muted bg-[#201d1a] border border-[#2d2822] inline-block"
                       }`}
                     >
                       {isTarget && (
                         <span className="w-1.5 h-1.5 rounded-full bg-brand-accent animate-pulse shrink-0" />
                       )}
-                      {crumb}
+                      <span className="truncate max-w-[280px] inline-block align-middle" title={crumb}>
+                        {crumb}
+                      </span>
                     </span>
                   </span>
                 );
@@ -119,4 +129,6 @@ export function StorageSequenceTooltip({ data }: { data: StorageTooltipData | nu
       </div>
     </div>
   );
+
+  return createPortal(content, document.body);
 }

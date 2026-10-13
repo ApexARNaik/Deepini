@@ -30,7 +30,8 @@ export function EditProjectModal({
 
   // Storage Location state (mandatory when status === 'archived')
   const [availableHotspots, setAvailableHotspots] = useState<any[]>([]);
-  const [selectedLocationId, setSelectedLocationId] = useState<string>(project.location_id || "");
+  const previousArchivedLocId = project.location_id || project.last_archived_location_id || "";
+  const [selectedLocationId, setSelectedLocationId] = useState<string>(previousArchivedLocId);
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
   const [locationSearch, setLocationSearch] = useState("");
   const [highlightedLocIndex, setHighlightedLocIndex] = useState(-1);
@@ -41,15 +42,25 @@ export function EditProjectModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load available leaf hotspots
+  // Sync state and load available leaf hotspots
   useEffect(() => {
     if (!isOpen) return;
+    setName(project.name);
+    setDescription(project.description || "");
+    const initialPhase = initialStatus || (project.status === ('completed' as any) ? 'archived' : project.status);
+    setStatus(initialPhase);
+    const prevLoc = project.location_id || project.last_archived_location_id || "";
+    setSelectedLocationId(prevLoc);
+    setError(null);
     getAllLeafHotspots()
       .then((hotspots) => {
         setAvailableHotspots(hotspots);
+        if (prevLoc && hotspots.some(h => h.id === prevLoc)) {
+          setSelectedLocationId(prevLoc);
+        }
       })
       .catch(console.error);
-  }, [isOpen]);
+  }, [isOpen, project, initialStatus]);
 
   // Click outside to close location dropdown
   useEffect(() => {
@@ -273,7 +284,15 @@ export function EditProjectModal({
 
               {/* Archived Option */}
               <label
-                onClick={() => setStatus("archived")}
+                onClick={() => {
+                  setStatus("archived");
+                  if (!selectedLocationId) {
+                    const prevLoc = project.location_id || project.last_archived_location_id || "";
+                    if (prevLoc && availableHotspots.some(h => h.id === prevLoc)) {
+                      setSelectedLocationId(prevLoc);
+                    }
+                  }
+                }}
                 className={`p-3 border rounded-lg cursor-pointer transition-all flex items-start gap-3 ${
                   status === "archived"
                     ? "bg-zinc-500/15 border-zinc-400/60 text-white"
@@ -307,8 +326,15 @@ export function EditProjectModal({
                   <span>Physical Storage Location (Required) *</span>
                 </label>
                 {selectedLocationId && (
-                  <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-brand-accent/20 text-brand-accent border border-brand-accent/30">
-                    Location Selected
+                  <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-brand-accent/20 text-brand-accent border border-brand-accent/30 flex items-center gap-1">
+                    {project.status !== 'archived' && selectedLocationId === (project.location_id || project.last_archived_location_id) ? (
+                      <>
+                        <Sparkles className="h-2.5 w-2.5 text-brand-gold" />
+                        <span>Previous Location Preselected</span>
+                      </>
+                    ) : (
+                      <span>Location Selected</span>
+                    )}
                   </span>
                 )}
               </div>
@@ -340,23 +366,23 @@ export function EditProjectModal({
                       : isLocationDropdownOpen
                       ? "border-brand-accent ring-1 ring-brand-accent/50"
                       : "border-[#3a352e] hover:border-[#4a443c]"
-                  } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none`}
+                  } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none min-w-0`}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
                     <MapPin className={`h-4 w-4 shrink-0 ${selectedHotspotObj ? "text-brand-accent" : "text-brand-text-muted"}`} />
                     {selectedHotspotObj ? (
-                      <div className="flex items-baseline gap-2 min-w-0 truncate">
-                        <span className="text-white font-medium truncate">
+                      <div className="flex items-baseline gap-2 min-w-0 flex-1">
+                        <span className="text-white font-medium truncate shrink-0 max-w-[180px] sm:max-w-[240px]">
                           {getHotspotDisplay(selectedHotspotObj).destination}
                         </span>
                         {getHotspotDisplay(selectedHotspotObj).trail && (
-                          <span className="text-[11px] text-brand-text-muted truncate hidden sm:inline">
+                          <span className="text-[11px] text-brand-text-muted truncate min-w-0 hidden sm:inline" title={getHotspotDisplay(selectedHotspotObj).trail}>
                             ({getHotspotDisplay(selectedHotspotObj).trail})
                           </span>
                         )}
                       </div>
                     ) : (
-                      <span className="text-brand-text-muted text-xs">Select physical storage location...</span>
+                      <span className="text-brand-text-muted text-xs truncate">Select physical storage location...</span>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">

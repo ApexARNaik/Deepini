@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 
 export type TooltipVariant = "default" | "danger" | "warning" | "accent";
 export type TooltipPosition = "top" | "bottom" | "left" | "right";
@@ -13,6 +14,7 @@ interface TooltipState {
 }
 
 export function GlobalTooltip() {
+  const [mounted, setMounted] = useState(false);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [coords, setCoords] = useState<{
     x: number;
@@ -200,6 +202,8 @@ export function GlobalTooltip() {
     document.addEventListener("scroll", hide, { capture: true, passive: true });
     window.addEventListener("keydown", handleKeyDown, { passive: true });
 
+    setMounted(true);
+
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
       observer.disconnect();
@@ -211,7 +215,7 @@ export function GlobalTooltip() {
     };
   }, []);
 
-  if (!tooltip) return null;
+  if (!tooltip || !mounted || typeof document === "undefined") return null;
 
   const { variant } = tooltip;
 
@@ -236,7 +240,7 @@ export function GlobalTooltip() {
 
   const actualPos = coords?.actualPos || tooltip.preferredPos;
 
-  return (
+  const tooltipNode = (
     <div
       ref={tooltipRef}
       role="tooltip"
@@ -276,4 +280,6 @@ export function GlobalTooltip() {
       </div>
     </div>
   );
+
+  return createPortal(tooltipNode, document.body);
 }
