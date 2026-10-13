@@ -303,7 +303,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-brand-bg relative">
+      <div className="flex-1 flex flex-col overflow-hidden bg-brand-bg relative min-w-0">
         {/* Top Header */}
         <header className="h-16 md:h-20 shrink-0 flex items-center justify-between px-4 md:px-8 border-b border-[#332f2a] bg-brand-bg relative z-30">
           <div ref={searchContainerRef} className="flex-1 max-w-2xl relative">
@@ -602,7 +602,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12 pb-24 md:pb-8 lg:pb-12">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 p-4 md:p-8 lg:p-12 pb-24 md:pb-8 lg:pb-12">
           {children}
         </main>
 

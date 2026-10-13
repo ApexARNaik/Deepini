@@ -90,16 +90,18 @@ export function StorageSequenceTooltip({ data }: { data: StorageTooltipData | nu
                       <ChevronRight className="h-3 w-3 text-brand-gold/50 mx-0.5 shrink-0" />
                     )}
                     <span
-                      className={`px-2 py-0.5 rounded text-xs transition-colors ${
+                      className={`px-2 py-0.5 rounded text-xs transition-colors max-w-full ${
                         isTarget
                           ? "bg-brand-accent/25 text-white font-bold border border-brand-accent/60 shadow-[0_0_10px_rgba(188,115,83,0.3)] inline-flex items-center gap-1.5"
-                          : "text-brand-text-muted bg-[#201d1a] border border-[#2d2822]"
+                          : "text-brand-text-muted bg-[#201d1a] border border-[#2d2822] inline-block"
                       }`}
                     >
                       {isTarget && (
                         <span className="w-1.5 h-1.5 rounded-full bg-brand-accent animate-pulse shrink-0" />
                       )}
-                      {crumb}
+                      <span className="truncate max-w-[280px] inline-block align-middle" title={crumb}>
+                        {crumb}
+                      </span>
                     </span>
                   </span>
                 );

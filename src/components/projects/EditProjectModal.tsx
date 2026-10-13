@@ -366,23 +366,23 @@ export function EditProjectModal({
                       : isLocationDropdownOpen
                       ? "border-brand-accent ring-1 ring-brand-accent/50"
                       : "border-[#3a352e] hover:border-[#4a443c]"
-                  } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none`}
+                  } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none min-w-0`}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
                     <MapPin className={`h-4 w-4 shrink-0 ${selectedHotspotObj ? "text-brand-accent" : "text-brand-text-muted"}`} />
                     {selectedHotspotObj ? (
-                      <div className="flex items-baseline gap-2 min-w-0 truncate">
-                        <span className="text-white font-medium truncate">
+                      <div className="flex items-baseline gap-2 min-w-0 flex-1">
+                        <span className="text-white font-medium truncate shrink-0 max-w-[180px] sm:max-w-[240px]">
                           {getHotspotDisplay(selectedHotspotObj).destination}
                         </span>
                         {getHotspotDisplay(selectedHotspotObj).trail && (
-                          <span className="text-[11px] text-brand-text-muted truncate hidden sm:inline">
+                          <span className="text-[11px] text-brand-text-muted truncate min-w-0 hidden sm:inline" title={getHotspotDisplay(selectedHotspotObj).trail}>
                             ({getHotspotDisplay(selectedHotspotObj).trail})
                           </span>
                         )}
                       </div>
                     ) : (
-                      <span className="text-brand-text-muted text-xs">Select physical storage location...</span>
+                      <span className="text-brand-text-muted text-xs truncate">Select physical storage location...</span>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">

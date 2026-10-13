@@ -596,12 +596,12 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
   };
 
   return (
-    <form onSubmit={onSubmit} className="max-w-4xl mx-auto space-y-8 pb-20">
-      <fieldset disabled={!isOnline} className="space-y-8">
+    <form onSubmit={onSubmit} className="max-w-4xl mx-auto space-y-8 pb-20 w-full min-w-0">
+      <fieldset disabled={!isOnline} className="space-y-8 min-w-0">
       
       {/* Header & Item Type Selector */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#332f2a]">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#332f2a] min-w-0">
+        <div className="min-w-0">
           <h1 className="font-serif text-2xl sm:text-3xl font-bold text-white mb-1">
             {initialData 
               ? `Edit ${itemType === 'personal' ? 'Personal Item' : 'Component'}` 
@@ -751,32 +751,60 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
           Assign this {itemType === 'personal' ? 'item' : 'component'} to a physical location or container on the room map.
         </p>
         {locations.length > 0 && (
-          <div className="flex flex-col gap-2 mb-3">
-            {locations.map(l => (
-              <div 
-                key={l.hotspot_id} 
-                onMouseEnter={(e) => {
-                  handleShowTooltip(e, {
-                    fullLabel: l.label,
-                    quantity: l.quantity
-                  });
-                }}
-                onMouseLeave={handleHideTooltip}
-                className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] hover:border-[#4a443c] rounded transition-colors group/loc"
-              >
-                <div className="text-sm text-white truncate pr-2">{l.label}</div>
-                <div className="flex items-center gap-4 shrink-0">
-                  <div className="text-sm text-brand-text-muted">Qty: <span className="text-brand-accent font-bold">{l.quantity}</span></div>
-                  <button type="button" onClick={() => handleRemoveLocation(l.hotspot_id)} className="text-brand-text-muted hover:text-red-400 transition-colors">
-                    <X className="h-4 w-4" />
-                  </button>
+          <div className="flex flex-col gap-2 mb-3 min-w-0">
+            {locations.map(l => {
+              const display = getHotspotDisplay({ fullLabel: l.label, label: l.label });
+              return (
+                <div 
+                  key={l.hotspot_id} 
+                  onMouseEnter={(e) => {
+                    handleShowTooltip(e, {
+                      fullLabel: l.label,
+                      quantity: l.quantity
+                    });
+                  }}
+                  onMouseLeave={handleHideTooltip}
+                  className="flex items-center justify-between p-3 bg-[#1a1816] border border-[#332f2a] hover:border-[#4a443c] rounded transition-colors group/loc min-w-0 gap-3"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
+                    <MapPin className="h-4 w-4 text-brand-accent shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      {display.trail ? (
+                        <div className="flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-2 min-w-0">
+                          <span className="text-sm font-semibold text-white truncate shrink-0 max-w-[200px] sm:max-w-[260px]">
+                            {display.destination}
+                          </span>
+                          <span className="text-xs text-brand-text-muted truncate min-w-0" title={l.label}>
+                            ({display.trail})
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-white font-medium truncate min-w-0" title={l.label}>
+                          {l.label}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0">
+                    <div className="text-sm text-brand-text-muted whitespace-nowrap">
+                      Qty: <span className="text-brand-accent font-bold">{l.quantity}</span>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={() => handleRemoveLocation(l.hotspot_id)} 
+                      className="text-brand-text-muted hover:text-red-400 transition-colors p-1"
+                      title="Remove location"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
-        <div className="flex gap-2 items-end">
-          <div className="flex-1 relative" ref={locationDropdownRef}>
+        <div className="flex gap-2 items-end min-w-0">
+          <div className="flex-1 min-w-0 relative" ref={locationDropdownRef}>
             <button
               type="button"
               onClick={() => {
@@ -801,23 +829,23 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               }}
               className={`w-full bg-[#191715] border ${
                 isLocationDropdownOpen ? 'border-brand-accent ring-1 ring-brand-accent/50' : 'border-[#3a352e] hover:border-[#4a443c]'
-              } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none focus:border-brand-accent`}
+              } p-2.5 rounded text-sm text-left flex items-center justify-between transition-all focus:outline-none focus:border-brand-accent min-w-0`}
             >
-              <div className="flex items-center gap-2.5 min-w-0 pr-2">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-2">
                 <MapPin className={`h-4 w-4 shrink-0 ${selectedHotspotObj ? 'text-brand-accent' : 'text-brand-text-muted'}`} />
                 {selectedHotspotObj ? (
-                  <div className="flex items-baseline gap-2 min-w-0 truncate">
-                    <span className="text-white font-medium truncate">
+                  <div className="flex items-baseline gap-2 min-w-0 flex-1">
+                    <span className="text-white font-medium truncate shrink-0 max-w-[180px] sm:max-w-[240px]">
                       {getHotspotDisplay(selectedHotspotObj).destination}
                     </span>
                     {getHotspotDisplay(selectedHotspotObj).trail && (
-                      <span className="text-[11px] text-brand-text-muted truncate hidden sm:inline">
+                      <span className="text-[11px] text-brand-text-muted truncate min-w-0 hidden sm:inline" title={getHotspotDisplay(selectedHotspotObj).trail}>
                         ({getHotspotDisplay(selectedHotspotObj).trail})
                       </span>
                     )}
                   </div>
                 ) : (
-                  <span className="text-brand-text-muted">Select a location on the map...</span>
+                  <span className="text-brand-text-muted truncate">Select a location on the map...</span>
                 )}
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -957,7 +985,7 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               </div>
             )}
           </div>
-          <div className="w-24">
+          <div className="w-24 shrink-0">
             <ThemedNumberInput
               min={1}
               value={locationQuantity}
@@ -965,7 +993,12 @@ export function ComponentForm({ initialData, initialTags, initialLocations }: Pr
               className="w-full bg-brand-bg border border-[#332f2a]"
             />
           </div>
-          <button type="button" onClick={handleAddLocation} disabled={!selectedHotspot} className="px-4 py-2 bg-brand-accent text-white font-medium hover:bg-brand-accent-hover disabled:opacity-50">
+          <button 
+            type="button" 
+            onClick={handleAddLocation} 
+            disabled={!selectedHotspot} 
+            className="px-4 py-2 bg-brand-accent text-white font-medium hover:bg-brand-accent-hover disabled:opacity-50 shrink-0"
+          >
             Add
           </button>
         </div>
