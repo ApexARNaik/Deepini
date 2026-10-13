@@ -11,7 +11,9 @@ import {
   calculateLoanDaysRemaining,
   getComponentProjectUsage,
   ComponentProjectUsage,
-  checkinComponent
+  checkinComponent,
+  getSpatialNotesForComponent,
+  SpatialNote
 } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useParams, useRouter } from "next/navigation";
@@ -30,7 +32,8 @@ import {
   FolderGit2,
   Lock,
   Hammer,
-  Loader2
+  Loader2,
+  StickyNote
 } from "lucide-react";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { LendModal } from "@/components/loans/LendModal";
@@ -42,6 +45,7 @@ export default function ComponentDetailPage() {
   const [data, setData] = useState<{ component: ComponentWithTotals, locations: ComponentLocation[] } | null>(null);
   const [activeLoans, setActiveLoans] = useState<Loan[]>([]);
   const [projectUsages, setProjectUsages] = useState<ComponentProjectUsage[]>([]);
+  const [spatialNotes, setSpatialNotes] = useState<SpatialNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [returningUsageId, setReturningUsageId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
@@ -70,11 +74,13 @@ export default function ComponentDetailPage() {
     Promise.all([
       getComponentDetails(componentId),
       getLoans().then(all => all.filter(l => l.component_id === componentId && !l.returned_at)).catch(() => [] as Loan[]),
-      getComponentProjectUsage(componentId).catch(() => [] as ComponentProjectUsage[])
-    ]).then(([res, loans, usages]) => {
+      getComponentProjectUsage(componentId).catch(() => [] as ComponentProjectUsage[]),
+      getSpatialNotesForComponent(componentId).catch(() => [] as SpatialNote[])
+    ]).then(([res, loans, usages, notes]) => {
       setData(res);
       setActiveLoans(loans);
       setProjectUsages(usages);
+      setSpatialNotes(notes);
       setLoading(false);
     }).catch(console.error);
   };
@@ -360,6 +366,69 @@ export default function ComponentDetailPage() {
               </div>
             )}
           </section>
+
+          {/* Spatial Notes Linked to this Component */}
+          {spatialNotes.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between border-b border-[#332f2a] pb-2 mb-4">
+                <h2 className="text-xs font-bold text-brand-text-muted uppercase tracking-widest flex items-center gap-1.5">
+                  <StickyNote className="h-3.5 w-3.5 text-amber-400" />
+                  <span>Linked Spatial Notes ({spatialNotes.length})</span>
+                </h2>
+              </div>
+              <div className="space-y-3">
+                {spatialNotes.map(sn => {
+                  const colorClass = sn.color === 'sky' 
+                    ? 'border-sky-500/40 bg-sky-950/20 text-sky-200'
+                    : sn.color === 'emerald'
+                      ? 'border-emerald-500/40 bg-emerald-950/20 text-emerald-200'
+                      : sn.color === 'purple'
+                        ? 'border-purple-500/40 bg-purple-950/20 text-purple-200'
+                        : sn.color === 'rose'
+                          ? 'border-rose-500/40 bg-rose-950/20 text-rose-200'
+                          : 'border-amber-500/40 bg-amber-950/20 text-amber-200';
+
+                  const accentBar = sn.color === 'sky' ? 'bg-sky-400'
+                    : sn.color === 'emerald' ? 'bg-emerald-400'
+                    : sn.color === 'purple' ? 'bg-purple-400'
+                    : sn.color === 'rose' ? 'bg-rose-400'
+                    : 'bg-amber-400';
+
+                  const currentLoc = locations[0];
+
+                  return (
+                    <div key={sn.id} className="bg-[#1a1816] border border-[#332f2a] rounded overflow-hidden">
+                      <div className={`h-1 w-full ${accentBar}`} />
+                      <div className="p-3">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border uppercase tracking-wider font-semibold ${colorClass}`}>
+                            Spatial Note
+                          </span>
+                          <span className="text-[10px] text-brand-text-muted">
+                            Tracks with item
+                          </span>
+                        </div>
+                        <p className="text-xs text-neutral-200 whitespace-pre-wrap leading-relaxed">
+                          {sn.text}
+                        </p>
+                        {currentLoc?.room && (
+                          <div className="mt-3 pt-2.5 border-t border-[#262320]">
+                            <Link
+                              href={`/rooms/${currentLoc.room.id}?locateHotspot=${currentLoc.hotspot_id}`}
+                              className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-[#252320] hover:bg-brand-accent text-brand-text hover:text-white rounded text-xs font-semibold transition-colors"
+                            >
+                              <MapPin className="h-3 w-3" />
+                              <span>View Note in {currentLoc.hotspot?.label || currentLoc.room.name}</span>
+                            </Link>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           {/* In Use in Projects Section */}
           <section>

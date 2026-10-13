@@ -1,14 +1,15 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import { SpatialHotspot } from "@/lib/api";
+import { SpatialHotspot, ResolvedSpatialNote } from "@/lib/api";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { useNetworkState } from "@/hooks/useNetworkState";
-import { Trash2, MapPin, Check, RotateCcw, Edit2, Sliders, Crop, Move, ArrowRightLeft } from "lucide-react";
+import { Trash2, MapPin, Check, RotateCcw, Edit2, Sliders, Crop, Move, ArrowRightLeft, StickyNote, Package, Plus, Eye, EyeOff } from "lucide-react";
 
 interface Props {
   imageUrl: string;
   hotspots: SpatialHotspot[];
+  notes?: ResolvedSpatialNote[];
   isEditing: boolean;
   highlightedHotspotId?: string | null;
   reshapingHotspot?: SpatialHotspot | null;
@@ -25,6 +26,12 @@ interface Props {
   onUndo?: () => void;
   canUndo?: boolean;
   onCancelEdit: () => void;
+  // Spatial Notes Props
+  onNoteDrop?: (x: number, y: number, hotspotId?: string | null, componentId?: string | null) => void;
+  onNoteClick?: (note: ResolvedSpatialNote) => void;
+  onNoteMove?: (id: string, x: number, y: number) => void;
+  onNoteDelete?: (id: string) => void;
+  onOpenCreateNote?: () => void;
 }
 
 type DrawMode = 'freehand' | 'polygon' | 'rectangle' | 'arrow' | 'delete' | 'edit' | 'adjust';
@@ -33,9 +40,43 @@ type ResizeHandle = 'top' | 'bottom' | 'left' | 'right' | 'tl' | 'tr' | 'bl' | '
 type ArrowStage = 'idle' | 'drawing' | 'adjusting';
 type ArrowHandle = 'tail' | 'tip' | 'body' | 'width1' | 'width2';
 
+const NOTE_COLOR_STYLES: Record<string, { pin: string; halo: string; accent: string; badge: string }> = {
+  amber: {
+    pin: "bg-amber-400 text-amber-950 border border-amber-300",
+    halo: "shadow-[0_0_12px_rgba(245,158,11,0.65)] ring-2 ring-amber-300/80",
+    accent: "bg-amber-400",
+    badge: "bg-amber-950/80 text-amber-200 border-amber-600/60"
+  },
+  sky: {
+    pin: "bg-sky-400 text-sky-950 border border-sky-300",
+    halo: "shadow-[0_0_12px_rgba(14,165,233,0.65)] ring-2 ring-sky-300/80",
+    accent: "bg-sky-400",
+    badge: "bg-sky-950/80 text-sky-200 border-sky-600/60"
+  },
+  emerald: {
+    pin: "bg-emerald-400 text-emerald-950 border border-emerald-300",
+    halo: "shadow-[0_0_12px_rgba(16,185,129,0.65)] ring-2 ring-emerald-300/80",
+    accent: "bg-emerald-400",
+    badge: "bg-emerald-950/80 text-emerald-200 border-emerald-600/60"
+  },
+  purple: {
+    pin: "bg-purple-400 text-purple-950 border border-purple-300",
+    halo: "shadow-[0_0_12px_rgba(168,85,247,0.65)] ring-2 ring-purple-300/80",
+    accent: "bg-purple-400",
+    badge: "bg-purple-950/80 text-purple-200 border-purple-600/60"
+  },
+  rose: {
+    pin: "bg-rose-400 text-rose-950 border border-rose-300",
+    halo: "shadow-[0_0_12px_rgba(244,63,94,0.65)] ring-2 ring-rose-300/80",
+    accent: "bg-rose-400",
+    badge: "bg-rose-950/80 text-rose-200 border-rose-600/60"
+  }
+};
+
 export function HotspotCanvas({ 
   imageUrl, 
   hotspots, 
+  notes = [],
   isEditing, 
   highlightedHotspotId, 
   reshapingHotspot,
@@ -51,7 +92,12 @@ export function HotspotCanvas({
   onBatchUpdateHotspots,
   onUndo,
   canUndo = false,
-  onCancelEdit 
+  onCancelEdit,
+  onNoteDrop,
+  onNoteClick,
+  onNoteMove,
+  onNoteDelete,
+  onOpenCreateNote
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentPoints, setCurrentPoints] = useState<{ x: number; y: number }[]>([]);
@@ -101,6 +147,102 @@ export function HotspotCanvas({
     origBounds: { minX: number; minY: number; maxX: number; maxY: number };
     origHotspots: SpatialHotspot[];
   } | null>(null);
+
+  // Spatial Notes State & Handlers
+  const [hoveredNoteId, setHoveredNoteId] = useState<string | null>(null);
+  const [isDragOverCanvas, setIsDragOverCanvas] = useState(false);
+  const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
+  const [draggedNotePos, setDraggedNotePos] = useState<{ x: number; y: number } | null>(null);
+  const [notePointerDownPos, setNotePointerDownPos] = useState<{ x: number; y: number } | null>(null);
+  const [showNotes, setShowNotes] = useState(true);
+
+  const isPointInPolygon = (point: { x: number; y: number }, vs: { x: number; y: number }[]): boolean => {
+    let inside = false;
+    for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+      const xi = vs[i].x, yi = vs[i].y;
+      const xj = vs[j].x, yj = vs[j].y;
+      const intersect = ((yi > point.y) !== (yj > point.y))
+          && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  };
+
+  const handleNotePointerDown = (e: React.PointerEvent, note: ResolvedSpatialNote) => {
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    setDraggedNoteId(note.id);
+    setDraggedNotePos({ x: note.x, y: note.y });
+    setNotePointerDownPos({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleNotePointerMove = (e: React.PointerEvent) => {
+    if (!draggedNoteId || !containerRef.current) return;
+    e.stopPropagation();
+    const rect = containerRef.current.getBoundingClientRect();
+    const newX = Math.max(0.02, Math.min(0.98, (e.clientX - rect.left) / rect.width));
+    const newY = Math.max(0.02, Math.min(0.98, (e.clientY - rect.top) / rect.height));
+    setDraggedNotePos({ x: newX, y: newY });
+  };
+
+  const handleNotePointerUp = (e: React.PointerEvent, note: ResolvedSpatialNote) => {
+    if (draggedNoteId === note.id) {
+      e.stopPropagation();
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {}
+
+      if (notePointerDownPos) {
+        const dist = Math.hypot(e.clientX - notePointerDownPos.x, e.clientY - notePointerDownPos.y);
+        if (dist > 6 && draggedNotePos) {
+          onNoteMove?.(note.id, draggedNotePos.x, draggedNotePos.y);
+        } else {
+          onNoteClick?.(note);
+        }
+      }
+      setDraggedNoteId(null);
+      setDraggedNotePos(null);
+      setNotePointerDownPos(null);
+    }
+  };
+
+  const handleCanvasDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    if (!isDragOverCanvas) setIsDragOverCanvas(true);
+  };
+
+  const handleCanvasDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget === e.target) {
+      setIsDragOverCanvas(false);
+    }
+  };
+
+  const handleCanvasDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOverCanvas(false);
+    if (!containerRef.current) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = Math.max(0.02, Math.min(0.98, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0.02, Math.min(0.98, (e.clientY - rect.top) / rect.height));
+
+    const matchingHotspot = hotspots.find(hs => hs.shape_points && isPointInPolygon({ x, y }, hs.shape_points));
+
+    let componentId: string | null = null;
+    let hotspotId: string | null = matchingHotspot?.id || null;
+
+    try {
+      const dataStr = e.dataTransfer.getData('application/deepini-note');
+      if (dataStr) {
+        const parsed = JSON.parse(dataStr);
+        if (parsed.componentId) componentId = parsed.componentId;
+        if (parsed.hotspotId) hotspotId = parsed.hotspotId;
+      }
+    } catch {}
+
+    onNoteDrop?.(x, y, hotspotId, componentId);
+  };
 
   const initAdjustMode = () => {
     if (hotspots.length === 0) return;
@@ -1098,6 +1240,24 @@ export function HotspotCanvas({
                 </span>
               )}
             </button>
+
+            {/* Draggable Sticky Note Tool */}
+            <div
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('application/deepini-note', JSON.stringify({ type: 'new-note' }));
+                e.dataTransfer.effectAllowed = 'copy';
+              }}
+              onClick={() => onOpenCreateNote?.()}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded transition-all cursor-grab active:cursor-grabbing select-none bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 hover:text-white"
+              data-tooltip="Sticky Note: Drag onto image or click to place"
+            >
+              <StickyNote className="h-3.5 w-3.5 text-amber-400" />
+              <span>Note</span>
+              <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-950/60 text-amber-200 border border-amber-500/30">
+                Drag ⤓
+              </span>
+            </div>
           </div>
 
           {/* Right: Contextual Status, Guidance & Quick Action Buttons */}
@@ -1455,6 +1615,49 @@ export function HotspotCanvas({
         </div>
       )}
 
+      {/* View Mode Top Toolbar for Quick Spatial Notes & View Info */}
+      {!isEditing && (
+        <div className="w-full bg-[#141211] border-b border-[#332f2a] px-3 py-1.5 sm:px-4 flex items-center justify-between gap-2.5 z-20 shrink-0 shadow-sm">
+          <div className="flex items-center gap-2">
+            <div
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('application/deepini-note', JSON.stringify({ type: 'new-note' }));
+                e.dataTransfer.effectAllowed = 'copy';
+              }}
+              onClick={() => onOpenCreateNote?.()}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded transition-all cursor-grab active:cursor-grabbing select-none bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 hover:text-white shadow-xs"
+              data-tooltip="Drag onto view to write note about a location or component, or click to add"
+            >
+              <StickyNote className="h-3.5 w-3.5 text-amber-400" />
+              <span>Drag Note onto View</span>
+              <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-950/60 text-amber-200 border border-amber-500/30">
+                ⤓
+              </span>
+            </div>
+            {notes.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowNotes(prev => !prev)}
+                className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors ${
+                  showNotes 
+                    ? 'text-brand-text-muted hover:text-white bg-[#252320]/60' 
+                    : 'text-brand-text-muted/60 hover:text-white line-through'
+                }`}
+                data-tooltip={showNotes ? "Hide spatial notes on canvas" : "Show spatial notes on canvas"}
+              >
+                {showNotes ? <Eye className="h-3.5 w-3.5 text-amber-400/80" /> : <EyeOff className="h-3.5 w-3.5" />}
+                <span>Notes ({notes.length})</span>
+              </button>
+            )}
+          </div>
+
+          <div className="text-[11px] text-brand-text-muted hidden md:flex items-center gap-2 font-mono">
+            <span>Hover on note pins to reveal text • Drag pins to reposition</span>
+          </div>
+        </div>
+      )}
+
       {/* Main Image Canvas Area (purely dedicated to image display & drawing) */}
       <div className="flex-1 w-full min-h-[500px] flex items-center justify-center overflow-auto p-2 sm:p-4 bg-[#0a0908]">
         <div 
@@ -1467,6 +1670,9 @@ export function HotspotCanvas({
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
+          onDragOver={handleCanvasDragOver}
+          onDragLeave={handleCanvasDragLeave}
+          onDrop={handleCanvasDrop}
         >
         {/* The actual image */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1476,6 +1682,16 @@ export function HotspotCanvas({
           className="max-w-full h-auto block pointer-events-none select-none"
           draggable={false}
         />
+
+        {/* Drop zone indicator when dragging a note */}
+        {isDragOverCanvas && (
+          <div className="absolute inset-0 z-40 bg-amber-500/20 border-2 border-dashed border-amber-400 rounded-md pointer-events-none flex items-center justify-center backdrop-blur-2xs animate-pulse">
+            <div className="bg-[#141211]/95 text-amber-300 px-4 py-2 rounded-lg border border-amber-400/80 shadow-2xl flex items-center gap-2 text-xs font-bold">
+              <StickyNote className="h-4 w-4 text-amber-400" />
+              <span>Drop anywhere to place sticky note</span>
+            </div>
+          </div>
+        )}
 
         {/* SVG Overlay for existing hotspots and current drawing */}
         <svg 
@@ -2288,6 +2504,156 @@ export function HotspotCanvas({
             </div>
           );
         })()}
+
+        {/* Spatial Note Pins & Hover Cards */}
+        {showNotes && notes.map((note) => {
+          const isDraggingThis = draggedNoteId === note.id;
+          const isHovered = hoveredNoteId === note.id;
+          const currentX = isDraggingThis && draggedNotePos ? draggedNotePos.x : note.x;
+          const currentY = isDraggingThis && draggedNotePos ? draggedNotePos.y : note.y;
+
+          const colorTheme = NOTE_COLOR_STYLES[note.color || 'amber'] || NOTE_COLOR_STYLES.amber;
+          const isNearTop = currentY < 0.16;
+
+          return (
+            <div
+              key={note.id}
+              style={{
+                left: `${currentX * 100}%`,
+                top: `${currentY * 100}%`,
+              }}
+              className="absolute -translate-x-1/2 -translate-y-1/2 z-30 select-none"
+              onMouseEnter={() => !draggedNoteId && setHoveredNoteId(note.id)}
+              onMouseLeave={() => !draggedNoteId && setHoveredNoteId(null)}
+            >
+              {/* Dog-ear Sticky Pin Marker */}
+              <div
+                onPointerDown={(e) => handleNotePointerDown(e, note)}
+                onPointerMove={handleNotePointerMove}
+                onPointerUp={(e) => handleNotePointerUp(e, note)}
+                className={`relative w-7 h-7 rounded-md cursor-grab active:cursor-grabbing flex items-center justify-center transition-transform shadow-lg ${
+                  colorTheme.pin
+                } ${isDraggingThis ? 'scale-125 ring-2 ring-white shadow-2xl z-40' : 'hover:scale-110'} ${
+                  isHovered ? colorTheme.halo : ''
+                }`}
+                style={{
+                  clipPath: 'polygon(0% 0%, 75% 0%, 100% 25%, 100% 100%, 0% 100%)'
+                }}
+              >
+                {/* Dog-ear fold top-right triangle */}
+                <div 
+                  className="absolute top-0 right-0 w-2 h-2 bg-black/25 pointer-events-none"
+                  style={{
+                    clipPath: 'polygon(0% 0%, 100% 100%, 0% 100%)'
+                  }}
+                />
+
+                {note.component_id ? (
+                  <Package className="h-3.5 w-3.5" />
+                ) : note.hotspot_id ? (
+                  <MapPin className="h-3.5 w-3.5" />
+                ) : (
+                  <StickyNote className="h-3.5 w-3.5" />
+                )}
+
+                {/* Pulsing indicator if note followed a moved component */}
+                {note.is_moved_component && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-black animate-pulse" />
+                )}
+              </div>
+
+              {/* Floating Tooltip / Card on Hover */}
+              {isHovered && !isDraggingThis && (
+                <div
+                  onMouseEnter={() => setHoveredNoteId(note.id)}
+                  onMouseLeave={() => setHoveredNoteId(null)}
+                  className={`absolute -translate-x-1/2 z-50 pointer-events-auto flex flex-col items-center animate-fadeIn min-w-[220px] max-w-[320px] ${
+                    isNearTop ? "top-full mt-2" : "bottom-full mb-2"
+                  }`}
+                  style={{
+                    left: '50%'
+                  }}
+                >
+                  {isNearTop && (
+                    <div className="w-2.5 h-2.5 rotate-45 -mb-1.5 z-10 bg-[#161412] border-l border-t border-[#4a443c]" />
+                  )}
+                  
+                  <div className="w-full bg-[#161412]/98 border border-[#4a443c] rounded-lg shadow-2xl backdrop-blur-md overflow-hidden text-left p-3">
+                    {/* Top colored stripe */}
+                    <div className={`h-1 w-full -mt-3 -mx-3 mb-2.5 ${colorTheme.accent}`} />
+
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        {note.component_id ? (
+                          <Package className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                        ) : note.hotspot_id ? (
+                          <MapPin className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                        ) : (
+                          <StickyNote className="h-3.5 w-3.5 text-amber-300 shrink-0" />
+                        )}
+                        <span className="text-[11px] font-bold text-white tracking-wide truncate">
+                          {note.component_id 
+                            ? `Item: ${note.component_name || 'Component'}` 
+                            : note.hotspot_id 
+                              ? `Location: ${note.hotspot_label || 'Location'}`
+                              : 'General Note'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNoteClick?.(note);
+                          }}
+                          className="p-1 rounded text-brand-text-muted hover:text-white hover:bg-[#252320] transition-colors"
+                          data-tooltip="Edit note"
+                        >
+                          <Edit2 className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNoteDelete?.(note.id);
+                          }}
+                          className="p-1 rounded text-brand-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          data-tooltip="Delete note"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Moved component badge */}
+                    {note.is_moved_component && (
+                      <div className="mt-1.5 px-2 py-0.5 rounded bg-sky-950/80 border border-sky-500/50 text-[10px] text-sky-200 flex items-center gap-1.5 font-medium">
+                        <ArrowRightLeft className="h-3 w-3 text-sky-400 shrink-0" />
+                        <span>Moved with component to {note.current_location_label || 'storage'}</span>
+                      </div>
+                    )}
+
+                    {/* Note content text */}
+                    <div className="mt-2 text-xs text-neutral-200 leading-relaxed font-sans whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+                      {note.text}
+                    </div>
+
+                    {/* Bottom hint */}
+                    <div className="mt-2.5 pt-2 border-t border-[#262320] flex items-center justify-between text-[9px] text-brand-text-muted font-mono">
+                      <span>Drag pin to move</span>
+                      <span>Click to edit</span>
+                    </div>
+                  </div>
+
+                  {!isNearTop && (
+                    <div className="w-2.5 h-2.5 rotate-45 -mt-1.5 z-10 bg-[#161412] border-r border-b border-[#4a443c]" />
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
       </div>
 

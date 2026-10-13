@@ -30,6 +30,27 @@ export interface SpatialHotspot {
   updated_at?: string;
 }
 
+export interface SpatialNote {
+  id: string;
+  photo_id?: string | null;
+  hotspot_id?: string | null;
+  component_id?: string | null;
+  text: string;
+  x: number;
+  y: number;
+  color?: string; // 'amber' | 'sky' | 'emerald' | 'purple' | 'rose'
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ResolvedSpatialNote extends SpatialNote {
+  component_name?: string;
+  component_photo_url?: string;
+  hotspot_label?: string;
+  is_moved_component?: boolean;
+  current_location_label?: string;
+}
+
 export type CustomField = { type: 'text' | 'number' | 'link' | 'image'; value: any };
 
 export interface Component {
@@ -2719,4 +2740,266 @@ export async function getLoanNotifications(): Promise<LoanNotification[]> {
   const priorityOrder = { critical: 0, high: 1, medium: 2 };
   return notifications.sort((a, b) => priorityOrder[a.urgency] - priorityOrder[b.urgency]);
 }
+
+// ==========================================
+// SPATIAL NOTES / STICKY ANNOTATIONS API
+// ==========================================
+
+export async function getSpatialNotes(): Promise<SpatialNote[]> {
+  try {
+    const { data, error } = await supabase.from('spatial_notes').select('*');
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        db.spatial_notes.bulkPut(data).catch(() => {});
+        try {
+          localStorage.setItem('deepini_spatial_notes', JSON.stringify(data));
+        } catch {}
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn("Supabase spatial_notes unavailable, using Dexie/local:", err);
+  }
+
+  // Fallback to local Dexie
+  if (typeof window !== 'undefined') {
+    try {
+      const local = await db.spatial_notes.toArray();
+      if (local && local.length > 0) return local;
+    } catch {}
+    
+    // Fallback to localStorage
+    try {
+      const stored = localStorage.getItem('deepini_spatial_notes');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+  }
+  return [];
+}
+
+export async function getSpatialNotesForPhoto(photoId: string): Promise<ResolvedSpatialNote[]> {
+  const allNotes = await getSpatialNotes();
+  if (allNotes.length === 0) return [];
+
+  let photoHotspots: SpatialHotspot[] = [];
+  try {
+    photoHotspots = await getHotspotsForPhoto(photoId);
+  } catch {}
+
+  let compLocs: any[] = [];
+  try {
+    const { data } = await supabase.from('component_locations').select('*');
+    if (data) {
+      compLocs = data;
+    } else if (typeof window !== 'undefined') {
+      compLocs = await db.component_locations.toArray().catch(() => []);
+    }
+  } catch {
+    if (typeof window !== 'undefined') {
+      compLocs = await db.component_locations.toArray().catch(() => []);
+    }
+  }
+
+  let comps: any[] = [];
+  try {
+    const { data } = await supabase.from('components').select('id, name, photo_url, notes, item_type');
+    if (data) {
+      comps = data;
+    } else if (typeof window !== 'undefined') {
+      comps = await db.components.toArray().catch(() => []);
+    }
+  } catch {
+    if (typeof window !== 'undefined') {
+      comps = await db.components.toArray().catch(() => []);
+    }
+  }
+
+  const photoHotspotMap = new Map<string, SpatialHotspot>(photoHotspots.map((h: SpatialHotspot) => [h.id, h]));
+  const compMap = new Map<string, any>(comps.map((c: any) => [c.id, c]));
+
+  // Map of component_id -> list of hotspot_ids
+  const compLocationsMap = new Map<string, string[]>();
+  compLocs.forEach((cl: any) => {
+    const list = compLocationsMap.get(cl.component_id) || [];
+    list.push(cl.hotspot_id);
+    compLocationsMap.set(cl.component_id, list);
+  });
+
+  const resolved: ResolvedSpatialNote[] = [];
+
+  for (const note of allNotes) {
+    // 1. Note is linked to a component
+    if (note.component_id) {
+      const comp = compMap.get(note.component_id);
+      const assignedHotspotIds = compLocationsMap.get(note.component_id) || [];
+
+      // Check if this component is stored in any hotspot visible on this active photo
+      const activeHotspotIdOnThisPhoto = assignedHotspotIds.find(hid => photoHotspotMap.has(hid));
+
+      if (activeHotspotIdOnThisPhoto) {
+        const hs = photoHotspotMap.get(activeHotspotIdOnThisPhoto)!;
+        let x = note.x;
+        let y = note.y;
+        let isMoved = false;
+
+        // If the note was placed on a different photo (or no photo),
+        // or if the component moved to a different hotspot on the same photo,
+        // center it on the active hotspot's boundary
+        if (note.photo_id !== photoId || (note.hotspot_id && note.hotspot_id !== activeHotspotIdOnThisPhoto)) {
+          isMoved = true;
+          if (hs.shape_points && hs.shape_points.length > 0) {
+            x = hs.shape_points.reduce((acc, p) => acc + p.x, 0) / hs.shape_points.length;
+            y = hs.shape_points.reduce((acc, p) => acc + p.y, 0) / hs.shape_points.length;
+          }
+        }
+
+        resolved.push({
+          ...note,
+          x,
+          y,
+          component_name: comp?.name || "Component",
+          component_photo_url: comp?.photo_url,
+          hotspot_label: hs.label,
+          is_moved_component: isMoved,
+          current_location_label: hs.label
+        });
+      }
+      // If the component is not in any hotspot on this photo, do NOT show it here.
+      // It followed the component to its new location!
+      continue;
+    }
+
+    // 2. Note is linked to a storage location (hotspot)
+    if (note.hotspot_id) {
+      const hs = photoHotspotMap.get(note.hotspot_id);
+      if (hs) {
+        resolved.push({
+          ...note,
+          hotspot_label: hs.label
+        });
+      }
+      continue;
+    }
+
+    // 3. General view note on this photo
+    if (note.photo_id === photoId) {
+      resolved.push(note);
+    }
+  }
+
+  return resolved;
+}
+
+export async function getSpatialNotesForComponent(componentId: string): Promise<SpatialNote[]> {
+  const allNotes = await getSpatialNotes();
+  return allNotes.filter(n => n.component_id === componentId);
+}
+
+export async function createSpatialNote(note: Omit<SpatialNote, 'id' | 'created_at' | 'updated_at'>): Promise<SpatialNote> {
+  const newNote: SpatialNote = {
+    id: typeof crypto !== 'undefined' && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : `note_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    ...note,
+    color: note.color || 'amber',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  try {
+    const { data, error } = await supabase.from('spatial_notes').insert([newNote]).select().single();
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        db.spatial_notes.put(data).catch(() => {});
+        try {
+          const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+          stored.push(data);
+          localStorage.setItem('deepini_spatial_notes', JSON.stringify(stored));
+        } catch {}
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn("Could not insert note into Supabase, saving locally:", err);
+  }
+
+  // Local save
+  if (typeof window !== 'undefined') {
+    await db.spatial_notes.put(newNote).catch(() => {});
+    try {
+      const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+      stored.push(newNote);
+      localStorage.setItem('deepini_spatial_notes', JSON.stringify(stored));
+    } catch {}
+  }
+
+  return newNote;
+}
+
+export async function updateSpatialNote(id: string, updates: Partial<SpatialNote>): Promise<SpatialNote> {
+  const updatePayload = {
+    ...updates,
+    updated_at: new Date().toISOString()
+  };
+
+  try {
+    const { data, error } = await supabase.from('spatial_notes').update(updatePayload).eq('id', id).select().single();
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        db.spatial_notes.put(data).catch(() => {});
+        try {
+          const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+          const idx = stored.findIndex((n: any) => n.id === id);
+          if (idx >= 0) stored[idx] = data;
+          localStorage.setItem('deepini_spatial_notes', JSON.stringify(stored));
+        } catch {}
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn("Could not update note in Supabase, updating locally:", err);
+  }
+
+  // Local update
+  if (typeof window !== 'undefined') {
+    let existing = await db.spatial_notes.get(id).catch(() => undefined);
+    if (!existing) {
+      const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+      existing = stored.find((n: any) => n.id === id);
+    }
+    const merged: SpatialNote = {
+      ...(existing || { id, text: "", x: 0.5, y: 0.5 }),
+      ...updatePayload
+    };
+    await db.spatial_notes.put(merged).catch(() => {});
+    try {
+      const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+      const idx = stored.findIndex((n: any) => n.id === id);
+      if (idx >= 0) stored[idx] = merged;
+      else stored.push(merged);
+      localStorage.setItem('deepini_spatial_notes', JSON.stringify(stored));
+    } catch {}
+    return merged;
+  }
+
+  return { id, text: "", x: 0.5, y: 0.5, ...updatePayload };
+}
+
+export async function deleteSpatialNote(id: string): Promise<void> {
+  try {
+    await supabase.from('spatial_notes').delete().eq('id', id);
+  } catch (err) {
+    console.warn("Could not delete note in Supabase, deleting locally:", err);
+  }
+
+  if (typeof window !== 'undefined') {
+    await db.spatial_notes.delete(id).catch(() => {});
+    try {
+      const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+      const filtered = stored.filter((n: any) => n.id !== id);
+      localStorage.setItem('deepini_spatial_notes', JSON.stringify(filtered));
+    } catch {}
+  }
+}
+
 

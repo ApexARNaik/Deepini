@@ -1,16 +1,17 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot, Project, getProjectsForHotspot } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot, Project, getProjectsForHotspot, SpatialNote, ResolvedSpatialNote, getSpatialNotesForPhoto, createSpatialNote, updateSpatialNote, deleteSpatialNote } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
+import { SpatialNoteModal } from "./SpatialNoteModal";
 import { ImageUploadDropzone } from "./ImageUploadDropzone";
 import { InsertIntermediateModal } from "./InsertIntermediateModal";
 import { MoveHotspotModal } from "./MoveHotspotModal";
 import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { ThemedNumberInput } from "@/components/ThemedNumberInput";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, FolderArchive, ExternalLink, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, FolderArchive, ExternalLink, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye, StickyNote } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -217,6 +218,83 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const [isExtendedHotspotsView, setIsExtendedHotspotsView] = useState(false);
 
+  // Spatial Notes State
+  const [spatialNotes, setSpatialNotes] = useState<ResolvedSpatialNote[]>([]);
+  const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState<SpatialNote | null>(null);
+  const [newNoteTarget, setNewNoteTarget] = useState<{
+    x: number;
+    y: number;
+    hotspotId?: string | null;
+    componentId?: string | null;
+  } | null>(null);
+
+  const loadSpatialNotes = useCallback(async (photoId: string) => {
+    try {
+      const notes = await getSpatialNotesForPhoto(photoId);
+      setSpatialNotes(notes);
+    } catch (err) {
+      console.error("Failed to load spatial notes:", err);
+    }
+  }, []);
+
+  const handleSaveSpatialNote = async (noteData: Omit<SpatialNote, 'id' | 'created_at' | 'updated_at'>) => {
+    try {
+      if (editingNote) {
+        await updateSpatialNote(editingNote.id, noteData);
+      } else {
+        await createSpatialNote({
+          ...noteData,
+          photo_id: activePhotoId || null
+        });
+      }
+      setIsNoteModalOpen(false);
+      setEditingNote(null);
+      setNewNoteTarget(null);
+      if (activePhotoId) {
+        await loadSpatialNotes(activePhotoId);
+      }
+    } catch (err) {
+      console.error("Failed to save spatial note:", err);
+    }
+  };
+
+  const handleDeleteSpatialNote = async (noteId: string) => {
+    try {
+      await deleteSpatialNote(noteId);
+      setSpatialNotes(prev => prev.filter(n => n.id !== noteId));
+      if (editingNote?.id === noteId) {
+        setIsNoteModalOpen(false);
+        setEditingNote(null);
+      }
+    } catch (err) {
+      console.error("Failed to delete spatial note:", err);
+    }
+  };
+
+  const handleMoveSpatialNote = async (noteId: string, x: number, y: number) => {
+    // Optimistic update
+    setSpatialNotes(prev => prev.map(n => n.id === noteId ? { ...n, x, y } : n));
+    try {
+      await updateSpatialNote(noteId, { x, y });
+    } catch (err) {
+      console.error("Failed to move note:", err);
+      if (activePhotoId) loadSpatialNotes(activePhotoId);
+    }
+  };
+
+  const handleNoteDropOnCanvas = (x: number, y: number, hotspotId?: string | null, componentId?: string | null) => {
+    setNewNoteTarget({ x, y, hotspotId, componentId });
+    setEditingNote(null);
+    setIsNoteModalOpen(true);
+  };
+
+  const handleOpenCreateNote = () => {
+    setNewNoteTarget({ x: 0.5, y: 0.5, hotspotId: selectedLeafHotspot?.id || null });
+    setEditingNote(null);
+    setIsNoteModalOpen(true);
+  };
+
   useEffect(() => {
     getInventory().then(setAllInventory).catch(console.error);
     return () => {
@@ -242,8 +320,10 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   useEffect(() => {
     if (activePhotoId) {
       loadHotspots(activePhotoId);
+      loadSpatialNotes(activePhotoId);
     } else {
       setHotspots([]);
+      setSpatialNotes([]);
     }
     setHotspotSearchFilter("");
     if (isLocatingRef.current) {
@@ -252,7 +332,7 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       setHighlightedHotspotId(null);
     }
     setIsExtendedHotspotsView(false);
-  }, [activePhotoId]);
+  }, [activePhotoId, loadSpatialNotes]);
 
   const loadRoomData = async () => {
     setLoading(true);
@@ -1179,6 +1259,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
       leafSyncQueueRef.current = leafSyncQueueRef.current.then(async () => {
         try {
           await updateHotspotComponents(currentTask.hotspotId, currentTask.updates);
+          if (activePhotoId) {
+            loadSpatialNotes(activePhotoId);
+          }
         } catch (err) {
           console.error("Failed to sync hotspot components:", err);
         }
@@ -2112,6 +2195,15 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 onBatchUpdateHotspots={handleBatchUpdateHotspots}
                 onUndo={handleUndo}
                 canUndo={undoStack.length > 0 && !isUndoing}
+                notes={spatialNotes}
+                onNoteDrop={handleNoteDropOnCanvas}
+                onNoteClick={(note) => {
+                  setEditingNote(note);
+                  setIsNoteModalOpen(true);
+                }}
+                onNoteMove={handleMoveSpatialNote}
+                onNoteDelete={handleDeleteSpatialNote}
+                onOpenCreateNote={handleOpenCreateNote}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-brand-text-muted flex-col p-8">
@@ -2404,6 +2496,28 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
+                    <div
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/deepini-note', JSON.stringify({
+                          hotspotId: selectedLeafHotspot.id
+                        }));
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }}
+                      onClick={() => {
+                        setNewNoteTarget({
+                          x: 0.5,
+                          y: 0.5,
+                          hotspotId: selectedLeafHotspot.id
+                        });
+                        setEditingNote(null);
+                        setIsNoteModalOpen(true);
+                      }}
+                      className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-500/15 rounded cursor-grab active:cursor-grabbing transition-colors"
+                      data-tooltip={`Write note about "${selectedLeafHotspot.label}" (Drag onto map or click)`}
+                    >
+                      <StickyNote className="h-4 w-4" />
+                    </div>
                   </>
                 )}
                 <button onClick={() => { setSelectedLeafHotspot(null); setHighlightedHotspotId(null); setLeafProjects([]); }} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
@@ -2542,6 +2656,16 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                                 Personal
                               </span>
                             )}
+                            {(() => {
+                              const compNoteCount = spatialNotes.filter(n => n.component_id === lc.component_id).length;
+                              if (compNoteCount === 0) return null;
+                              return (
+                                <span className="text-[9px] px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded flex items-center gap-1 font-mono font-bold shrink-0" data-tooltip={`${compNoteCount} spatial note(s) linked to this item`}>
+                                  <StickyNote className="h-2.5 w-2.5" />
+                                  <span>{compNoteCount}</span>
+                                </span>
+                              );
+                            })()}
                           </div>
                           {lc.components?.notes && (
                             <span className="text-[10px] text-brand-text-muted truncate group-hover/item:text-brand-text transition-colors">
@@ -2551,6 +2675,32 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                        {/* Draggable Note Chip for this Component */}
+                        <div
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('application/deepini-note', JSON.stringify({
+                              componentId: lc.component_id,
+                              hotspotId: selectedLeafHotspot.id
+                            }));
+                            e.dataTransfer.effectAllowed = 'copy';
+                          }}
+                          onClick={() => {
+                            setNewNoteTarget({
+                              x: 0.5,
+                              y: 0.5,
+                              hotspotId: selectedLeafHotspot.id,
+                              componentId: lc.component_id
+                            });
+                            setEditingNote(null);
+                            setIsNoteModalOpen(true);
+                          }}
+                          className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-500/15 rounded cursor-grab active:cursor-grabbing transition-colors"
+                          data-tooltip={`Note for "${lc.components?.name || 'Item'}": Drag onto map or click to add`}
+                        >
+                          <StickyNote className="h-3.5 w-3.5" />
+                        </div>
+
                         {/* Quantity Stepper */}
                         <ThemedNumberInput
                           size="sm"
@@ -2724,6 +2874,26 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         title={previewImage?.title}
         subtitle={previewImage?.subtitle}
         onClose={() => setPreviewImage(null)}
+      />
+
+      {/* Spatial Note Create/Edit Modal */}
+      <SpatialNoteModal
+        isOpen={isNoteModalOpen}
+        onClose={() => {
+          setIsNoteModalOpen(false);
+          setEditingNote(null);
+          setNewNoteTarget(null);
+        }}
+        initialNote={editingNote}
+        defaultX={newNoteTarget?.x ?? 0.5}
+        defaultY={newNoteTarget?.y ?? 0.5}
+        defaultHotspotId={newNoteTarget?.hotspotId ?? selectedLeafHotspot?.id ?? null}
+        defaultComponentId={newNoteTarget?.componentId ?? null}
+        photoId={activePhotoId}
+        availableHotspots={hotspots}
+        availableComponents={allInventory}
+        onSave={handleSaveSpatialNote}
+        onDelete={handleDeleteSpatialNote}
       />
     </div>
   );
