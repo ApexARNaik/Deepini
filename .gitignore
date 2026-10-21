@@ -42,4 +42,5 @@ next-env.d.ts
 
 # database backups
 /backups/
+deepini_backup_*
 *.sql.gz
