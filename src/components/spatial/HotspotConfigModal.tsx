@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Crop, Layers, ArrowRightLeft } from "lucide-react";
+import { X, Crop, Layers, ArrowRightLeft, Share2 } from "lucide-react";
 
 interface Props {
   onClose: () => void;
@@ -9,6 +9,7 @@ interface Props {
   onRedrawShape?: () => void;
   onInsertIntermediate?: () => void;
   onMoveHotspot?: () => void;
+  onLendHotspot?: () => void;
   initialLabel?: string;
   initialType?: "leaf" | "drill";
   title?: string;
@@ -21,6 +22,7 @@ export function HotspotConfigModal({
   onRedrawShape,
   onInsertIntermediate,
   onMoveHotspot,
+  onLendHotspot,
   initialLabel = "",
   initialType = "drill",
   title = "Configure Hotspot",
@@ -128,6 +130,17 @@ export function HotspotConfigModal({
                 >
                   <ArrowRightLeft className="h-3.5 w-3.5" />
                   <span>Move Location</span>
+                </button>
+              )}
+              {onLendHotspot && (
+                <button
+                  type="button"
+                  onClick={onLendHotspot}
+                  className="px-3 py-2 text-xs font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded transition-colors flex items-center gap-1.5"
+                  data-tooltip="Lend this entire hotspot and all its components to a person"
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                  <span>Lend Hotspot</span>
                 </button>
               )}
             </div>

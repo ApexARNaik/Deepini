@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot, Project, getProjectsForHotspot, SpatialNote, ResolvedSpatialNote, getSpatialNotesForPhoto, createSpatialNote, updateSpatialNote, deleteSpatialNote } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot, Project, getProjectsForHotspot, SpatialNote, ResolvedSpatialNote, getSpatialNotesForPhoto, createSpatialNote, updateSpatialNote, deleteSpatialNote, getActiveLoansForHotspotTree, returnLentComponent, Loan } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { SpatialNoteModal } from "./SpatialNoteModal";
@@ -11,7 +11,8 @@ import { MoveHotspotModal } from "./MoveHotspotModal";
 import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickViewModal";
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { ThemedNumberInput } from "@/components/ThemedNumberInput";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, FolderArchive, ExternalLink, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye, StickyNote } from "lucide-react";
+import { LendModal } from "@/components/loans/LendModal";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, FolderArchive, ExternalLink, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye, StickyNote, Share2 } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -217,6 +218,22 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [quickViewComponentId, setQuickViewComponentId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const [isExtendedHotspotsView, setIsExtendedHotspotsView] = useState(false);
+
+  // Hotspot Lending & Loans State
+  const [activeLeafLoans, setActiveLeafLoans] = useState<Loan[]>([]);
+  const [lendTargetHotspot, setLendTargetHotspot] = useState<SpatialHotspot | null>(null);
+  const [isReturningHotspotLoan, setIsReturningHotspotLoan] = useState(false);
+
+  // Sync active loans when a leaf hotspot is selected
+  useEffect(() => {
+    if (!selectedLeafHotspot) {
+      setActiveLeafLoans([]);
+      return;
+    }
+    getActiveLoansForHotspotTree(selectedLeafHotspot.id)
+      .then(setActiveLeafLoans)
+      .catch(console.error);
+  }, [selectedLeafHotspot]);
 
   // Spatial Notes State
   const [spatialNotes, setSpatialNotes] = useState<ResolvedSpatialNote[]>([]);
@@ -2518,6 +2535,14 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     >
                       <StickyNote className="h-4 w-4" />
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setLendTargetHotspot(selectedLeafHotspot)}
+                      className="p-1.5 text-amber-300 hover:text-amber-200 hover:bg-amber-500/15 rounded transition-colors"
+                      data-tooltip={`Lend this location and all its contents`}
+                    >
+                      <Share2 className="h-4 w-4" />
+                    </button>
                   </>
                 )}
                 <button onClick={() => { setSelectedLeafHotspot(null); setHighlightedHotspotId(null); setLeafProjects([]); }} className="p-1.5 text-brand-text-muted hover:text-white transition-colors">
@@ -2527,6 +2552,48 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
             </div>
             
             <div className="p-4 flex-1 overflow-y-auto">
+              {/* Active Loans Banner */}
+              {activeLeafLoans.length > 0 && (
+                <div className="mb-4 p-3 bg-amber-950/40 border border-amber-600/50 rounded-lg text-amber-200 text-xs shadow-sm">
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[11px] text-amber-300">
+                      <Share2 className="h-3.5 w-3.5 text-amber-400" />
+                      <span>Items Currently Lent Out ({activeLeafLoans.length})</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isReturningHotspotLoan}
+                      onClick={async () => {
+                        if (!confirm(`Return ${activeLeafLoans.length} component(s) back to this location?`)) return;
+                        setIsReturningHotspotLoan(true);
+                        try {
+                          for (const l of activeLeafLoans) {
+                            if (l.source_location_id) await returnLentComponent(l.id, l.source_location_id);
+                          }
+                          const comps = await getHotspotComponents(selectedLeafHotspot.id);
+                          setLeafComponents(comps);
+                          const remaining = await getActiveLoansForHotspotTree(selectedLeafHotspot.id);
+                          setActiveLeafLoans(remaining);
+                        } catch (err: any) {
+                          console.error(err);
+                          alert("Failed to return components: " + err.message);
+                        } finally {
+                          setIsReturningHotspotLoan(false);
+                        }
+                      }}
+                      className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                    >
+                      {isReturningHotspotLoan ? "Returning..." : "Return All"}
+                    </button>
+                  </div>
+                  <div className="text-[11px] text-zinc-300">
+                    Lent to <strong className="text-white">{activeLeafLoans[0].borrower_name}</strong>
+                    {activeLeafLoans[0].due_date && (
+                      <span> • Due: {new Date(activeLeafLoans[0].due_date).toLocaleDateString()}</span>
+                    )}.
+                  </div>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-3">
                 <div className="text-[10px] tracking-widest text-brand-text-muted uppercase font-medium">Contents</div>
                 <button
@@ -2839,6 +2906,10 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
           }}
           onRedrawShape={() => handleStartReshape(editingHotspot)}
           onMoveHotspot={() => handleStartMoveHotspot(editingHotspot)}
+          onLendHotspot={() => {
+            setLendTargetHotspot(editingHotspot);
+            setEditingHotspot(null);
+          }}
           onInsertIntermediate={
             !editingHotspot.is_leaf && editingHotspot.child_photo_id
               ? () => handleOpenInsertIntermediate(editingHotspot)
@@ -2905,6 +2976,26 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         onSave={handleSaveSpatialNote}
         onDelete={handleDeleteSpatialNote}
       />
+
+      {/* Lend Hotspot Modal */}
+      {lendTargetHotspot && (
+        <LendModal
+          isOpen={!!lendTargetHotspot}
+          onClose={() => setLendTargetHotspot(null)}
+          onSuccess={async () => {
+            const hid = lendTargetHotspot.id;
+            setLendTargetHotspot(null);
+            if (selectedLeafHotspot && selectedLeafHotspot.id === hid) {
+              const comps = await getHotspotComponents(hid);
+              setLeafComponents(comps);
+              const loans = await getActiveLoansForHotspotTree(hid);
+              setActiveLeafLoans(loans);
+            }
+          }}
+          initialType="hotspot"
+          initialHotspotId={lendTargetHotspot.id}
+        />
+      )}
     </div>
   );
 }

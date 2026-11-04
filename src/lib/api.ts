@@ -644,11 +644,64 @@ export async function getFullHotspotPath(hotspotId: string) {
   return chain;
 }
 
-export function buildLeafHotspotsHierarchy(
+export interface HotspotHierarchyItem {
+  id: string;
+  photo_id: string;
+  label: string;
+  is_leaf: boolean;
+  child_photo_id: string | null;
+  fullLabel: string;
+  roomId?: string;
+  roomName?: string;
+  created_at?: string;
+}
+
+export interface HotspotTreeComponentItem {
+  locationId: string;
+  componentId: string;
+  componentName: string;
+  componentPhotoUrl?: string;
+  quantity: number;
+  hotspotId: string;
+  hotspotLabel: string;
+  hotspotFullPath: string;
+}
+
+export interface HotspotTreeSummary {
+  rootHotspot: SpatialHotspot;
+  rootLabel: string;
+  fullPath: string;
+  isLeaf: boolean;
+  descendantCount: number;
+  components: HotspotTreeComponentItem[];
+  totalUnits: number;
+}
+
+export interface HotspotLoanMeta {
+  rootHotspotId: string;
+  rootHotspotLabel: string;
+  groupId: string;
+  cleanNotes: string;
+}
+
+export function parseHotspotLoanMeta(notes?: string | null): HotspotLoanMeta | null {
+  if (!notes) return null;
+  const match = notes.match(/^\[Hotspot Loan:\s*([^|]+)\|([^|]+)\|([^\]]+)\]\s*(.*)$/);
+  if (!match) return null;
+  return {
+    rootHotspotId: match[1].trim(),
+    rootHotspotLabel: match[2].trim(),
+    groupId: match[3].trim(),
+    cleanNotes: match[4].trim(),
+  };
+}
+
+export function buildHotspotsHierarchy(
   allHotspots: any[],
   allPhotos: any[],
-  allRooms: any[]
-) {
+  allRooms: any[],
+  filterLeavesOnly: boolean = false
+): HotspotHierarchyItem[] {
   const hotspotMap = new Map<string, any>();
   allHotspots.forEach(h => hotspotMap.set(h.id, h));
 
@@ -658,9 +711,9 @@ export function buildLeafHotspotsHierarchy(
   const roomMap = new Map<string, any>();
   allRooms.forEach(r => roomMap.set(r.id, r));
 
-  const leafHotspots = allHotspots.filter(h => h.is_leaf);
+  const targetHotspots = filterLeavesOnly ? allHotspots.filter(h => h.is_leaf) : allHotspots;
 
-  const results = leafHotspots.map(hs => {
+  const results: HotspotHierarchyItem[] = targetHotspots.map(hs => {
     const chain: { type: 'hotspot' | 'photo'; id: string; label: string }[] = [];
     let currentHotspotId: string | null = hs.id;
     let depth = 0;
@@ -709,6 +762,42 @@ export function buildLeafHotspotsHierarchy(
     }
     return (a.fullLabel || '').localeCompare(b.fullLabel || '');
   });
+}
+
+export function buildLeafHotspotsHierarchy(
+  allHotspots: any[],
+  allPhotos: any[],
+  allRooms: any[]
+): HotspotHierarchyItem[] {
+  return buildHotspotsHierarchy(allHotspots, allPhotos, allRooms, true);
+}
+
+export async function getAllHotspotsWithHierarchy(): Promise<HotspotHierarchyItem[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const [allHotspots, allPhotos, allRooms] = await Promise.all([
+      db.spatial_hotspots.toArray(),
+      db.spatial_photos.toArray(),
+      db.rooms.toArray()
+    ]);
+    return buildHotspotsHierarchy(allHotspots, allPhotos, allRooms, false);
+  }
+
+  const [hotspotsRes, photosRes, roomsRes] = await Promise.all([
+    supabase.from('spatial_hotspots').select('*'),
+    supabase.from('spatial_photos').select('*'),
+    supabase.from('rooms').select('id, name')
+  ]);
+
+  if (hotspotsRes.error) throw new Error(hotspotsRes.error.message || "Failed to fetch hotspots");
+  if (photosRes.error) throw new Error(photosRes.error.message || "Failed to fetch photos");
+  if (roomsRes.error) throw new Error(roomsRes.error.message || "Failed to fetch rooms");
+
+  return buildHotspotsHierarchy(
+    hotspotsRes.data || [],
+    photosRes.data || [],
+    roomsRes.data || [],
+    false
+  );
 }
 
 export async function getAllLeafHotspots() {
@@ -2680,6 +2769,194 @@ export async function returnLentProject(loanId: string, returnLocationId?: strin
   }
 
   return { ...loan, ...updates };
+}
+
+// -------------------------------------------------------------
+// HOTSPOT HIERARCHICAL LENDING & BATCH RETURN
+// -------------------------------------------------------------
+
+export async function getHotspotTreeSummary(hotspotId: string): Promise<HotspotTreeSummary> {
+  const isOffline = typeof window !== 'undefined' && !navigator.onLine;
+  
+  let allHotspots: any[] = [];
+  let allPhotos: any[] = [];
+  let allRooms: any[] = [];
+  let allCompLocs: any[] = [];
+  let allComps: any[] = [];
+
+  if (isOffline) {
+    [allHotspots, allPhotos, allRooms, allCompLocs, allComps] = await Promise.all([
+      db.spatial_hotspots.toArray(),
+      db.spatial_photos.toArray(),
+      db.rooms.toArray(),
+      db.component_locations.toArray(),
+      db.components.toArray()
+    ]);
+  } else {
+    const [hsRes, phRes, rmRes, clRes, cRes] = await Promise.all([
+      supabase.from('spatial_hotspots').select('*'),
+      supabase.from('spatial_photos').select('*'),
+      supabase.from('rooms').select('id, name'),
+      supabase.from('component_locations').select('*'),
+      supabase.from('components').select('id, name, photo_url')
+    ]);
+    if (hsRes.error) throw hsRes.error;
+    if (phRes.error) throw phRes.error;
+    if (rmRes.error) throw rmRes.error;
+    if (clRes.error) throw clRes.error;
+    if (cRes.error) throw cRes.error;
+    allHotspots = hsRes.data || [];
+    allPhotos = phRes.data || [];
+    allRooms = rmRes.data || [];
+    allCompLocs = clRes.data || [];
+    allComps = cRes.data || [];
+  }
+
+  const rootHotspot = allHotspots.find(h => h.id === hotspotId);
+  if (!rootHotspot) {
+    throw new Error(`Hotspot with ID "${hotspotId}" not found.`);
+  }
+
+  // Hierarchy map for fullLabel paths
+  const hierarchyList = buildHotspotsHierarchy(allHotspots, allPhotos, allRooms, false);
+  const hierMap = new Map<string, HotspotHierarchyItem>(hierarchyList.map(h => [h.id, h]));
+  const compMap = new Map<string, any>(allComps.map(c => [c.id, c]));
+
+  // Recursive descendant collector
+  function collectDescendants(hs: any): any[] {
+    const list = [hs];
+    if (!hs.is_leaf && hs.child_photo_id) {
+      const childHotspots = allHotspots.filter(h => h.photo_id === hs.child_photo_id);
+      for (const child of childHotspots) {
+        list.push(...collectDescendants(child));
+      }
+    }
+    return list;
+  }
+
+  const allDescendants = collectDescendants(rootHotspot);
+  const descendantIds = new Set(allDescendants.map(d => d.id));
+
+  // Find component locations assigned to any of these hotspots
+  const matchingLocs = allCompLocs.filter(l => descendantIds.has(l.hotspot_id) && l.quantity > 0);
+
+  const components: HotspotTreeComponentItem[] = matchingLocs.map(loc => {
+    const comp = compMap.get(loc.component_id);
+    const hsItem = hierMap.get(loc.hotspot_id);
+    return {
+      locationId: loc.id,
+      componentId: loc.component_id,
+      componentName: comp?.name || "Unknown Component",
+      componentPhotoUrl: comp?.photo_url,
+      quantity: loc.quantity,
+      hotspotId: loc.hotspot_id,
+      hotspotLabel: hsItem?.label || "Location",
+      hotspotFullPath: hsItem?.fullLabel || hsItem?.label || "Location"
+    };
+  });
+
+  const rootHier = hierMap.get(hotspotId);
+
+  return {
+    rootHotspot,
+    rootLabel: rootHotspot.label,
+    fullPath: rootHier?.fullLabel || rootHotspot.label,
+    isLeaf: rootHotspot.is_leaf,
+    descendantCount: Math.max(0, allDescendants.length - 1),
+    components,
+    totalUnits: components.reduce((sum, c) => sum + c.quantity, 0)
+  };
+}
+
+export async function lendHotspotTree(params: {
+  hotspotId: string;
+  borrowerName: string;
+  borrowerContact?: string;
+  dueDate: string;
+  notes?: string;
+}): Promise<{ groupId: string; rootHotspotLabel: string; count: number; totalUnits: number; loans: Loan[] }> {
+  const { hotspotId, borrowerName, borrowerContact, dueDate, notes } = params;
+  if (!borrowerName.trim()) throw new Error("Borrower name is required.");
+  if (!dueDate) throw new Error("Return due date is required.");
+
+  const summary = await getHotspotTreeSummary(hotspotId);
+  if (summary.components.length === 0) {
+    throw new Error(`Hotspot "${summary.rootLabel}" and its contents do not currently contain any stored components to lend.`);
+  }
+
+  const groupId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `hloan-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const userNotes = notes?.trim() || "";
+  const encodedNotes = `[Hotspot Loan: ${summary.rootHotspot.id}|${summary.rootLabel}|${groupId}] ${userNotes}`.trim();
+
+  const createdLoans: Loan[] = [];
+  for (const item of summary.components) {
+    const loan = await lendComponent({
+      componentId: item.componentId,
+      sourceLocationId: item.hotspotId,
+      quantity: item.quantity,
+      borrowerName: borrowerName.trim(),
+      borrowerContact: borrowerContact?.trim() || undefined,
+      dueDate,
+      notes: encodedNotes
+    });
+    createdLoans.push(loan);
+  }
+
+  return {
+    groupId,
+    rootHotspotLabel: summary.rootLabel,
+    count: summary.components.length,
+    totalUnits: summary.totalUnits,
+    loans: createdLoans
+  };
+}
+
+export async function returnHotspotLoan(groupId: string): Promise<Loan[]> {
+  const allLoans = await getLoans();
+  const activeMatchingLoans = allLoans.filter(l => {
+    if (l.returned_at) return false;
+    const meta = parseHotspotLoanMeta(l.notes);
+    return meta && meta.groupId === groupId;
+  });
+
+  if (activeMatchingLoans.length === 0) {
+    throw new Error("No active loans found for this hotspot loan group.");
+  }
+
+  const returned: Loan[] = [];
+  for (const loan of activeMatchingLoans) {
+    if (!loan.source_location_id) continue;
+    const res = await returnLentComponent(loan.id, loan.source_location_id);
+    returned.push(res);
+  }
+
+  return returned;
+}
+
+export async function getActiveLoansForHotspotTree(hotspotId: string): Promise<Loan[]> {
+  const allLoans = await getLoans();
+  const activeLoans = allLoans.filter(l => !l.returned_at);
+  if (activeLoans.length === 0) return [];
+
+  // Direct match by meta or direct hotspot id
+  const matchingLoans = activeLoans.filter(l => {
+    const meta = parseHotspotLoanMeta(l.notes);
+    if (meta && meta.rootHotspotId === hotspotId) return true;
+    if (l.source_location_id === hotspotId) return true;
+    return false;
+  });
+
+  try {
+    const summary = await getHotspotTreeSummary(hotspotId);
+    const hsIds = new Set([summary.rootHotspot.id, ...summary.components.map(c => c.hotspotId)]);
+    return activeLoans.filter(l => {
+      if (matchingLoans.some(m => m.id === l.id)) return true;
+      if (l.source_location_id && hsIds.has(l.source_location_id)) return true;
+      return false;
+    });
+  } catch {
+    return matchingLoans;
+  }
 }
 
 // -------------------------------------------------------------
