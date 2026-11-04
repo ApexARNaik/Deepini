@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot, Project, getProjectsForHotspot, SpatialNote, ResolvedSpatialNote, getSpatialNotesForPhoto, createSpatialNote, updateSpatialNote, deleteSpatialNote, getActiveLoansForHotspotTree, returnLentComponent, Loan } from "@/lib/api";
+import { SpatialPhoto, SpatialHotspot, getPhotosForRoom, getHotspotsForPhoto, getHotspotById, uploadPhotoAndCreate, replaceSpatialPhoto, batchUpdateHotspotPoints, insertIntermediateSpatialPhoto, createHotspot, updateHotspot, getFullHotspotPath, getInventory, filterAndRankInventory, ComponentWithTotals, getHotspotComponents, updateHotspotComponents, getRoom, updatePhotoLabel, deleteSpatialPhoto, deleteHotspot, updateRoom, deleteRoom, reorderSpatialPhotos, isPersonalItem, undoInsertIntermediateSpatialPhoto, undoReplaceSpatialPhoto, restoreDeletedHotspot, serializeSpatialPhotoTree, restoreDeletedSpatialPhotoTree, moveSpatialHotspot, Project, getProjectsForHotspot, SpatialNote, ResolvedSpatialNote, getSpatialNotesForPhoto, createSpatialNote, updateSpatialNote, deleteSpatialNote, getActiveLoansForHotspotTree, returnLentComponent, Loan, getMultipleHotspotsSummary } from "@/lib/api";
 import { HotspotCanvas } from "./HotspotCanvas";
 import { HotspotConfigModal } from "./HotspotConfigModal";
 import { SpatialNoteModal } from "./SpatialNoteModal";
@@ -12,7 +12,7 @@ import { ComponentQuickViewModal } from "@/components/inventory/ComponentQuickVi
 import { ImagePreviewModal } from "@/components/inventory/ImagePreviewModal";
 import { ThemedNumberInput } from "@/components/ThemedNumberInput";
 import { LendModal } from "@/components/loans/LendModal";
-import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, FolderArchive, ExternalLink, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye, StickyNote, Share2 } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronUp, ChevronDown, Plus, Edit2, X, Search, Archive, FolderArchive, ExternalLink, Trash2, GripVertical, MapPin, Crop, ImageIcon, RefreshCw, Layers, RotateCcw, ArrowRightLeft, SlidersHorizontal, Eye, StickyNote, Share2, CheckSquare, Square } from "lucide-react";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -223,6 +223,60 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
   const [activeLeafLoans, setActiveLeafLoans] = useState<Loan[]>([]);
   const [lendTargetHotspot, setLendTargetHotspot] = useState<SpatialHotspot | null>(null);
   const [isReturningHotspotLoan, setIsReturningHotspotLoan] = useState(false);
+
+  // Multi-Hotspot Selection & Batch Lending State
+  const [selectedHotspotIds, setSelectedHotspotIds] = useState<Set<string>>(new Set());
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [batchHotspotSummary, setBatchHotspotSummary] = useState<{ totalComponents: number; totalUnits: number } | null>(null);
+  const [lendTargetHotspotIds, setLendTargetHotspotIds] = useState<string[] | null>(null);
+
+  // Clear multi-selection when active view changes
+  useEffect(() => {
+    setSelectedHotspotIds(new Set());
+    setBatchHotspotSummary(null);
+  }, [activePhotoId]);
+
+  // Fetch aggregate summary whenever selectedHotspotIds changes
+  useEffect(() => {
+    if (selectedHotspotIds.size === 0) {
+      setBatchHotspotSummary(null);
+      return;
+    }
+    let active = true;
+    getMultipleHotspotsSummary(Array.from(selectedHotspotIds))
+      .then((summary) => {
+        if (active) {
+          setBatchHotspotSummary({
+            totalComponents: summary.components.length,
+            totalUnits: summary.totalUnits,
+          });
+        }
+      })
+      .catch(console.error);
+    return () => {
+      active = false;
+    };
+  }, [selectedHotspotIds]);
+
+  const handleToggleSelectHotspot = useCallback((hs: SpatialHotspot | { id: string }) => {
+    setSelectedHotspotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(hs.id)) {
+        next.delete(hs.id);
+      } else {
+        next.add(hs.id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSelectAllHotspotsInView = useCallback(() => {
+    setSelectedHotspotIds(new Set(hotspots.map((h) => h.id)));
+  }, [hotspots]);
+
+  const handleClearSelectedHotspots = useCallback(() => {
+    setSelectedHotspotIds(new Set());
+  }, []);
 
   // Sync active loans when a leaf hotspot is selected
   useEffect(() => {
@@ -1963,6 +2017,32 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 )}
               </div>
             )}
+            {/* Multi-Select Hotspots Button */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode = !isMultiSelectMode;
+                setIsMultiSelectMode(nextMode);
+                if (!nextMode && selectedHotspotIds.size > 0) {
+                  setSelectedHotspotIds(new Set());
+                }
+              }}
+              className={`flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest border transition-all ${
+                isMultiSelectMode || selectedHotspotIds.size > 0
+                  ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
+                  : 'bg-[#1a1816] border-[#332f2a] text-brand-text hover:border-[#4a443c] hover:text-white'
+              }`}
+              data-tooltip={isMultiSelectMode ? "Exit multi-select mode" : "Select multiple hotspots in this view (Shift+click also works)"}
+            >
+              <CheckSquare className="h-3.5 w-3.5 mr-1.5 text-amber-400" />
+              <span>{isMultiSelectMode ? "Selecting..." : "Select Hotspots"}</span>
+              {selectedHotspotIds.size > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 bg-amber-500 text-black font-black rounded-full text-[10px] leading-none">
+                  {selectedHotspotIds.size}
+                </span>
+              )}
+            </button>
+
             {/* Undo Button */}
             <button
               type="button"
@@ -2221,6 +2301,9 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                 onNoteMove={handleMoveSpatialNote}
                 onNoteDelete={handleDeleteSpatialNote}
                 onOpenCreateNote={handleOpenCreateNote}
+                selectedHotspotIds={selectedHotspotIds}
+                isMultiSelectMode={isMultiSelectMode}
+                onToggleSelectHotspot={handleToggleSelectHotspot}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-brand-text-muted flex-col p-8">
@@ -2230,6 +2313,81 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                     <ImageUploadDropzone onUpload={handleUploadRootPhoto} isUploading={uploading} label="Upload First Photo" />
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Floating Batch Hotspot Action Bar */}
+            {selectedHotspotIds.size > 0 && (
+              <div className="sticky bottom-3 inset-x-3 z-30 mx-3 mb-3 p-3 bg-[#181512]/95 border border-amber-500/60 backdrop-blur-md rounded-lg shadow-2xl animate-fadeIn">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse" />
+                      <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                        {selectedHotspotIds.size} {selectedHotspotIds.size === 1 ? "Hotspot" : "Hotspots"} Selected
+                      </span>
+                    </div>
+
+                    {batchHotspotSummary && (
+                      <div className="flex items-center gap-2 text-xs text-brand-text-muted border-l border-[#332f2a] pl-3">
+                        <span>{batchHotspotSummary.totalComponents} unique item{batchHotspotSummary.totalComponents === 1 ? "" : "s"}</span>
+                        <span>•</span>
+                        <span className="text-white font-medium">{batchHotspotSummary.totalUnits} total unit{batchHotspotSummary.totalUnits === 1 ? "" : "s"}</span>
+                      </div>
+                    )}
+
+                    <div className="hidden md:flex items-center gap-1.5 overflow-x-auto max-w-[280px] py-0.5">
+                      {Array.from(selectedHotspotIds).map((id) => {
+                        const hs = hotspots.find((h) => h.id === id);
+                        return (
+                          <span
+                            key={id}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-200 text-[11px] whitespace-nowrap"
+                          >
+                            {hs?.label || "Hotspot"}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleSelectHotspot({ id } as SpatialHotspot);
+                              }}
+                              className="hover:text-white"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {selectedHotspotIds.size < hotspots.length && (
+                      <button
+                        type="button"
+                        onClick={handleSelectAllHotspotsInView}
+                        className="px-2.5 py-1 text-xs text-brand-text-muted hover:text-white bg-white/5 hover:bg-white/10 rounded transition-colors"
+                      >
+                        Select All ({hotspots.length})
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleClearSelectedHotspots}
+                      className="px-2.5 py-1 text-xs text-brand-text-muted hover:text-white hover:bg-white/5 rounded transition-colors"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLendTargetHotspotIds(Array.from(selectedHotspotIds))}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold uppercase tracking-wider rounded transition-colors shadow-lg shadow-amber-500/20"
+                    >
+                      <Share2 className="h-3.5 w-3.5" />
+                      <span>Lend Selected Hotspots</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -2335,43 +2493,78 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
                       {displayedHotspots.map((hs) => {
                         const isHovered = highlightedHotspotId === hs.id;
                         const isSelectedLeaf = selectedLeafHotspot?.id === hs.id;
+                        const isMultiSelected = selectedHotspotIds.has(hs.id);
 
                         return (
                           <div
                             key={hs.id}
-                            onClick={() => {
+                            onClick={(e) => {
+                              if (isMultiSelectMode || e.shiftKey || e.ctrlKey) {
+                                e.stopPropagation();
+                                handleToggleSelectHotspot(hs);
+                                return;
+                              }
                               setHighlightedHotspotId(hs.id);
                               handleHotspotClick(hs);
                             }}
                             onMouseEnter={() => setHighlightedHotspotId(hs.id)}
                             onMouseLeave={() => setHighlightedHotspotId(null)}
                             className={`p-3 rounded border transition-all cursor-pointer group flex flex-col justify-between ${
-                              isHovered
-                                ? 'bg-brand-accent/20 border-brand-accent shadow-[0_0_12px_rgba(188,115,83,0.3)] ring-1 ring-brand-accent'
-                                : isSelectedLeaf
-                                  ? 'bg-[#1f1d1a] border-[#4a443c] ring-1 ring-white/10'
-                                  : 'bg-[#1a1816]/70 border-[#2d2924] hover:border-[#4a443c] hover:bg-[#1a1816]'
+                              isMultiSelected
+                                ? 'bg-amber-500/15 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.25)] ring-1 ring-amber-500/50'
+                                : isHovered
+                                  ? 'bg-brand-accent/20 border-brand-accent shadow-[0_0_12px_rgba(188,115,83,0.3)] ring-1 ring-brand-accent'
+                                  : isSelectedLeaf
+                                    ? 'bg-[#1f1d1a] border-[#4a443c] ring-1 ring-white/10'
+                                    : 'bg-[#1a1816]/70 border-[#2d2924] hover:border-[#4a443c] hover:bg-[#1a1816]'
                             }`}
-                            data-tooltip={hs.is_leaf ? `Open contents for "${hs.label}"` : `Drill down into "${hs.label}"`}
+                            data-tooltip={
+                              isMultiSelectMode
+                                ? `${isMultiSelected ? 'Deselect' : 'Select'} "${hs.label}"`
+                                : hs.is_leaf ? `Open contents for "${hs.label}"` : `Drill down into "${hs.label}"`
+                            }
                           >
                             <div className="flex items-start justify-between gap-2 min-w-0">
                               <div className="flex items-center gap-2 min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleSelectHotspot(hs);
+                                  }}
+                                  className={`p-1 -ml-1 rounded transition-colors ${
+                                    isMultiSelected
+                                      ? 'text-amber-400 hover:text-amber-300'
+                                      : 'text-brand-text-muted/60 hover:text-amber-300'
+                                  }`}
+                                  data-tooltip={isMultiSelected ? "Deselect" : "Select hotspot for batch action"}
+                                >
+                                  {isMultiSelected ? (
+                                    <CheckSquare className="h-4 w-4 text-amber-400" />
+                                  ) : (
+                                    <Square className="h-4 w-4" />
+                                  )}
+                                </button>
                                 <div className={`p-1.5 rounded shrink-0 transition-colors ${
-                                  isHovered 
-                                    ? 'bg-brand-accent text-white' 
-                                    : isSelectedLeaf
-                                      ? 'bg-brand-accent/25 text-brand-accent'
-                                      : 'bg-[#252320] text-brand-text-muted group-hover:text-brand-accent'
+                                  isMultiSelected
+                                    ? 'bg-amber-500 text-black font-bold'
+                                    : isHovered 
+                                      ? 'bg-brand-accent text-white' 
+                                      : isSelectedLeaf
+                                        ? 'bg-brand-accent/25 text-brand-accent'
+                                        : 'bg-[#252320] text-brand-text-muted group-hover:text-brand-accent'
                                 }`}>
                                   {hs.is_leaf ? <Archive className="h-3.5 w-3.5" /> : <Layers className="h-3.5 w-3.5" />}
                                 </div>
                                 <div className="min-w-0">
                                   <div className={`text-sm font-bold truncate transition-colors ${
-                                    isHovered 
-                                      ? 'text-white' 
-                                      : isSelectedLeaf 
+                                    isMultiSelected
+                                      ? 'text-amber-300 font-semibold'
+                                      : isHovered 
                                         ? 'text-white' 
-                                        : 'text-white/90 group-hover:text-brand-accent'
+                                        : isSelectedLeaf 
+                                          ? 'text-white' 
+                                          : 'text-white/90 group-hover:text-brand-accent'
                                   }`}>
                                     {hs.label}
                                   </div>
@@ -2977,23 +3170,30 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         onDelete={handleDeleteSpatialNote}
       />
 
-      {/* Lend Hotspot Modal */}
-      {lendTargetHotspot && (
+      {/* Lend Hotspot Modal (Single or Multi) */}
+      {(lendTargetHotspot || (lendTargetHotspotIds && lendTargetHotspotIds.length > 0)) && (
         <LendModal
-          isOpen={!!lendTargetHotspot}
-          onClose={() => setLendTargetHotspot(null)}
-          onSuccess={async () => {
-            const hid = lendTargetHotspot.id;
+          isOpen={!!lendTargetHotspot || !!(lendTargetHotspotIds && lendTargetHotspotIds.length > 0)}
+          onClose={() => {
             setLendTargetHotspot(null);
-            if (selectedLeafHotspot && selectedLeafHotspot.id === hid) {
-              const comps = await getHotspotComponents(hid);
+            setLendTargetHotspotIds(null);
+          }}
+          onSuccess={async () => {
+            const hid = lendTargetHotspot?.id;
+            const hids = lendTargetHotspotIds;
+            setLendTargetHotspot(null);
+            setLendTargetHotspotIds(null);
+            setSelectedHotspotIds(new Set());
+            if (selectedLeafHotspot && (selectedLeafHotspot.id === hid || (hids && hids.includes(selectedLeafHotspot.id)))) {
+              const comps = await getHotspotComponents(selectedLeafHotspot.id);
               setLeafComponents(comps);
-              const loans = await getActiveLoansForHotspotTree(hid);
+              const loans = await getActiveLoansForHotspotTree(selectedLeafHotspot.id);
               setActiveLeafLoans(loans);
             }
           }}
           initialType="hotspot"
-          initialHotspotId={lendTargetHotspot.id}
+          initialHotspotId={lendTargetHotspot?.id}
+          initialHotspotIds={lendTargetHotspotIds || (lendTargetHotspot ? [lendTargetHotspot.id] : undefined)}
         />
       )}
     </div>

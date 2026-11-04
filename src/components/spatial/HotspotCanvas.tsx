@@ -26,6 +26,10 @@ interface Props {
   onUndo?: () => void;
   canUndo?: boolean;
   onCancelEdit: () => void;
+  // Multi-Hotspot Selection
+  selectedHotspotIds?: Set<string>;
+  isMultiSelectMode?: boolean;
+  onToggleSelectHotspot?: (hotspot: SpatialHotspot) => void;
   // Spatial Notes Props
   onNoteDrop?: (x: number, y: number, hotspotId?: string | null, componentId?: string | null) => void;
   onNoteClick?: (note: ResolvedSpatialNote) => void;
@@ -93,6 +97,9 @@ export function HotspotCanvas({
   onUndo,
   canUndo = false,
   onCancelEdit,
+  selectedHotspotIds,
+  isMultiSelectMode = false,
+  onToggleSelectHotspot,
   onNoteDrop,
   onNoteClick,
   onNoteMove,
@@ -1878,88 +1885,130 @@ export function HotspotCanvas({
               );
             }
 
+            const isMultiSelected = selectedHotspotIds?.has(hs.id);
+            const centroid = hs.shape_points.reduce(
+              (acc, p) => ({ x: acc.x + (p.x * 100) / hs.shape_points.length, y: acc.y + (p.y * 100) / hs.shape_points.length }),
+              { x: 0, y: 0 }
+            );
+
             return (
-              <polygon
-                key={hs.id}
-                points={hs.shape_points.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
-                fill={
-                  isDeleteMode
-                    ? (isHovered ? "rgba(239, 68, 68, 0.55)" : "rgba(239, 68, 68, 0.22)")
-                    : isEditMode
-                      ? (isHovered 
-                          ? (isArrow ? "rgba(250, 204, 21, 0.65)" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.45)" : "rgba(100, 100, 100, 0.25)")
-                          : (isArrow ? "rgba(234, 179, 8, 0.40)" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.22)" : "rgba(255, 255, 255, 0.15)"))
-                      : isHovered 
-                        ? (isArrow ? "rgba(250, 204, 21, 0.70)" : "rgba(56, 189, 248, 0.35)") 
+              <g key={hs.id} className="hotspot-shape-group">
+                <polygon
+                  points={hs.shape_points.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
+                  fill={
+                    isMultiSelected
+                      ? (isHovered ? "rgba(245, 158, 11, 0.55)" : "rgba(245, 158, 11, 0.35)")
+                      : isDeleteMode
+                      ? (isHovered ? "rgba(239, 68, 68, 0.55)" : "rgba(239, 68, 68, 0.22)")
+                      : isEditMode
+                        ? (isHovered 
+                            ? (isArrow ? "rgba(250, 204, 21, 0.65)" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.45)" : "rgba(100, 100, 100, 0.25)")
+                            : (isArrow ? "rgba(234, 179, 8, 0.40)" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.22)" : "rgba(255, 255, 255, 0.15)"))
+                        : isHovered 
+                          ? (isArrow ? "rgba(250, 204, 21, 0.70)" : "rgba(56, 189, 248, 0.35)") 
+                          : isHighlighted 
+                            ? (isArrow ? "rgba(234, 179, 8, 0.65)" : "rgba(239, 68, 68, 0.2)") 
+                            : (isArrow ? "rgba(234, 179, 8, 0.45)" : "rgba(255, 255, 255, 0.25)")
+                  }
+                  stroke={
+                    isMultiSelected
+                      ? "#f59e0b"
+                      : isDeleteMode
+                      ? (isHovered ? "#ff2222" : "rgba(239, 68, 68, 0.85)")
+                      : isEditMode
+                        ? (isHovered 
+                            ? (isArrow ? "#facc15" : !hs.child_photo_id ? "#f59e0b" : "rgba(156, 163, 175, 0.6)")
+                            : (isArrow ? "#eab308" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.75)" : "rgba(156, 163, 175, 0.4)"))
                         : isHighlighted 
-                          ? (isArrow ? "rgba(234, 179, 8, 0.65)" : "rgba(239, 68, 68, 0.2)") 
-                          : (isArrow ? "rgba(234, 179, 8, 0.45)" : "rgba(255, 255, 255, 0.25)")
-                }
-                stroke={
-                  isDeleteMode
-                    ? (isHovered ? "#ff2222" : "rgba(239, 68, 68, 0.85)")
-                    : isEditMode
-                      ? (isHovered 
-                          ? (isArrow ? "#facc15" : !hs.child_photo_id ? "#f59e0b" : "rgba(156, 163, 175, 0.6)")
-                          : (isArrow ? "#eab308" : !hs.child_photo_id ? "rgba(245, 158, 11, 0.75)" : "rgba(156, 163, 175, 0.4)"))
-                      : isHighlighted 
-                        ? (isArrow ? "#facc15" : "#ef4444")
-                        : isHovered
-                          ? (isArrow ? "#facc15" : "#38bdf8")
-                          : (isArrow ? "#eab308" : "#7dd3fc")
-                }
-                strokeWidth={
-                  isArrow 
-                    ? (isHovered || isHighlighted ? "0.8" : "0.5") 
-                    : (isDeleteMode || isEditMode ? (isHovered ? "0.8" : "0.5") : (isHovered || isHighlighted ? "0.5" : "0.3"))
-                }
-                strokeDasharray={isDeleteMode ? (isHovered ? "none" : "2,2") : isEditMode ? (isHovered ? "none" : "3,3") : "none"}
-                style={
-                  isArrow 
-                    ? { filter: isHovered ? 'drop-shadow(0 0 6px rgba(234,179,8,0.75))' : 'drop-shadow(0 0 3px rgba(234,179,8,0.35))' } 
-                    : { filter: isHovered ? 'drop-shadow(0 0 6px rgba(56,189,248,0.75))' : 'drop-shadow(0 0 1.5px rgba(125,211,252,0.4))' }
-                }
-                className={`transition-all duration-200 ${isHighlighted ? 'animate-pulse' : ''} ${
-                  isClickable ? "cursor-pointer pointer-events-auto" : "pointer-events-none"
-                }`}
-                onMouseEnter={(e) => {
-                  if (isClickable) {
-                    setHoveredHotspotId(hs.id);
-                    if (containerRef.current) {
+                          ? (isArrow ? "#facc15" : "#ef4444")
+                          : isHovered
+                            ? (isArrow ? "#facc15" : "#38bdf8")
+                            : (isArrow ? "#eab308" : "#7dd3fc")
+                  }
+                  strokeWidth={
+                    isMultiSelected
+                      ? (isHovered ? "0.9" : "0.7")
+                      : isArrow 
+                      ? (isHovered || isHighlighted ? "0.8" : "0.5") 
+                      : (isDeleteMode || isEditMode ? (isHovered ? "0.8" : "0.5") : (isHovered || isHighlighted ? "0.5" : "0.3"))
+                  }
+                  strokeDasharray={isDeleteMode ? (isHovered ? "none" : "2,2") : isEditMode ? (isHovered ? "none" : "3,3") : "none"}
+                  style={
+                    isMultiSelected
+                      ? { filter: 'drop-shadow(0 0 8px rgba(245,158,11,0.85))' }
+                      : isArrow 
+                      ? { filter: isHovered ? 'drop-shadow(0 0 6px rgba(234,179,8,0.75))' : 'drop-shadow(0 0 3px rgba(234,179,8,0.35))' } 
+                      : { filter: isHovered ? 'drop-shadow(0 0 6px rgba(56,189,248,0.75))' : 'drop-shadow(0 0 1.5px rgba(125,211,252,0.4))' }
+                  }
+                  className={`transition-all duration-200 ${isHighlighted ? 'animate-pulse' : ''} ${
+                    isClickable ? "cursor-pointer pointer-events-auto" : "pointer-events-none"
+                  }`}
+                  onMouseEnter={(e) => {
+                    if (isClickable) {
+                      setHoveredHotspotId(hs.id);
+                      if (containerRef.current) {
+                        const rect = containerRef.current.getBoundingClientRect();
+                        const x = ((e.clientX - rect.left) / rect.width) * 100;
+                        const y = ((e.clientY - rect.top) / rect.height) * 100;
+                        setHoverPos({ x, y });
+                      }
+                    }
+                  }}
+                  onMouseMove={(e) => {
+                    if (isClickable && containerRef.current) {
                       const rect = containerRef.current.getBoundingClientRect();
                       const x = ((e.clientX - rect.left) / rect.width) * 100;
                       const y = ((e.clientY - rect.top) / rect.height) * 100;
                       setHoverPos({ x, y });
                     }
-                  }
-                }}
-                onMouseMove={(e) => {
-                  if (isClickable && containerRef.current) {
-                    const rect = containerRef.current.getBoundingClientRect();
-                    const x = ((e.clientX - rect.left) / rect.width) * 100;
-                    const y = ((e.clientY - rect.top) / rect.height) * 100;
-                    setHoverPos({ x, y });
-                  }
-                }}
-                onMouseLeave={() => {
-                  setHoveredHotspotId(null);
-                  setHoverPos(null);
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (isDeleteMode) {
-                    onHotspotDelete?.(hs);
-                  } else if (isEditMode) {
-                    if (!hs.child_photo_id) {
-                      onHotspotEdit?.(hs);
+                  }}
+                  onMouseLeave={() => {
+                    setHoveredHotspotId(null);
+                    setHoverPos(null);
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isDeleteMode) {
+                      onHotspotDelete?.(hs);
+                    } else if (isEditMode) {
+                      if (!hs.child_photo_id) {
+                        onHotspotEdit?.(hs);
+                      }
+                    } else if (!isEditing) {
+                      if (e.shiftKey || e.ctrlKey || isMultiSelectMode) {
+                        onToggleSelectHotspot?.(hs);
+                      } else {
+                        onHotspotClick(hs);
+                      }
                     }
-                  } else if (!isEditing) {
-                    onHotspotClick(hs);
-                  }
-                }}
-              >
-                <title>{hs.label} ({hs.is_leaf ? "Storage Location" : "Opens into Storage"})</title>
-              </polygon>
+                  }}
+                >
+                  <title>{hs.label} ({hs.is_leaf ? "Storage Location" : "Opens into Storage"})</title>
+                </polygon>
+
+                {/* Multi-Selection Checkmark Badge */}
+                {isMultiSelected && (
+                  <g className="pointer-events-none animate-in zoom-in-50 duration-150">
+                    <circle
+                      cx={centroid.x}
+                      cy={centroid.y}
+                      r="2.2"
+                      fill="#f59e0b"
+                      stroke="#ffffff"
+                      strokeWidth="0.4"
+                      className="filter drop-shadow-[0_0_4px_rgba(0,0,0,0.9)]"
+                    />
+                    <path
+                      d={`M ${centroid.x - 0.8} ${centroid.y} L ${centroid.x - 0.2} ${centroid.y + 0.7} L ${centroid.x + 0.9} ${centroid.y - 0.7}`}
+                      fill="none"
+                      stroke="#141210"
+                      strokeWidth="0.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </g>
+                )}
+              </g>
             );
           })}
 

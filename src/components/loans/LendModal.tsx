@@ -12,13 +12,16 @@ import {
   getAllHotspotsWithHierarchy,
   getHotspotTreeSummary,
   lendHotspotTree,
+  getMultipleHotspotsSummary,
+  lendMultipleHotspots,
   HotspotHierarchyItem,
   HotspotTreeSummary,
+  HotspotTreeComponentItem,
   ComponentWithTotals, 
   ComponentLocation, 
   Project 
 } from "@/lib/api";
-import { X, Search, Package, MapPin, Compass, AlertCircle, Calendar, User, Phone, FileText, ChevronDown, Clock, Layers, Check, ChevronRight } from "lucide-react";
+import { X, Search, Package, MapPin, Compass, AlertCircle, Calendar, User, Phone, FileText, ChevronDown, Clock, Layers, Check, ChevronRight, CheckSquare } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { ThemedNumberInput } from "@/components/ThemedNumberInput";
 
@@ -30,6 +33,7 @@ interface Props {
   initialComponentId?: string;
   initialProjectId?: string;
   initialHotspotId?: string;
+  initialHotspotIds?: string[];
 }
 
 interface PastBorrower {
@@ -47,6 +51,7 @@ export function LendModal({
   initialComponentId,
   initialProjectId,
   initialHotspotId,
+  initialHotspotIds,
 }: Props) {
   const [loanType, setLoanType] = useState<'component' | 'project' | 'hotspot'>(initialType);
 
@@ -66,8 +71,14 @@ export function LendModal({
   // Hotspot lending state
   const [allHotspots, setAllHotspots] = useState<HotspotHierarchyItem[]>([]);
   const [hotspotSearch, setHotspotSearch] = useState("");
-  const [selectedHotspotId, setSelectedHotspotId] = useState<string>(initialHotspotId || "");
-  const [hotspotSummary, setHotspotSummary] = useState<HotspotTreeSummary | null>(null);
+  const [selectedHotspotIds, setSelectedHotspotIds] = useState<string[]>(
+    initialHotspotIds || (initialHotspotId ? [initialHotspotId] : [])
+  );
+  const [multiHotspotSummary, setMultiHotspotSummary] = useState<{
+    hotspots: { id: string; label: string }[];
+    components: HotspotTreeComponentItem[];
+    totalUnits: number;
+  } | null>(null);
   const [loadingHotspotSummary, setLoadingHotspotSummary] = useState(false);
 
   // Borrower details state
@@ -223,26 +234,49 @@ export function LendModal({
       setSelectedProjectId(initialProjectId);
     }
 
-    if (initialHotspotId) {
+    const initialHIds = initialHotspotIds && initialHotspotIds.length > 0
+      ? initialHotspotIds
+      : (initialHotspotId ? [initialHotspotId] : []);
+
+    if (initialHIds.length > 0) {
       setLoanType('hotspot');
-      setSelectedHotspotId(initialHotspotId);
-      setLoadingHotspotSummary(true);
-      getHotspotTreeSummary(initialHotspotId)
-        .then(summary => {
-          setHotspotSummary(summary);
-          if (summary.components.length === 0) {
-            setError(`"${summary.rootLabel}" contains no stored components in physical storage.`);
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          setError(err.message || "Failed to load hotspot details.");
-        })
-        .finally(() => {
-          setLoadingHotspotSummary(false);
-        });
+      setSelectedHotspotIds(initialHIds);
     }
-  }, [isOpen, initialComponentId, initialProjectId, initialHotspotId]);
+  }, [isOpen, initialComponentId, initialProjectId, initialHotspotId, initialHotspotIds]);
+
+  // Load summary whenever selectedHotspotIds changes
+  useEffect(() => {
+    if (!isOpen || loanType !== 'hotspot') return;
+    if (selectedHotspotIds.length === 0) {
+      setMultiHotspotSummary(null);
+      setLoadingHotspotSummary(false);
+      return;
+    }
+
+    let isMounted = true;
+    setLoadingHotspotSummary(true);
+    setError(null);
+
+    getMultipleHotspotsSummary(selectedHotspotIds)
+      .then(res => {
+        if (!isMounted) return;
+        setMultiHotspotSummary(res);
+        if (res.components.length === 0) {
+          setError("The selected hotspot(s) contain no components in storage to lend.");
+        }
+      })
+      .catch(err => {
+        console.error("Failed to load multi-hotspot summary:", err);
+        if (isMounted) setError(err.message || "Failed to load hotspot details.");
+      })
+      .finally(() => {
+        if (isMounted) setLoadingHotspotSummary(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, loanType, selectedHotspotIds]);
 
   // Load all hotspots for hotspot lending
   useEffect(() => {
@@ -291,24 +325,6 @@ export function LendModal({
       setError("Failed to load component locations.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSelectHotspot = async (hs: HotspotHierarchyItem) => {
-    setSelectedHotspotId(hs.id);
-    setLoadingHotspotSummary(true);
-    setError(null);
-    try {
-      const summary = await getHotspotTreeSummary(hs.id);
-      setHotspotSummary(summary);
-      if (summary.components.length === 0) {
-        setError(`"${summary.rootLabel}" contains no stored components in physical storage.`);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to load hotspot contents.");
-    } finally {
-      setLoadingHotspotSummary(false);
     }
   };
 
@@ -382,20 +398,20 @@ export function LendModal({
           notes: notes.trim() || undefined
         });
       } else if (loanType === 'hotspot') {
-        if (!selectedHotspotId) {
-          setError("Please select a hotspot or container to lend.");
+        if (selectedHotspotIds.length === 0) {
+          setError("Please select at least one hotspot or container to lend.");
           setLoading(false);
           return;
         }
 
-        if (!hotspotSummary || hotspotSummary.components.length === 0) {
-          setError("This hotspot has no stored components to lend.");
+        if (!multiHotspotSummary || multiHotspotSummary.components.length === 0) {
+          setError("The selected hotspot(s) contain no stored components to lend.");
           setLoading(false);
           return;
         }
 
-        await lendHotspotTree({
-          hotspotId: selectedHotspotId,
+        await lendMultipleHotspots({
+          hotspotIds: selectedHotspotIds,
           borrowerName: borrowerName.trim(),
           borrowerContact: borrowerContact.trim() || undefined,
           dueDate,
@@ -726,58 +742,116 @@ export function LendModal({
           {/* ================= HOTSPOT / CONTAINER SELECTION ================= */}
           {loanType === 'hotspot' && (
             <div className="space-y-4">
-              {!selectedHotspotId ? (
-                <div>
-                  <label className="block text-[10px] uppercase tracking-widest text-brand-text-muted mb-1.5">
-                    Search Hotspot / Container / Organizer
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] uppercase tracking-widest text-brand-text-muted font-bold">
+                    Select One or Multiple Hotspots / Containers to Lend
                   </label>
-                  <div className="relative w-full mb-2">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-brand-text-muted" />
-                    <input 
-                      autoFocus
-                      type="text" 
-                      placeholder="Search container, toolbox, drawer, room..." 
-                      value={hotspotSearch}
-                      onChange={(e) => setHotspotSearch(e.target.value)}
-                      className="w-full bg-[#191715] border border-[#332f2a] pl-10 pr-4 py-2.5 text-sm text-white focus:border-brand-accent focus:outline-none transition-colors rounded"
-                    />
-                  </div>
+                  {selectedHotspotIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedHotspotIds([])}
+                      className="text-[10px] uppercase tracking-wider text-brand-accent hover:text-white transition-colors"
+                    >
+                      Clear All ({selectedHotspotIds.length})
+                    </button>
+                  )}
+                </div>
 
-                  {(() => {
-                    const q = hotspotSearch.toLowerCase().trim();
-                    const filtered = allHotspots.filter(h => {
-                      if (!q) return true;
+                {/* Selected Hotspot Chips */}
+                {selectedHotspotIds.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 p-2 bg-[#141210] border border-[#2d2924] rounded-lg mb-2.5">
+                    <span className="text-[10px] uppercase tracking-wider font-bold text-amber-400 flex items-center gap-1 mr-1">
+                      <Layers className="h-3 w-3" />
+                      <span>Selected ({selectedHotspotIds.length}):</span>
+                    </span>
+                    {selectedHotspotIds.map(hid => {
+                      const hsObj = allHotspots.find(h => h.id === hid);
                       return (
-                        h.label.toLowerCase().includes(q) ||
-                        h.fullLabel.toLowerCase().includes(q) ||
-                        (h.roomName && h.roomName.toLowerCase().includes(q))
-                      );
-                    });
-
-                    if (filtered.length === 0) {
-                      return (
-                        <div className="text-center text-xs text-brand-text-muted py-6 border border-dashed border-[#332f2a] rounded">
-                          No storage locations match &quot;{hotspotSearch}&quot;.
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div className="space-y-1.5 max-h-60 overflow-y-auto themed-scrollbar border border-[#2a2622] p-1.5 rounded">
-                        {filtered.map(hs => (
+                        <span 
+                          key={hid}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#221f1c] border border-amber-600/50 text-amber-300 rounded text-xs font-semibold"
+                        >
+                          <span className="truncate max-w-[150px]">{hsObj?.label || "Hotspot"}</span>
                           <button
-                            key={hs.id}
                             type="button"
-                            onClick={() => handleSelectHotspot(hs)}
-                            className="w-full flex items-center justify-between p-2.5 bg-[#191715] hover:bg-[#221f1c] border border-[#332f2a] hover:border-brand-accent rounded text-left transition-all group"
+                            onClick={() => setSelectedHotspotIds(prev => prev.filter(id => id !== hid))}
+                            className="text-zinc-400 hover:text-white p-0.5 hover:bg-black/30 rounded"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Hotspot Search Input */}
+                <div className="relative w-full mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-brand-text-muted" />
+                  <input 
+                    type="text" 
+                    placeholder="Search containers, toolboxes, drawers, rooms..." 
+                    value={hotspotSearch}
+                    onChange={(e) => setHotspotSearch(e.target.value)}
+                    className="w-full bg-[#191715] border border-[#332f2a] pl-10 pr-4 py-2.5 text-sm text-white focus:border-brand-accent focus:outline-none transition-colors rounded"
+                  />
+                </div>
+
+                {/* Hotspots Checkbox List */}
+                {(() => {
+                  const q = hotspotSearch.toLowerCase().trim();
+                  const filtered = allHotspots.filter(h => {
+                    if (!q) return true;
+                    return (
+                      h.label.toLowerCase().includes(q) ||
+                      h.fullLabel.toLowerCase().includes(q) ||
+                      (h.roomName && h.roomName.toLowerCase().includes(q))
+                    );
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="text-center text-xs text-brand-text-muted py-6 border border-dashed border-[#332f2a] rounded">
+                        No storage locations match &quot;{hotspotSearch}&quot;.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-1.5 max-h-52 overflow-y-auto themed-scrollbar border border-[#2a2622] p-1.5 rounded bg-[#131110]">
+                      {filtered.map(hs => {
+                        const isChecked = selectedHotspotIds.includes(hs.id);
+                        return (
+                          <div
+                            key={hs.id}
+                            onClick={() => {
+                              setSelectedHotspotIds(prev => 
+                                prev.includes(hs.id) ? prev.filter(id => id !== hs.id) : [...prev, hs.id]
+                              );
+                            }}
+                            className={`w-full flex items-center justify-between p-2.5 rounded cursor-pointer text-left transition-all ${
+                              isChecked 
+                                ? 'bg-amber-950/30 border border-amber-500/60 text-white' 
+                                : 'bg-[#181614] hover:bg-[#201d1a] border border-[#2a2622] text-zinc-300'
+                            }`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                              {/* Checkbox */}
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                                isChecked 
+                                  ? 'bg-amber-500 border-amber-400 text-black' 
+                                  : 'border-[#4a443c] bg-[#1d1b18]'
+                              }`}>
+                                {isChecked && <Check className="h-3 w-3 stroke-[3]" />}
+                              </div>
+
                               <div className={`p-1.5 rounded shrink-0 ${hs.is_leaf ? 'bg-[#25221d] text-brand-accent' : 'bg-amber-500/10 text-amber-400'}`}>
                                 {hs.is_leaf ? <Package className="h-4 w-4" /> : <Layers className="h-4 w-4" />}
                               </div>
                               <div className="min-w-0">
-                                <div className="text-xs font-bold text-white group-hover:text-brand-accent transition-colors truncate">
-                                  {hs.label}
+                                <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                                  <span>{hs.label}</span>
                                 </div>
                                 <div className="text-[10px] text-brand-text-muted truncate">
                                   {hs.fullLabel}
@@ -793,83 +867,45 @@ export function LendModal({
                               }`}>
                                 {hs.is_leaf ? 'Compartment' : 'Container'}
                               </span>
-                              <ChevronRight className="h-3.5 w-3.5 text-brand-text-muted group-hover:text-white transition-colors" />
                             </div>
-                          </button>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {/* Selected Hotspot Header Card */}
-                  <div className="p-3.5 bg-[#141211] border border-brand-accent/50 rounded-lg flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`p-2 rounded-lg shrink-0 ${hotspotSummary?.isLeaf ? 'bg-[#25221d] text-brand-accent' : 'bg-amber-500/15 text-amber-400'}`}>
-                        {hotspotSummary?.isLeaf ? <Package className="h-5 w-5" /> : <Layers className="h-5 w-5" />}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-white truncate">
-                            {hotspotSummary?.rootLabel || "Selected Hotspot"}
-                          </h4>
-                          <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold uppercase tracking-wider ${
-                            hotspotSummary?.isLeaf 
-                              ? 'bg-brand-accent/20 text-brand-accent border border-brand-accent/30' 
-                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                          }`}>
-                            {hotspotSummary?.isLeaf ? 'Leaf Compartment' : `Container (${hotspotSummary?.descendantCount || 0} sub-hotspots)`}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-brand-text-muted truncate mt-0.5">
-                          {hotspotSummary?.fullPath}
-                        </p>
-                      </div>
+                          </div>
+                        );
+                      })}
                     </div>
+                  );
+                })()}
+              </div>
 
-                    {!initialHotspotId && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedHotspotId("");
-                          setHotspotSummary(null);
-                        }}
-                        className="px-2.5 py-1 text-xs text-brand-text-muted hover:text-white bg-[#22201d] hover:bg-[#2e2a26] border border-[#38332c] rounded transition-colors shrink-0"
-                      >
-                        Change
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Loading summary state */}
+              {/* Combined Contents Preview */}
+              {selectedHotspotIds.length > 0 && (
+                <div className="space-y-3 pt-1">
                   {loadingHotspotSummary ? (
                     <div className="p-8 text-center text-xs text-brand-text-muted flex flex-col items-center justify-center gap-2 bg-[#191715] border border-[#2a2622] rounded">
-                      <div className="w-5 h-5 border-2 border-brand-accent/30 border-t-brand-accent rounded-full animate-spin" />
-                      <span>Scanning hotspot hierarchy and collecting all stored components...</span>
+                      <div className="w-5 h-5 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
+                      <span>Scanning {selectedHotspotIds.length} hotspot(s) and collecting all stored components...</span>
                     </div>
-                  ) : hotspotSummary ? (
+                  ) : multiHotspotSummary ? (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-brand-text-muted">
                         <span className="font-bold text-white flex items-center gap-1.5">
                           <span>Contents to be lent</span>
                           <span className="text-brand-gold font-mono">
-                            ({hotspotSummary.components.length} components, {hotspotSummary.totalUnits} units)
+                            ({multiHotspotSummary.components.length} components, {multiHotspotSummary.totalUnits} units total across {selectedHotspotIds.length} hotspots)
                           </span>
                         </span>
                         <span className="text-[10px] text-brand-gold">
-                          Returns automatically to exact original compartments
+                          Returns automatically to exact origin compartments
                         </span>
                       </div>
 
-                      {hotspotSummary.components.length === 0 ? (
+                      {multiHotspotSummary.components.length === 0 ? (
                         <div className="p-4 bg-amber-950/20 border border-amber-600/30 rounded text-xs text-amber-300 flex items-center gap-2">
                           <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
-                          <span>This hotspot currently has no components assigned to it or its sub-compartments.</span>
+                          <span>None of the selected hotspots currently have components stored in physical storage.</span>
                         </div>
                       ) : (
                         <div className="max-h-56 overflow-y-auto themed-scrollbar border border-[#2e2924] rounded divide-y divide-[#26231f] bg-[#121110]">
-                          {hotspotSummary.components.map((comp, idx) => (
+                          {multiHotspotSummary.components.map((comp, idx) => (
                             <div key={`${comp.locationId}-${idx}`} className="p-2.5 flex items-center justify-between hover:bg-[#191715] transition-colors">
                               <div className="flex items-center gap-2.5 min-w-0 pr-2">
                                 {comp.componentPhotoUrl ? (
@@ -885,14 +921,14 @@ export function LendModal({
                                     {comp.componentName}
                                   </div>
                                   <div className="text-[10px] text-brand-text-muted truncate flex items-center gap-1">
-                                    <MapPin className="h-2.5 w-2.5 shrink-0 text-brand-accent" />
-                                    <span>{comp.hotspotFullPath}</span>
+                                    <MapPin className="h-2.5 w-2.5 text-amber-400 shrink-0" />
+                                    <span>{comp.hotspotFullPath || comp.hotspotLabel}</span>
                                   </div>
                                 </div>
                               </div>
 
                               <div className="text-right shrink-0">
-                                <span className="px-2 py-0.5 bg-[#201d1a] text-brand-gold border border-[#38332c] rounded font-mono font-bold text-xs">
+                                <span className="font-mono text-xs font-bold text-brand-gold bg-[#201d1a] px-2 py-0.5 rounded border border-[#332f2a]">
                                   {comp.quantity}x
                                 </span>
                               </div>
@@ -1140,14 +1176,14 @@ export function LendModal({
                 loading || 
                 (loanType === 'component' && (!selectedComponent || !selectedLocationId)) || 
                 (loanType === 'project' && !selectedProjectId) ||
-                (loanType === 'hotspot' && (!selectedHotspotId || !hotspotSummary || hotspotSummary.components.length === 0))
+                (loanType === 'hotspot' && (selectedHotspotIds.length === 0 || !multiHotspotSummary || multiHotspotSummary.components.length === 0))
               }
               className="px-6 py-2 bg-brand-accent hover:bg-brand-accent-hover text-white text-xs font-bold uppercase tracking-widest rounded-sm transition-colors disabled:opacity-50 shadow-sm"
             >
               {loading 
                 ? "RECORDING LOAN..." 
-                : loanType === 'hotspot' && hotspotSummary
-                ? `LEND ENTIRE HOTSPOT (${hotspotSummary.totalUnits} UNITS)`
+                : loanType === 'hotspot' && multiHotspotSummary
+                ? `LEND ${selectedHotspotIds.length === 1 ? 'HOTSPOT' : `${selectedHotspotIds.length} HOTSPOTS`} (${multiHotspotSummary.totalUnits} UNITS)`
                 : "CONFIRM & LEND"}
             </button>
           </div>

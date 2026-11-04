@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { getLoans, Loan, calculateLoanDaysRemaining, parseHotspotLoanMeta, returnHotspotLoan, GroupedHotspotLoan } from "@/lib/api";
+import { getLoans, Loan, calculateLoanDaysRemaining, parseHotspotLoanMeta, returnHotspotLoan, GroupedHotspotLoan, returnLentComponent } from "@/lib/api";
 import { LendModal } from "@/components/loans/LendModal";
 import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
 import { EditLoanModal } from "@/components/loans/EditLoanModal";
@@ -22,7 +22,8 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
-  Pencil
+  Pencil,
+  Users
 } from "lucide-react";
 import Link from "next/link";
 import { useNetworkState } from "@/hooks/useNetworkState";
@@ -31,12 +32,28 @@ type LoanDisplayItem =
   | { type: 'single'; loan: Loan }
   | { type: 'hotspot_group'; group: GroupedHotspotLoan };
 
+interface BorrowerGroup {
+  key: string;
+  name: string;
+  contact?: string;
+  items: LoanDisplayItem[];
+  totalItems: number;
+  totalUnits: number;
+  earliestDueDate: string;
+  daysRemaining: number;
+  isOverdue: boolean;
+  isToday: boolean;
+  isTomorrow: boolean;
+  isReturned: boolean;
+}
+
 export default function LoansPage() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
   const [filterType, setFilterType] = useState<'all' | 'components' | 'projects' | 'hotspots' | 'urgent'>('all');
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<'grouped' | 'individual'>('grouped');
 
   const [showLendModal, setShowLendModal] = useState(false);
   const [lendType, setLendType] = useState<'component' | 'project' | 'hotspot'>('component');
@@ -83,6 +100,35 @@ export default function LoansPage() {
       alert(err.message || "Failed to return hotspot loan.");
     } finally {
       setReturningGroupId(null);
+    }
+  };
+
+  const handleReturnAllForBorrower = async (bGroup: BorrowerGroup) => {
+    const unreturnedItems = bGroup.items.filter(item => 
+      item.type === 'hotspot_group' ? !item.group.returned_at : !item.loan.returned_at
+    );
+    if (unreturnedItems.length === 0) return;
+
+    if (!confirm(`Return all ${unreturnedItems.length} active item(s) (${bGroup.totalUnits} total units) lent to "${bGroup.name}" back to their original storage locations?`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      for (const item of unreturnedItems) {
+        if (item.type === 'hotspot_group') {
+          await returnHotspotLoan(item.group.groupId);
+        } else if (item.loan.source_location_id) {
+          await returnLentComponent(item.loan.id, item.loan.source_location_id);
+        }
+      }
+      await load();
+    } catch (err: any) {
+      console.error("Failed to return all borrower items:", err);
+      alert(err.message || "Failed to return some items.");
+      await load();
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -211,6 +257,69 @@ export default function LoansPage() {
     });
   }, [displayItems, filterType, searchQuery]);
 
+  // Group filteredDisplayItems by Borrower
+  const borrowerGroups = useMemo<BorrowerGroup[]>(() => {
+    const map = new Map<string, BorrowerGroup>();
+
+    filteredDisplayItems.forEach((item) => {
+      const name = (item.type === 'single' ? item.loan.borrower_name : item.group.borrower_name) || "Unknown Borrower";
+      const contact = item.type === 'single' ? item.loan.borrower_contact : item.group.borrower_contact;
+      const dueDate = item.type === 'single' ? item.loan.due_date : item.group.due_date;
+      const isRet = item.type === 'single' ? !!item.loan.returned_at : !!item.group.returned_at;
+      const units = item.type === 'single' ? item.loan.quantity : item.group.totalUnits;
+
+      const key = name.trim().toLowerCase();
+      const existing = map.get(key);
+
+      if (existing) {
+        existing.items.push(item);
+        existing.totalItems += 1;
+        existing.totalUnits += units;
+        if (!existing.contact && contact) existing.contact = contact;
+        if (!isRet && (!existing.earliestDueDate || dueDate < existing.earliestDueDate)) {
+          existing.earliestDueDate = dueDate;
+        }
+        if (!isRet) existing.isReturned = false;
+      } else {
+        map.set(key, {
+          key,
+          name,
+          contact: contact || undefined,
+          items: [item],
+          totalItems: 1,
+          totalUnits: units,
+          earliestDueDate: dueDate,
+          daysRemaining: calculateLoanDaysRemaining(dueDate),
+          isOverdue: false,
+          isToday: false,
+          isTomorrow: false,
+          isReturned: isRet,
+        });
+      }
+    });
+
+    const groups = Array.from(map.values()).map((g) => {
+      const days = calculateLoanDaysRemaining(g.earliestDueDate);
+      return {
+        ...g,
+        daysRemaining: days,
+        isOverdue: !g.isReturned && days < 0,
+        isToday: !g.isReturned && days === 0,
+        isTomorrow: !g.isReturned && days === 1,
+      };
+    });
+
+    groups.sort((a, b) => {
+      if (activeTab === 'active') {
+        return a.earliestDueDate.localeCompare(b.earliestDueDate);
+      } else {
+        return b.earliestDueDate.localeCompare(a.earliestDueDate);
+      }
+    });
+
+    return groups;
+  }, [filteredDisplayItems, activeTab]);
+
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 pb-12">
       
@@ -320,78 +429,110 @@ export default function LoansPage() {
         </div>
       </div>
 
-      {/* Filter Pills */}
-      <div className="flex flex-wrap items-center gap-2 py-1 shrink-0">
-        <button
-          type="button"
-          onClick={() => setFilterType('all')}
-          className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
-            filterType === 'all'
-              ? 'bg-brand-accent text-white shadow-sm'
-              : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white hover:border-[#4a443c]'
-          }`}
-        >
-          <span>All Items</span>
-          <span className="text-[10px] opacity-75 font-mono">({filterCounts.total})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setFilterType('hotspots')}
-          className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
-            filterType === 'hotspots'
-              ? 'bg-amber-600 text-white shadow-sm'
-              : 'bg-[#191715] border border-[#332f2a] text-amber-400 hover:text-white hover:border-amber-600/50'
-          }`}
-        >
-          <Layers className="h-3.5 w-3.5" />
-          <span>Hotspots / Containers</span>
-          <span className="text-[10px] opacity-75 font-mono">({filterCounts.hotspots})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setFilterType('components')}
-          className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
-            filterType === 'components'
-              ? 'bg-brand-accent text-white shadow-sm'
-              : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white hover:border-[#4a443c]'
-          }`}
-        >
-          <Package className="h-3.5 w-3.5" />
-          <span>Components</span>
-          <span className="text-[10px] opacity-75 font-mono">({filterCounts.components})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setFilterType('projects')}
-          className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
-            filterType === 'projects'
-              ? 'bg-brand-accent text-white shadow-sm'
-              : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white hover:border-[#4a443c]'
-          }`}
-        >
-          <Compass className="h-3.5 w-3.5" />
-          <span>Projects</span>
-          <span className="text-[10px] opacity-75 font-mono">({filterCounts.projects})</span>
-        </button>
-
-        {activeTab === 'active' && filterCounts.urgent > 0 && (
+      {/* Filter Pills and View Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-1">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => setFilterType('urgent')}
+            onClick={() => setFilterType('all')}
             className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
-              filterType === 'urgent'
-                ? 'bg-red-600 text-white shadow-sm'
-                : 'bg-[#191715] border border-red-900/40 text-red-400 hover:text-white hover:border-red-600/50'
+              filterType === 'all'
+                ? 'bg-brand-accent text-white shadow-sm'
+                : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white hover:border-[#4a443c]'
             }`}
           >
-            <Clock className="h-3.5 w-3.5" />
-            <span>Due Soon / Overdue</span>
-            <span className="text-[10px] opacity-75 font-mono">({filterCounts.urgent})</span>
+            <span>All Items</span>
+            <span className="text-[10px] opacity-75 font-mono">({filterCounts.total})</span>
           </button>
-        )}
+
+          <button
+            type="button"
+            onClick={() => setFilterType('hotspots')}
+            className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
+              filterType === 'hotspots'
+                ? 'bg-amber-600 text-white shadow-sm'
+                : 'bg-[#191715] border border-[#332f2a] text-amber-400 hover:text-white hover:border-amber-600/50'
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span>Hotspots / Containers</span>
+            <span className="text-[10px] opacity-75 font-mono">({filterCounts.hotspots})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFilterType('components')}
+            className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
+              filterType === 'components'
+                ? 'bg-brand-accent text-white shadow-sm'
+                : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white hover:border-[#4a443c]'
+            }`}
+          >
+            <Package className="h-3.5 w-3.5" />
+            <span>Components</span>
+            <span className="text-[10px] opacity-75 font-mono">({filterCounts.components})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFilterType('projects')}
+            className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
+              filterType === 'projects'
+                ? 'bg-brand-accent text-white shadow-sm'
+                : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white hover:border-[#4a443c]'
+            }`}
+          >
+            <Compass className="h-3.5 w-3.5" />
+            <span>Projects</span>
+            <span className="text-[10px] opacity-75 font-mono">({filterCounts.projects})</span>
+          </button>
+
+          {activeTab === 'active' && filterCounts.urgent > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterType('urgent')}
+              className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
+                filterType === 'urgent'
+                  ? 'bg-red-600 text-white shadow-sm'
+                  : 'bg-[#191715] border border-red-900/40 text-red-400 hover:text-white hover:border-red-600/50'
+              }`}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              <span>Due Soon / Overdue</span>
+              <span className="text-[10px] opacity-75 font-mono">({filterCounts.urgent})</span>
+            </button>
+          )}
+        </div>
+
+        {/* View Switcher: Group by Person vs Individual Items */}
+        <div className="flex items-center bg-[#141210] border border-[#332f2a] rounded p-0.5 shrink-0 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setViewMode('grouped')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded transition-all ${
+              viewMode === 'grouped'
+                ? 'bg-brand-accent text-white shadow-sm'
+                : 'text-brand-text-muted hover:text-white'
+            }`}
+            title="Group all lends of a person together"
+          >
+            <Users className="h-3.5 w-3.5" />
+            <span>By Person ({borrowerGroups.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('individual')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded transition-all ${
+              viewMode === 'individual'
+                ? 'bg-brand-accent text-white shadow-sm'
+                : 'text-brand-text-muted hover:text-white'
+            }`}
+            title="Show individual item cards"
+          >
+            <Package className="h-3.5 w-3.5" />
+            <span>Individual ({filteredDisplayItems.length})</span>
+          </button>
+        </div>
       </div>
 
       {/* Content List */}
@@ -406,6 +547,345 @@ export default function LoansPage() {
               ? "All workshop components, containers, and projects are currently accounted for in storage." 
               : "No historical loan records found."}
           </p>
+        </div>
+      ) : viewMode === 'grouped' ? (
+        /* Grouped by Borrower View */
+        <div className="space-y-4">
+          {borrowerGroups.map((bGroup) => (
+            <div
+              key={`borrower-${bGroup.key}`}
+              className={`bg-[#1a1816] border rounded-xl p-5 flex flex-col justify-between transition-all duration-200 relative overflow-hidden shadow-md ${
+                bGroup.isOverdue
+                  ? 'border-red-900/60 shadow-red-950/20'
+                  : bGroup.isToday
+                  ? 'border-orange-900/60 shadow-orange-950/20'
+                  : bGroup.isTomorrow
+                  ? 'border-amber-900/60 shadow-amber-950/20'
+                  : 'border-[#332f2a] hover:border-[#4a443c]'
+              }`}
+            >
+              {/* Status Indicator Stripe */}
+              {!bGroup.isReturned && (
+                <div className={`absolute top-0 left-0 w-1.5 h-full ${
+                  bGroup.isOverdue ? 'bg-red-500' : bGroup.isToday ? 'bg-orange-500' : bGroup.isTomorrow ? 'bg-amber-400' : 'bg-brand-accent'
+                }`} />
+              )}
+
+              <div>
+                {/* Borrower Header */}
+                <div className="pl-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-[#2d2924]">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${
+                      bGroup.isOverdue
+                        ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                        : 'bg-brand-accent/15 border-brand-accent/30 text-brand-accent'
+                    }`}>
+                      <User className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="text-base font-bold text-white tracking-wide truncate">
+                          {bGroup.name}
+                        </h2>
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#141210] text-brand-gold border border-[#2d2924]">
+                          {bGroup.totalItems} {bGroup.totalItems === 1 ? 'item' : 'items'} ({bGroup.totalUnits} {bGroup.totalUnits === 1 ? 'unit' : 'units'})
+                        </span>
+                      </div>
+                      {bGroup.contact && (
+                        <p className="text-xs text-brand-text-muted flex items-center gap-1.5 mt-0.5 truncate">
+                          <Phone className="h-3 w-3 text-brand-gold shrink-0" />
+                          <span className="truncate">{bGroup.contact}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Due Status & Return All */}
+                  <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                    {bGroup.isReturned ? (
+                      <span className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                        All Returned
+                      </span>
+                    ) : (
+                      <span className={`px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold rounded flex items-center gap-1.5 ${
+                        bGroup.isOverdue
+                          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                          : bGroup.isToday
+                          ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                          : bGroup.isTomorrow
+                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
+                      }`}>
+                        {bGroup.isOverdue && <AlertTriangle className="h-3 w-3" />}
+                        {bGroup.isOverdue
+                          ? `Overdue by ${Math.abs(bGroup.daysRemaining)}d`
+                          : bGroup.isToday
+                          ? 'Due Today'
+                          : bGroup.isTomorrow
+                          ? 'Due Tomorrow'
+                          : `Due in ${bGroup.daysRemaining}d`}
+                      </span>
+                    )}
+
+                    {!bGroup.isReturned && isOnline && (
+                      <button
+                        type="button"
+                        onClick={() => handleReturnAllForBorrower(bGroup)}
+                        className="px-3.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors shadow-sm"
+                        title={`Return all ${bGroup.totalItems} item(s) lent to ${bGroup.name}`}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>Return All ({bGroup.totalItems})</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* List of items borrowed by this person */}
+                <div className="pl-2 pt-3.5 space-y-2.5">
+                  {bGroup.items.map((item) => {
+                    if (item.type === 'hotspot_group') {
+                      const group = item.group;
+                      const groupDays = calculateLoanDaysRemaining(group.due_date);
+                      const isRet = !!group.returned_at;
+                      const groupOverdue = !isRet && groupDays < 0;
+                      const groupToday = !isRet && groupDays === 0;
+                      const groupTomorrow = !isRet && groupDays === 1;
+                      const isExp = expandedGroupIds.has(group.groupId);
+
+                      return (
+                        <div
+                          key={`b-item-hs-${group.groupId}`}
+                          className="p-3.5 bg-[#141210] border border-amber-600/30 hover:border-amber-500/60 rounded-lg transition-colors space-y-2.5"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="p-1.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                                <Layers className="h-4 w-4" />
+                              </span>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-bold text-white text-sm truncate">
+                                    {group.rootHotspotLabel}
+                                  </span>
+                                  <span className="px-1.5 py-0.2 text-[9px] uppercase tracking-wider font-bold rounded bg-amber-500/15 text-amber-300 border border-amber-500/25">
+                                    Hotspot Container
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-brand-gold font-mono mt-0.5">
+                                  {group.loans.length} components • {group.totalUnits} units total
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                              {isRet ? (
+                                <span className="px-2 py-0.5 text-[9px] uppercase tracking-wider font-bold rounded bg-zinc-800 text-zinc-400">
+                                  Returned
+                                </span>
+                              ) : (
+                                <span className={`px-2 py-0.5 text-[9px] uppercase tracking-wider font-bold rounded ${
+                                  groupOverdue ? 'bg-red-500/20 text-red-400' : groupToday ? 'bg-orange-500/20 text-orange-400' : groupTomorrow ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-800 text-zinc-300'
+                                }`}>
+                                  Due {new Date(group.due_date).toLocaleDateString()}
+                                </span>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => toggleGroupExpanded(group.groupId)}
+                                className="px-2 py-1 bg-[#1e1c19] hover:bg-[#282521] text-zinc-300 hover:text-white border border-[#38332c] rounded text-[11px] font-medium flex items-center gap-1 transition-colors"
+                              >
+                                <span>{isExp ? "Hide" : "View"} {group.loans.length} items</span>
+                                {isExp ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setEditingTarget({ type: 'hotspot_group', group })}
+                                className="p-1.5 bg-[#1e1c19] hover:bg-[#282521] text-zinc-300 hover:text-white border border-[#38332c] hover:border-brand-gold/60 rounded transition-colors"
+                                title="Edit loan details"
+                              >
+                                <Pencil className="h-3 w-3 text-amber-400" />
+                              </button>
+
+                              {!isRet && isOnline && (
+                                <button
+                                  type="button"
+                                  disabled={returningGroupId === group.groupId}
+                                  onClick={() => handleReturnHotspotGroup(group)}
+                                  className="px-2.5 py-1 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1 transition-colors disabled:opacity-50"
+                                  title="Return this entire container"
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                  <span>{returningGroupId === group.groupId ? "Returning..." : "Return"}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Expanded Hotspot Components List */}
+                          {isExp && (
+                            <div className="pt-2 border-t border-[#2d2924] space-y-1.5 pl-2">
+                              {group.loans.map((subLoan) => (
+                                <div
+                                  key={subLoan.id}
+                                  className="flex items-center justify-between text-xs py-1 border-b border-[#22201d] last:border-b-0"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0 pr-2">
+                                    <span className="font-mono text-brand-gold font-bold shrink-0">{subLoan.quantity}x</span>
+                                    {subLoan.component_id ? (
+                                      <Link
+                                        href={`/inventory/${subLoan.component_id}`}
+                                        className="font-medium text-white hover:text-brand-accent transition-colors truncate"
+                                      >
+                                        {subLoan.component_name || subLoan.component?.name || "Component"}
+                                      </Link>
+                                    ) : (
+                                      <span className="font-medium text-white truncate">
+                                        {subLoan.component_name || subLoan.component?.name || "Component"}
+                                      </span>
+                                    )}
+                                    {subLoan.source_location_label && (
+                                      <span className="text-[10px] text-brand-text-muted truncate hidden md:inline">
+                                        ({subLoan.source_location_label})
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {!subLoan.returned_at && isOnline && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setReturnLoanItem(subLoan)}
+                                      className="p-1 text-emerald-400 hover:text-white hover:bg-emerald-600/30 rounded border border-emerald-500/30 transition-colors shrink-0"
+                                      title="Return this item individually"
+                                    >
+                                      <RotateCcw className="h-3 w-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // Single Loan (Component or Project)
+                    const loan = item.loan;
+                    const isComp = loan.loan_type === 'component';
+                    const itmName = isComp
+                      ? (loan.component_name || loan.component?.name || "Component")
+                      : (loan.project_name || loan.project?.name || "Project");
+                    const loanDays = calculateLoanDaysRemaining(loan.due_date);
+                    const isRet = !!loan.returned_at;
+                    const loanOverdue = !isRet && loanDays < 0;
+                    const loanToday = !isRet && loanDays === 0;
+                    const loanTomorrow = !isRet && loanDays === 1;
+
+                    return (
+                      <div
+                        key={`b-item-single-${loan.id}`}
+                        className="p-3.5 bg-[#141210] border border-[#2e2a25] hover:border-[#423d34] rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className={`p-1.5 rounded shrink-0 ${
+                            isComp ? 'bg-brand-accent/20 text-brand-accent' : 'bg-emerald-500/20 text-emerald-400'
+                          }`}>
+                            {isComp ? <Package className="h-4 w-4" /> : <Compass className="h-4 w-4" />}
+                          </span>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {isComp && loan.component_id ? (
+                                <Link
+                                  href={`/inventory/${loan.component_id}`}
+                                  className="font-bold text-white text-sm hover:text-brand-accent transition-colors truncate"
+                                >
+                                  {itmName}
+                                </Link>
+                              ) : !isComp && loan.project_id ? (
+                                <Link
+                                  href={`/projects/${loan.project_id}`}
+                                  className="font-bold text-white text-sm hover:text-brand-accent transition-colors truncate"
+                                >
+                                  {itmName}
+                                </Link>
+                              ) : (
+                                <span className="font-bold text-white text-sm truncate">{itmName}</span>
+                              )}
+
+                              {loan.quantity > 1 && (
+                                <span className="text-xs font-mono font-bold text-brand-gold">
+                                  {loan.quantity}x
+                                </span>
+                              )}
+
+                              <span className={`px-1.5 py-0.2 text-[9px] uppercase tracking-wider font-bold rounded ${
+                                isComp ? 'bg-brand-accent/15 text-brand-accent' : 'bg-emerald-500/15 text-emerald-400'
+                              }`}>
+                                {loan.loan_type}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-3 text-[11px] text-brand-text-muted mt-0.5 flex-wrap">
+                              {loan.source_location_label && (
+                                <span className="flex items-center gap-1 text-zinc-400 truncate">
+                                  <MapPin className="h-3 w-3 text-amber-400 shrink-0" />
+                                  <span className="truncate">{loan.source_location_label}</span>
+                                </span>
+                              )}
+                              {loan.notes && (
+                                <span className="flex items-center gap-1 italic text-zinc-400 truncate max-w-[200px]">
+                                  <FileText className="h-2.5 w-2.5 text-brand-gold shrink-0" />
+                                  <span className="truncate">{loan.notes}</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                          {isRet ? (
+                            <span className="px-2 py-0.5 text-[9px] uppercase tracking-wider font-bold rounded bg-zinc-800 text-zinc-400">
+                              Returned
+                            </span>
+                          ) : (
+                            <span className={`px-2 py-0.5 text-[9px] uppercase tracking-wider font-bold rounded ${
+                              loanOverdue ? 'bg-red-500/20 text-red-400' : loanToday ? 'bg-orange-500/20 text-orange-400' : loanTomorrow ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-800 text-zinc-300'
+                            }`}>
+                              Due {new Date(loan.due_date).toLocaleDateString()}
+                            </span>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setEditingTarget({ type: 'single', loan })}
+                            className="p-1.5 bg-[#1e1c19] hover:bg-[#282521] text-zinc-300 hover:text-white border border-[#38332c] hover:border-brand-gold/60 rounded transition-colors"
+                            title="Edit loan details"
+                          >
+                            <Pencil className="h-3 w-3 text-brand-gold" />
+                          </button>
+
+                          {!isRet && isOnline && (
+                            <button
+                              type="button"
+                              onClick={() => setReturnLoanItem(loan)}
+                              className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1 transition-colors"
+                              title="Return this item"
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              <span>Return</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">

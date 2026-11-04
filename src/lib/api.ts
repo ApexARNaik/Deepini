@@ -3013,6 +3013,92 @@ export async function lendHotspotTree(params: {
   };
 }
 
+export async function getMultipleHotspotsSummary(hotspotIds: string[]): Promise<{
+  hotspots: { id: string; label: string }[];
+  components: HotspotTreeComponentItem[];
+  totalUnits: number;
+}> {
+  if (!hotspotIds || hotspotIds.length === 0) {
+    return { hotspots: [], components: [], totalUnits: 0 };
+  }
+  const summaries = await Promise.all(hotspotIds.map(hid => getHotspotTreeSummary(hid)));
+  const allComponents = summaries.flatMap(s => s.components);
+  return {
+    hotspots: summaries.map(s => ({ id: s.rootHotspot.id, label: s.rootLabel })),
+    components: allComponents,
+    totalUnits: summaries.reduce((sum, s) => sum + s.totalUnits, 0)
+  };
+}
+
+export async function lendMultipleHotspots(params: {
+  hotspotIds: string[];
+  borrowerName: string;
+  borrowerContact?: string;
+  dueDate: string;
+  notes?: string;
+}): Promise<{ groupId: string; groupLabel: string; count: number; totalUnits: number; loans: Loan[] }> {
+  const { hotspotIds, borrowerName, borrowerContact, dueDate, notes } = params;
+  if (!borrowerName.trim()) throw new Error("Borrower name is required.");
+  if (!dueDate) throw new Error("Return due date is required.");
+  if (!hotspotIds || hotspotIds.length === 0) throw new Error("At least one hotspot must be selected.");
+
+  if (hotspotIds.length === 1) {
+    const res = await lendHotspotTree({
+      hotspotId: hotspotIds[0],
+      borrowerName,
+      borrowerContact,
+      dueDate,
+      notes
+    });
+    return {
+      groupId: res.groupId,
+      groupLabel: res.rootHotspotLabel,
+      count: res.count,
+      totalUnits: res.totalUnits,
+      loans: res.loans
+    };
+  }
+
+  const summaries = await Promise.all(hotspotIds.map(hid => getHotspotTreeSummary(hid)));
+  const allComponents = summaries.flatMap(s => s.components);
+  if (allComponents.length === 0) {
+    throw new Error("None of the selected hotspots contain any stored components to lend.");
+  }
+
+  const groupId = typeof crypto !== 'undefined' && crypto.randomUUID 
+    ? crypto.randomUUID() 
+    : `hloan-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  
+  const labels = summaries.map(s => s.rootLabel).join(', ');
+  const compositeLabel = labels.length > 60 
+    ? `${summaries.length} Hotspots (${summaries.slice(0, 2).map(s => s.rootLabel).join(', ')}...)` 
+    : labels;
+  const userNotes = notes?.trim() || "";
+  const encodedNotes = `[Hotspot Loan: multi|${compositeLabel}|${groupId}] ${userNotes}`.trim();
+
+  const createdLoans: Loan[] = [];
+  for (const item of allComponents) {
+    const loan = await lendComponent({
+      componentId: item.componentId,
+      sourceLocationId: item.hotspotId,
+      quantity: item.quantity,
+      borrowerName: borrowerName.trim(),
+      borrowerContact: borrowerContact?.trim() || undefined,
+      dueDate,
+      notes: encodedNotes
+    });
+    createdLoans.push(loan);
+  }
+
+  return {
+    groupId,
+    groupLabel: compositeLabel,
+    count: allComponents.length,
+    totalUnits: summaries.reduce((sum, s) => sum + s.totalUnits, 0),
+    loans: createdLoans
+  };
+}
+
 export async function returnHotspotLoan(groupId: string): Promise<Loan[]> {
   const allLoans = await getLoans();
   const activeMatchingLoans = allLoans.filter(l => {
