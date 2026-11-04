@@ -125,6 +125,79 @@ export function GlobalTooltip() {
       attributeFilter: ["title"],
     });
 
+    // Helper to check if an element or its truncated text child overflows its container
+    const isElementOverflowing = (el: HTMLElement): boolean => {
+      if (!el) return false;
+
+      // 1. Direct horizontal overflow comparison:
+      // For elements with overflow:hidden / text-overflow:ellipsis / white-space:nowrap
+      if (el.clientWidth > 0 && el.scrollWidth > Math.ceil(el.clientWidth) + 1) {
+        return true;
+      }
+
+      // 2. Direct vertical overflow comparison (e.g. multiline clamp)
+      if (el.clientHeight > 0 && el.scrollHeight > Math.ceil(el.clientHeight) + 1) {
+        return true;
+      }
+
+      // 3. Fallback: Range measurement of text content vs bounding client rect
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const contentRect = range.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        if (elRect.width > 0 && contentRect.width > elRect.width + 1) {
+          return true;
+        }
+      } catch {
+        // Ignore Range errors
+      }
+
+      // 4. If this element wraps a child with .truncate or line-clamp, test child elements
+      const candidates = el.querySelectorAll<HTMLElement>(
+        ".truncate, [class*='line-clamp'], [style*='ellipsis']"
+      );
+      for (let i = 0; i < candidates.length; i++) {
+        const child = candidates[i];
+        if (child.clientWidth > 0 && child.scrollWidth > Math.ceil(child.clientWidth) + 1) {
+          return true;
+        }
+        if (child.clientHeight > 0 && child.scrollHeight > Math.ceil(child.clientHeight) + 1) {
+          return true;
+        }
+        try {
+          const range = document.createRange();
+          range.selectNodeContents(child);
+          const childContentRect = range.getBoundingClientRect();
+          const childRect = child.getBoundingClientRect();
+          if (childRect.width > 0 && childContentRect.width > childRect.width + 1) {
+            return true;
+          }
+        } catch {
+          // Ignore
+        }
+      }
+
+      return false;
+    };
+
+    // Finds the active tooltip trigger, respecting data-tooltip-only-overflow
+    const findTooltipTrigger = (target: Element | null): HTMLElement | null => {
+      let curr = target?.closest("[data-tooltip]") as HTMLElement | null;
+      while (curr) {
+        if (curr.hasAttribute("data-tooltip-only-overflow")) {
+          if (isElementOverflowing(curr)) {
+            return curr;
+          }
+          // Not overflowing: check if an outer ancestor has a tooltip
+          curr = curr.parentElement ? (curr.parentElement.closest("[data-tooltip]") as HTMLElement | null) : null;
+        } else {
+          return curr;
+        }
+      }
+      return null;
+    };
+
     // 2. Event listeners for displaying and hiding custom tooltips
     const hide = () => {
       if (timerRef.current) {
@@ -145,7 +218,7 @@ export function GlobalTooltip() {
         sanitizeElement(target);
       }
 
-      const trigger = target.closest("[data-tooltip]") as HTMLElement | null;
+      const trigger = findTooltipTrigger(target);
       if (!trigger) {
         hide();
         return;
@@ -161,6 +234,17 @@ export function GlobalTooltip() {
 
       // Small debounce delay (120ms) to ensure smooth browsing without flicker
       timerRef.current = setTimeout(() => {
+        if (!trigger.isConnected) {
+          hide();
+          return;
+        }
+
+        // Re-verify overflow if data-tooltip-only-overflow is set
+        if (trigger.hasAttribute("data-tooltip-only-overflow") && !isElementOverflowing(trigger)) {
+          hide();
+          return;
+        }
+
         const text = trigger.getAttribute("data-tooltip");
         if (!text || !text.trim()) {
           hide();
@@ -182,10 +266,15 @@ export function GlobalTooltip() {
     const handlePointerOut = (e: PointerEvent | MouseEvent) => {
       const target = e.target as Element | null;
       if (!target) return;
-      const trigger = target.closest("[data-tooltip]");
+      const trigger = findTooltipTrigger(target);
       if (trigger && trigger === currentTriggerRef.current) {
         const related = (e as MouseEvent).relatedTarget as Element | null;
         if (!related || !trigger.contains(related)) {
+          hide();
+        }
+      } else if (!trigger && currentTriggerRef.current) {
+        const related = (e as MouseEvent).relatedTarget as Element | null;
+        if (!related || !currentTriggerRef.current.contains(related)) {
           hide();
         }
       }

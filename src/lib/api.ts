@@ -30,6 +30,27 @@ export interface SpatialHotspot {
   updated_at?: string;
 }
 
+export interface SpatialNote {
+  id: string;
+  photo_id?: string | null;
+  hotspot_id?: string | null;
+  component_id?: string | null;
+  text: string;
+  x: number;
+  y: number;
+  color?: string; // 'amber' | 'sky' | 'emerald' | 'purple' | 'rose'
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ResolvedSpatialNote extends SpatialNote {
+  component_name?: string;
+  component_photo_url?: string;
+  hotspot_label?: string;
+  is_moved_component?: boolean;
+  current_location_label?: string;
+}
+
 export type CustomField = { type: 'text' | 'number' | 'link' | 'image'; value: any };
 
 export interface Component {
@@ -623,11 +644,78 @@ export async function getFullHotspotPath(hotspotId: string) {
   return chain;
 }
 
-export function buildLeafHotspotsHierarchy(
+export interface HotspotHierarchyItem {
+  id: string;
+  photo_id: string;
+  label: string;
+  is_leaf: boolean;
+  child_photo_id: string | null;
+  fullLabel: string;
+  roomId?: string;
+  roomName?: string;
+  created_at?: string;
+}
+
+export interface HotspotTreeComponentItem {
+  locationId: string;
+  componentId: string;
+  componentName: string;
+  componentPhotoUrl?: string;
+  quantity: number;
+  hotspotId: string;
+  hotspotLabel: string;
+  hotspotFullPath: string;
+}
+
+export interface HotspotTreeSummary {
+  rootHotspot: SpatialHotspot;
+  rootLabel: string;
+  fullPath: string;
+  isLeaf: boolean;
+  descendantCount: number;
+  components: HotspotTreeComponentItem[];
+  totalUnits: number;
+}
+
+export interface HotspotLoanMeta {
+  rootHotspotId: string;
+  rootHotspotLabel: string;
+  groupId: string;
+  cleanNotes: string;
+}
+
+export interface GroupedHotspotLoan {
+  groupId: string;
+  rootHotspotId: string;
+  rootHotspotLabel: string;
+  cleanNotes: string;
+  borrower_name: string;
+  borrower_contact?: string | null;
+  due_date: string;
+  lent_at: string;
+  returned_at?: string | null;
+  loans: Loan[];
+  totalUnits: number;
+}
+
+export function parseHotspotLoanMeta(notes?: string | null): HotspotLoanMeta | null {
+  if (!notes) return null;
+  const match = notes.match(/^\[Hotspot Loan:\s*([^|]+)\|([^|]+)\|([^\]]+)\]\s*(.*)$/);
+  if (!match) return null;
+  return {
+    rootHotspotId: match[1].trim(),
+    rootHotspotLabel: match[2].trim(),
+    groupId: match[3].trim(),
+    cleanNotes: match[4].trim(),
+  };
+}
+
+export function buildHotspotsHierarchy(
   allHotspots: any[],
   allPhotos: any[],
-  allRooms: any[]
-) {
+  allRooms: any[],
+  filterLeavesOnly: boolean = false
+): HotspotHierarchyItem[] {
   const hotspotMap = new Map<string, any>();
   allHotspots.forEach(h => hotspotMap.set(h.id, h));
 
@@ -637,9 +725,9 @@ export function buildLeafHotspotsHierarchy(
   const roomMap = new Map<string, any>();
   allRooms.forEach(r => roomMap.set(r.id, r));
 
-  const leafHotspots = allHotspots.filter(h => h.is_leaf);
+  const targetHotspots = filterLeavesOnly ? allHotspots.filter(h => h.is_leaf) : allHotspots;
 
-  const results = leafHotspots.map(hs => {
+  const results: HotspotHierarchyItem[] = targetHotspots.map(hs => {
     const chain: { type: 'hotspot' | 'photo'; id: string; label: string }[] = [];
     let currentHotspotId: string | null = hs.id;
     let depth = 0;
@@ -688,6 +776,42 @@ export function buildLeafHotspotsHierarchy(
     }
     return (a.fullLabel || '').localeCompare(b.fullLabel || '');
   });
+}
+
+export function buildLeafHotspotsHierarchy(
+  allHotspots: any[],
+  allPhotos: any[],
+  allRooms: any[]
+): HotspotHierarchyItem[] {
+  return buildHotspotsHierarchy(allHotspots, allPhotos, allRooms, true);
+}
+
+export async function getAllHotspotsWithHierarchy(): Promise<HotspotHierarchyItem[]> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    const [allHotspots, allPhotos, allRooms] = await Promise.all([
+      db.spatial_hotspots.toArray(),
+      db.spatial_photos.toArray(),
+      db.rooms.toArray()
+    ]);
+    return buildHotspotsHierarchy(allHotspots, allPhotos, allRooms, false);
+  }
+
+  const [hotspotsRes, photosRes, roomsRes] = await Promise.all([
+    supabase.from('spatial_hotspots').select('*'),
+    supabase.from('spatial_photos').select('*'),
+    supabase.from('rooms').select('id, name')
+  ]);
+
+  if (hotspotsRes.error) throw new Error(hotspotsRes.error.message || "Failed to fetch hotspots");
+  if (photosRes.error) throw new Error(photosRes.error.message || "Failed to fetch photos");
+  if (roomsRes.error) throw new Error(roomsRes.error.message || "Failed to fetch rooms");
+
+  return buildHotspotsHierarchy(
+    hotspotsRes.data || [],
+    photosRes.data || [],
+    roomsRes.data || [],
+    false
+  );
 }
 
 export async function getAllLeafHotspots() {
@@ -2661,6 +2785,368 @@ export async function returnLentProject(loanId: string, returnLocationId?: strin
   return { ...loan, ...updates };
 }
 
+export async function updateLoan(
+  loanId: string,
+  updates: {
+    borrower_name?: string;
+    borrower_contact?: string | null;
+    due_date?: string;
+    notes?: string | null;
+  }
+): Promise<Loan> {
+  const updatePayload: Record<string, any> = {
+    updated_at: new Date().toISOString()
+  };
+  if (updates.borrower_name !== undefined) updatePayload.borrower_name = updates.borrower_name.trim();
+  if (updates.borrower_contact !== undefined) updatePayload.borrower_contact = updates.borrower_contact?.trim() || null;
+  if (updates.due_date !== undefined) updatePayload.due_date = updates.due_date;
+  if (updates.notes !== undefined) updatePayload.notes = updates.notes?.trim() || null;
+
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    await db.loans.update(loanId, updatePayload);
+    const updated = await db.loans.get(loanId);
+    if (!updated) throw new Error("Loan not found");
+    return updated as Loan;
+  }
+
+  const { data, error } = await supabase
+    .from('loans')
+    .update(updatePayload)
+    .eq('id', loanId)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  if (typeof window !== 'undefined') {
+    await db.loans.update(loanId, updatePayload);
+  }
+
+  return data as Loan;
+}
+
+export async function updateHotspotLoanGroup(
+  groupId: string,
+  updates: {
+    borrower_name?: string;
+    borrower_contact?: string | null;
+    due_date?: string;
+    cleanNotes?: string | null;
+  }
+): Promise<Loan[]> {
+  const allLoans = await getLoans();
+  const matchingLoans = allLoans.filter(l => {
+    const meta = parseHotspotLoanMeta(l.notes);
+    return meta && meta.groupId === groupId;
+  });
+
+  if (matchingLoans.length === 0) {
+    throw new Error("No loans found for this hotspot loan group.");
+  }
+
+  const updatedLoans: Loan[] = [];
+
+  for (const loan of matchingLoans) {
+    const meta = parseHotspotLoanMeta(loan.notes);
+    let newNotes = loan.notes;
+    if (updates.cleanNotes !== undefined && meta) {
+      const userText = updates.cleanNotes?.trim() || "";
+      newNotes = `[Hotspot Loan: ${meta.rootHotspotId}|${meta.rootHotspotLabel}|${meta.groupId}] ${userText}`.trim();
+    }
+
+    const payload: {
+      borrower_name?: string;
+      borrower_contact?: string | null;
+      due_date?: string;
+      notes?: string | null;
+    } = {};
+
+    if (updates.borrower_name !== undefined) payload.borrower_name = updates.borrower_name;
+    if (updates.borrower_contact !== undefined) payload.borrower_contact = updates.borrower_contact;
+    if (updates.due_date !== undefined) payload.due_date = updates.due_date;
+    if (updates.cleanNotes !== undefined) payload.notes = newNotes;
+
+    const res = await updateLoan(loan.id, payload);
+    updatedLoans.push(res);
+  }
+
+  return updatedLoans;
+}
+
+// -------------------------------------------------------------
+// HOTSPOT HIERARCHICAL LENDING & BATCH RETURN
+// -------------------------------------------------------------
+
+export async function getHotspotTreeSummary(hotspotId: string): Promise<HotspotTreeSummary> {
+  const isOffline = typeof window !== 'undefined' && !navigator.onLine;
+  
+  let allHotspots: any[] = [];
+  let allPhotos: any[] = [];
+  let allRooms: any[] = [];
+  let allCompLocs: any[] = [];
+  let allComps: any[] = [];
+
+  if (isOffline) {
+    [allHotspots, allPhotos, allRooms, allCompLocs, allComps] = await Promise.all([
+      db.spatial_hotspots.toArray(),
+      db.spatial_photos.toArray(),
+      db.rooms.toArray(),
+      db.component_locations.toArray(),
+      db.components.toArray()
+    ]);
+  } else {
+    const [hsRes, phRes, rmRes, clRes, cRes] = await Promise.all([
+      supabase.from('spatial_hotspots').select('*'),
+      supabase.from('spatial_photos').select('*'),
+      supabase.from('rooms').select('id, name'),
+      supabase.from('component_locations').select('*'),
+      supabase.from('components').select('id, name, photo_url')
+    ]);
+    if (hsRes.error) throw hsRes.error;
+    if (phRes.error) throw phRes.error;
+    if (rmRes.error) throw rmRes.error;
+    if (clRes.error) throw clRes.error;
+    if (cRes.error) throw cRes.error;
+    allHotspots = hsRes.data || [];
+    allPhotos = phRes.data || [];
+    allRooms = rmRes.data || [];
+    allCompLocs = clRes.data || [];
+    allComps = cRes.data || [];
+  }
+
+  const rootHotspot = allHotspots.find(h => h.id === hotspotId);
+  if (!rootHotspot) {
+    throw new Error(`Hotspot with ID "${hotspotId}" not found.`);
+  }
+
+  // Hierarchy map for fullLabel paths
+  const hierarchyList = buildHotspotsHierarchy(allHotspots, allPhotos, allRooms, false);
+  const hierMap = new Map<string, HotspotHierarchyItem>(hierarchyList.map(h => [h.id, h]));
+  const compMap = new Map<string, any>(allComps.map(c => [c.id, c]));
+
+  // Recursive descendant collector
+  function collectDescendants(hs: any): any[] {
+    const list = [hs];
+    if (!hs.is_leaf && hs.child_photo_id) {
+      const childHotspots = allHotspots.filter(h => h.photo_id === hs.child_photo_id);
+      for (const child of childHotspots) {
+        list.push(...collectDescendants(child));
+      }
+    }
+    return list;
+  }
+
+  const allDescendants = collectDescendants(rootHotspot);
+  const descendantIds = new Set(allDescendants.map(d => d.id));
+
+  // Find component locations assigned to any of these hotspots
+  const matchingLocs = allCompLocs.filter(l => descendantIds.has(l.hotspot_id) && l.quantity > 0);
+
+  const components: HotspotTreeComponentItem[] = matchingLocs.map(loc => {
+    const comp = compMap.get(loc.component_id);
+    const hsItem = hierMap.get(loc.hotspot_id);
+    return {
+      locationId: loc.id,
+      componentId: loc.component_id,
+      componentName: comp?.name || "Unknown Component",
+      componentPhotoUrl: comp?.photo_url,
+      quantity: loc.quantity,
+      hotspotId: loc.hotspot_id,
+      hotspotLabel: hsItem?.label || "Location",
+      hotspotFullPath: hsItem?.fullLabel || hsItem?.label || "Location"
+    };
+  });
+
+  const rootHier = hierMap.get(hotspotId);
+
+  return {
+    rootHotspot,
+    rootLabel: rootHotspot.label,
+    fullPath: rootHier?.fullLabel || rootHotspot.label,
+    isLeaf: rootHotspot.is_leaf,
+    descendantCount: Math.max(0, allDescendants.length - 1),
+    components,
+    totalUnits: components.reduce((sum, c) => sum + c.quantity, 0)
+  };
+}
+
+export async function lendHotspotTree(params: {
+  hotspotId: string;
+  borrowerName: string;
+  borrowerContact?: string;
+  dueDate: string;
+  notes?: string;
+}): Promise<{ groupId: string; rootHotspotLabel: string; count: number; totalUnits: number; loans: Loan[] }> {
+  const { hotspotId, borrowerName, borrowerContact, dueDate, notes } = params;
+  if (!borrowerName.trim()) throw new Error("Borrower name is required.");
+  if (!dueDate) throw new Error("Return due date is required.");
+
+  const summary = await getHotspotTreeSummary(hotspotId);
+  if (summary.components.length === 0) {
+    throw new Error(`Hotspot "${summary.rootLabel}" and its contents do not currently contain any stored components to lend.`);
+  }
+
+  const groupId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `hloan-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const userNotes = notes?.trim() || "";
+  const encodedNotes = `[Hotspot Loan: ${summary.rootHotspot.id}|${summary.rootLabel}|${groupId}] ${userNotes}`.trim();
+
+  const createdLoans: Loan[] = [];
+  for (const item of summary.components) {
+    const loan = await lendComponent({
+      componentId: item.componentId,
+      sourceLocationId: item.hotspotId,
+      quantity: item.quantity,
+      borrowerName: borrowerName.trim(),
+      borrowerContact: borrowerContact?.trim() || undefined,
+      dueDate,
+      notes: encodedNotes
+    });
+    createdLoans.push(loan);
+  }
+
+  return {
+    groupId,
+    rootHotspotLabel: summary.rootLabel,
+    count: summary.components.length,
+    totalUnits: summary.totalUnits,
+    loans: createdLoans
+  };
+}
+
+export async function getMultipleHotspotsSummary(hotspotIds: string[]): Promise<{
+  hotspots: { id: string; label: string }[];
+  components: HotspotTreeComponentItem[];
+  totalUnits: number;
+}> {
+  if (!hotspotIds || hotspotIds.length === 0) {
+    return { hotspots: [], components: [], totalUnits: 0 };
+  }
+  const summaries = await Promise.all(hotspotIds.map(hid => getHotspotTreeSummary(hid)));
+  const allComponents = summaries.flatMap(s => s.components);
+  return {
+    hotspots: summaries.map(s => ({ id: s.rootHotspot.id, label: s.rootLabel })),
+    components: allComponents,
+    totalUnits: summaries.reduce((sum, s) => sum + s.totalUnits, 0)
+  };
+}
+
+export async function lendMultipleHotspots(params: {
+  hotspotIds: string[];
+  borrowerName: string;
+  borrowerContact?: string;
+  dueDate: string;
+  notes?: string;
+}): Promise<{ groupId: string; groupLabel: string; count: number; totalUnits: number; loans: Loan[] }> {
+  const { hotspotIds, borrowerName, borrowerContact, dueDate, notes } = params;
+  if (!borrowerName.trim()) throw new Error("Borrower name is required.");
+  if (!dueDate) throw new Error("Return due date is required.");
+  if (!hotspotIds || hotspotIds.length === 0) throw new Error("At least one hotspot must be selected.");
+
+  if (hotspotIds.length === 1) {
+    const res = await lendHotspotTree({
+      hotspotId: hotspotIds[0],
+      borrowerName,
+      borrowerContact,
+      dueDate,
+      notes
+    });
+    return {
+      groupId: res.groupId,
+      groupLabel: res.rootHotspotLabel,
+      count: res.count,
+      totalUnits: res.totalUnits,
+      loans: res.loans
+    };
+  }
+
+  const summaries = await Promise.all(hotspotIds.map(hid => getHotspotTreeSummary(hid)));
+  const allComponents = summaries.flatMap(s => s.components);
+  if (allComponents.length === 0) {
+    throw new Error("None of the selected hotspots contain any stored components to lend.");
+  }
+
+  const groupId = typeof crypto !== 'undefined' && crypto.randomUUID 
+    ? crypto.randomUUID() 
+    : `hloan-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  
+  const labels = summaries.map(s => s.rootLabel).join(', ');
+  const compositeLabel = labels.length > 60 
+    ? `${summaries.length} Hotspots (${summaries.slice(0, 2).map(s => s.rootLabel).join(', ')}...)` 
+    : labels;
+  const userNotes = notes?.trim() || "";
+  const encodedNotes = `[Hotspot Loan: multi|${compositeLabel}|${groupId}] ${userNotes}`.trim();
+
+  const createdLoans: Loan[] = [];
+  for (const item of allComponents) {
+    const loan = await lendComponent({
+      componentId: item.componentId,
+      sourceLocationId: item.hotspotId,
+      quantity: item.quantity,
+      borrowerName: borrowerName.trim(),
+      borrowerContact: borrowerContact?.trim() || undefined,
+      dueDate,
+      notes: encodedNotes
+    });
+    createdLoans.push(loan);
+  }
+
+  return {
+    groupId,
+    groupLabel: compositeLabel,
+    count: allComponents.length,
+    totalUnits: summaries.reduce((sum, s) => sum + s.totalUnits, 0),
+    loans: createdLoans
+  };
+}
+
+export async function returnHotspotLoan(groupId: string): Promise<Loan[]> {
+  const allLoans = await getLoans();
+  const activeMatchingLoans = allLoans.filter(l => {
+    if (l.returned_at) return false;
+    const meta = parseHotspotLoanMeta(l.notes);
+    return meta && meta.groupId === groupId;
+  });
+
+  if (activeMatchingLoans.length === 0) {
+    throw new Error("No active loans found for this hotspot loan group.");
+  }
+
+  const returned: Loan[] = [];
+  for (const loan of activeMatchingLoans) {
+    if (!loan.source_location_id) continue;
+    const res = await returnLentComponent(loan.id, loan.source_location_id);
+    returned.push(res);
+  }
+
+  return returned;
+}
+
+export async function getActiveLoansForHotspotTree(hotspotId: string): Promise<Loan[]> {
+  const allLoans = await getLoans();
+  const activeLoans = allLoans.filter(l => !l.returned_at);
+  if (activeLoans.length === 0) return [];
+
+  // Direct match by meta or direct hotspot id
+  const matchingLoans = activeLoans.filter(l => {
+    const meta = parseHotspotLoanMeta(l.notes);
+    if (meta && meta.rootHotspotId === hotspotId) return true;
+    if (l.source_location_id === hotspotId) return true;
+    return false;
+  });
+
+  try {
+    const summary = await getHotspotTreeSummary(hotspotId);
+    const hsIds = new Set([summary.rootHotspot.id, ...summary.components.map(c => c.hotspotId)]);
+    return activeLoans.filter(l => {
+      if (matchingLoans.some(m => m.id === l.id)) return true;
+      if (l.source_location_id && hsIds.has(l.source_location_id)) return true;
+      return false;
+    });
+  } catch {
+    return matchingLoans;
+  }
+}
+
 // -------------------------------------------------------------
 // DYNAMIC NOTIFICATION GENERATION (No persistent DB rows)
 // -------------------------------------------------------------
@@ -2719,4 +3205,266 @@ export async function getLoanNotifications(): Promise<LoanNotification[]> {
   const priorityOrder = { critical: 0, high: 1, medium: 2 };
   return notifications.sort((a, b) => priorityOrder[a.urgency] - priorityOrder[b.urgency]);
 }
+
+// ==========================================
+// SPATIAL NOTES / STICKY ANNOTATIONS API
+// ==========================================
+
+export async function getSpatialNotes(): Promise<SpatialNote[]> {
+  try {
+    const { data, error } = await supabase.from('spatial_notes').select('*');
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        db.spatial_notes.bulkPut(data).catch(() => {});
+        try {
+          localStorage.setItem('deepini_spatial_notes', JSON.stringify(data));
+        } catch {}
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn("Supabase spatial_notes unavailable, using Dexie/local:", err);
+  }
+
+  // Fallback to local Dexie
+  if (typeof window !== 'undefined') {
+    try {
+      const local = await db.spatial_notes.toArray();
+      if (local && local.length > 0) return local;
+    } catch {}
+    
+    // Fallback to localStorage
+    try {
+      const stored = localStorage.getItem('deepini_spatial_notes');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+  }
+  return [];
+}
+
+export async function getSpatialNotesForPhoto(photoId: string): Promise<ResolvedSpatialNote[]> {
+  const allNotes = await getSpatialNotes();
+  if (allNotes.length === 0) return [];
+
+  let photoHotspots: SpatialHotspot[] = [];
+  try {
+    photoHotspots = await getHotspotsForPhoto(photoId);
+  } catch {}
+
+  let compLocs: any[] = [];
+  try {
+    const { data } = await supabase.from('component_locations').select('*');
+    if (data) {
+      compLocs = data;
+    } else if (typeof window !== 'undefined') {
+      compLocs = await db.component_locations.toArray().catch(() => []);
+    }
+  } catch {
+    if (typeof window !== 'undefined') {
+      compLocs = await db.component_locations.toArray().catch(() => []);
+    }
+  }
+
+  let comps: any[] = [];
+  try {
+    const { data } = await supabase.from('components').select('id, name, photo_url, notes, item_type');
+    if (data) {
+      comps = data;
+    } else if (typeof window !== 'undefined') {
+      comps = await db.components.toArray().catch(() => []);
+    }
+  } catch {
+    if (typeof window !== 'undefined') {
+      comps = await db.components.toArray().catch(() => []);
+    }
+  }
+
+  const photoHotspotMap = new Map<string, SpatialHotspot>(photoHotspots.map((h: SpatialHotspot) => [h.id, h]));
+  const compMap = new Map<string, any>(comps.map((c: any) => [c.id, c]));
+
+  // Map of component_id -> list of hotspot_ids
+  const compLocationsMap = new Map<string, string[]>();
+  compLocs.forEach((cl: any) => {
+    const list = compLocationsMap.get(cl.component_id) || [];
+    list.push(cl.hotspot_id);
+    compLocationsMap.set(cl.component_id, list);
+  });
+
+  const resolved: ResolvedSpatialNote[] = [];
+
+  for (const note of allNotes) {
+    // 1. Note is linked to a component
+    if (note.component_id) {
+      const comp = compMap.get(note.component_id);
+      const assignedHotspotIds = compLocationsMap.get(note.component_id) || [];
+
+      // Check if this component is stored in any hotspot visible on this active photo
+      const activeHotspotIdOnThisPhoto = assignedHotspotIds.find(hid => photoHotspotMap.has(hid));
+
+      if (activeHotspotIdOnThisPhoto) {
+        const hs = photoHotspotMap.get(activeHotspotIdOnThisPhoto)!;
+        let x = note.x;
+        let y = note.y;
+        let isMoved = false;
+
+        // If the note was placed on a different photo (or no photo),
+        // or if the component moved to a different hotspot on the same photo,
+        // center it on the active hotspot's boundary
+        if (note.photo_id !== photoId || (note.hotspot_id && note.hotspot_id !== activeHotspotIdOnThisPhoto)) {
+          isMoved = true;
+          if (hs.shape_points && hs.shape_points.length > 0) {
+            x = hs.shape_points.reduce((acc, p) => acc + p.x, 0) / hs.shape_points.length;
+            y = hs.shape_points.reduce((acc, p) => acc + p.y, 0) / hs.shape_points.length;
+          }
+        }
+
+        resolved.push({
+          ...note,
+          x,
+          y,
+          component_name: comp?.name || "Component",
+          component_photo_url: comp?.photo_url,
+          hotspot_label: hs.label,
+          is_moved_component: isMoved,
+          current_location_label: hs.label
+        });
+      }
+      // If the component is not in any hotspot on this photo, do NOT show it here.
+      // It followed the component to its new location!
+      continue;
+    }
+
+    // 2. Note is linked to a storage location (hotspot)
+    if (note.hotspot_id) {
+      const hs = photoHotspotMap.get(note.hotspot_id);
+      if (hs) {
+        resolved.push({
+          ...note,
+          hotspot_label: hs.label
+        });
+      }
+      continue;
+    }
+
+    // 3. General view note on this photo
+    if (note.photo_id === photoId) {
+      resolved.push(note);
+    }
+  }
+
+  return resolved;
+}
+
+export async function getSpatialNotesForComponent(componentId: string): Promise<SpatialNote[]> {
+  const allNotes = await getSpatialNotes();
+  return allNotes.filter(n => n.component_id === componentId);
+}
+
+export async function createSpatialNote(note: Omit<SpatialNote, 'id' | 'created_at' | 'updated_at'>): Promise<SpatialNote> {
+  const newNote: SpatialNote = {
+    id: typeof crypto !== 'undefined' && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : `note_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    ...note,
+    color: note.color || 'amber',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  try {
+    const { data, error } = await supabase.from('spatial_notes').insert([newNote]).select().single();
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        db.spatial_notes.put(data).catch(() => {});
+        try {
+          const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+          stored.push(data);
+          localStorage.setItem('deepini_spatial_notes', JSON.stringify(stored));
+        } catch {}
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn("Could not insert note into Supabase, saving locally:", err);
+  }
+
+  // Local save
+  if (typeof window !== 'undefined') {
+    await db.spatial_notes.put(newNote).catch(() => {});
+    try {
+      const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+      stored.push(newNote);
+      localStorage.setItem('deepini_spatial_notes', JSON.stringify(stored));
+    } catch {}
+  }
+
+  return newNote;
+}
+
+export async function updateSpatialNote(id: string, updates: Partial<SpatialNote>): Promise<SpatialNote> {
+  const updatePayload = {
+    ...updates,
+    updated_at: new Date().toISOString()
+  };
+
+  try {
+    const { data, error } = await supabase.from('spatial_notes').update(updatePayload).eq('id', id).select().single();
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        db.spatial_notes.put(data).catch(() => {});
+        try {
+          const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+          const idx = stored.findIndex((n: any) => n.id === id);
+          if (idx >= 0) stored[idx] = data;
+          localStorage.setItem('deepini_spatial_notes', JSON.stringify(stored));
+        } catch {}
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn("Could not update note in Supabase, updating locally:", err);
+  }
+
+  // Local update
+  if (typeof window !== 'undefined') {
+    let existing = await db.spatial_notes.get(id).catch(() => undefined);
+    if (!existing) {
+      const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+      existing = stored.find((n: any) => n.id === id);
+    }
+    const merged: SpatialNote = {
+      ...(existing || { id, text: "", x: 0.5, y: 0.5 }),
+      ...updatePayload
+    };
+    await db.spatial_notes.put(merged).catch(() => {});
+    try {
+      const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+      const idx = stored.findIndex((n: any) => n.id === id);
+      if (idx >= 0) stored[idx] = merged;
+      else stored.push(merged);
+      localStorage.setItem('deepini_spatial_notes', JSON.stringify(stored));
+    } catch {}
+    return merged;
+  }
+
+  return { id, text: "", x: 0.5, y: 0.5, ...updatePayload };
+}
+
+export async function deleteSpatialNote(id: string): Promise<void> {
+  try {
+    await supabase.from('spatial_notes').delete().eq('id', id);
+  } catch (err) {
+    console.warn("Could not delete note in Supabase, deleting locally:", err);
+  }
+
+  if (typeof window !== 'undefined') {
+    await db.spatial_notes.delete(id).catch(() => {});
+    try {
+      const stored = JSON.parse(localStorage.getItem('deepini_spatial_notes') || '[]');
+      const filtered = stored.filter((n: any) => n.id !== id);
+      localStorage.setItem('deepini_spatial_notes', JSON.stringify(filtered));
+    } catch {}
+  }
+}
+
 

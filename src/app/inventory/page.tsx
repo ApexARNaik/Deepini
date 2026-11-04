@@ -1,19 +1,21 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, Suspense, useCallback } from "react";
 import { ComponentWithTotals, getInventory, isPersonalItem } from "@/lib/api";
 import { InventoryTable } from "@/components/inventory/InventoryTable";
-import { Search, Plus } from "lucide-react";
+import { Search, Plus, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNetworkState } from "@/hooks/useNetworkState";
 import { useSearchParams } from "next/navigation";
+import { ExportInventoryModal } from "@/components/inventory/ExportInventoryModal";
 
 function InventoryContent() {
   const searchParams = useSearchParams();
   const initialView = searchParams.get('view') === 'personal' ? 'personal' : 'components';
   const [components, setComponents] = useState<ComponentWithTotals[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const { isOnline } = useNetworkState();
   const initialSearch = searchParams.get('q') || searchParams.get('search') || "";
   const [search, setSearch] = useState(initialSearch);
@@ -33,11 +35,7 @@ function InventoryContent() {
 
   const debouncedSearch = useDebounce(search, 300);
 
-  useEffect(() => {
-    load();
-  }, [debouncedSearch]);
-
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getInventory(debouncedSearch);
@@ -47,7 +45,11 @@ function InventoryContent() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [debouncedSearch]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const componentItems = useMemo(() => components.filter(c => !isPersonalItem(c)), [components]);
   const personalItems = useMemo(() => components.filter(c => isPersonalItem(c)), [components]);
@@ -63,14 +65,25 @@ function InventoryContent() {
               {viewMode === 'components' ? 'All tracked electronics components.' : 'All personal items and belongings.'}
             </p>
           </div>
-          {isOnline && (
-            <Link 
-              href={viewMode === 'personal' ? "/inventory/new?type=personal" : "/inventory/new?type=component"} 
-              className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors shrink-0 self-start sm:self-auto"
+          <div className="flex items-center gap-2.5 shrink-0 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setIsExportModalOpen(true)}
+              className="flex items-center px-3.5 py-2 bg-[#252320] hover:bg-[#332f2a] text-brand-gold hover:text-white border border-[#3f3b35] hover:border-brand-gold/60 text-xs font-bold uppercase tracking-wider rounded-sm transition-all shadow-sm"
+              data-tooltip="Export inventory formatted for ChatGPT / Claude project suggestions & purchases"
             >
-              <Plus className="h-4 w-4 mr-1" /> {viewMode === 'personal' ? 'Add Personal Item' : 'Add Component'}
-            </Link>
-          )}
+              <Sparkles className="h-4 w-4 mr-1.5 text-brand-gold" />
+              <span>Export for AI</span>
+            </button>
+            {isOnline && (
+              <Link 
+                href={viewMode === 'personal' ? "/inventory/new?type=personal" : "/inventory/new?type=component"} 
+                className="flex items-center px-4 py-2 bg-brand-accent text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-brand-accent-hover transition-colors shrink-0"
+              >
+                <Plus className="h-4 w-4 mr-1" /> {viewMode === 'personal' ? 'Add Personal Item' : 'Add Component'}
+              </Link>
+            )}
+          </div>
         </div>
 
         {/* View Mode Toggle (Components vs Personal) */}
@@ -127,6 +140,14 @@ function InventoryContent() {
           />
         )}
       </div>
+
+      {/* Export for AI Modal */}
+      <ExportInventoryModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        components={components}
+        currentViewMode={viewMode}
+      />
     </div>
   );
 }

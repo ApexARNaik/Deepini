@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Room, SpatialPhoto, SpatialHotspot, Component, Tag, ComponentLocation, Project, ProjectComponent, Loan } from './api';
+import type { Room, SpatialPhoto, SpatialHotspot, Component, Tag, ComponentLocation, Project, ProjectComponent, Loan, SpatialNote } from './api';
 
 export class DeepiniDB extends Dexie {
   rooms!: Table<Room, string>;
@@ -13,6 +13,7 @@ export class DeepiniDB extends Dexie {
   project_components!: Table<ProjectComponent, string>;
   loans!: Table<Loan, string>;
   component_totals!: Table<{ component_id: string, total_owned_qty: number, checked_out_qty: number, in_storage_qty: number }, string>;
+  spatial_notes!: Table<SpatialNote, string>;
 
   constructor() {
     super('DeepiniDB');
@@ -31,6 +32,10 @@ export class DeepiniDB extends Dexie {
 
     this.version(2).stores({
       loans: 'id, loan_type, component_id, project_id, borrower_name, due_date, returned_at'
+    });
+
+    this.version(3).stores({
+      spatial_notes: 'id, photo_id, hotspot_id, component_id'
     });
   }
 }

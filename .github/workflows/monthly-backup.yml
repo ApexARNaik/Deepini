@@ -21,7 +21,8 @@ jobs:
             echo "::error::Secret SUPABASE_DB_URL is not configured in this repository."
             echo "Please go to: Repository Settings -> Secrets and variables -> Actions -> New repository secret"
             echo "Name: SUPABASE_DB_URL"
-            echo "Value: postgresql://postgres:[YOUR-PASSWORD]@[YOUR-HOST]:5432/postgres"
+            echo "Value: postgresql://postgres.lkbcqnzhiuinqgfledsc:[YOUR-PASSWORD]@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
+            echo "Note: Use the Supabase Connection Pooler host (aws-0-[region].pooler.supabase.com) because GitHub Actions requires IPv4."
             exit 1
           fi
 
@@ -32,6 +33,7 @@ jobs:
 
       - name: Generate Database Dump
         run: |
+          set -eo pipefail
           mkdir -p backups
           TIMESTAMP=$(date +"%Y-%m-%d_%H%M%S")
           FILENAME="deepini-backup-${TIMESTAMP}.sql.gz"
@@ -44,13 +46,20 @@ jobs:
             --no-privileges \
             --encoding=UTF8 | gzip > "backups/${FILENAME}"
 
-          FILESIZE=$(du -h "backups/${FILENAME}" | cut -f1)
-          echo "Backup generated successfully. Size: ${FILESIZE}"
-          
+          FILESIZE_BYTES=$(stat -c%s "backups/${FILENAME}")
+          FILESIZE_HUMAN=$(du -h "backups/${FILENAME}" | cut -f1)
+          echo "Backup file size: ${FILESIZE_BYTES} bytes (${FILESIZE_HUMAN})"
+
+          # A valid Deepini dump is > 50 KB. A failed/empty gzip is <= 30 bytes.
+          if [ "$FILESIZE_BYTES" -lt 1024 ]; then
+            echo "::error::Database dump is empty or corrupt (${FILESIZE_BYTES} bytes). pg_dump failed to fetch data."
+            exit 1
+          fi
+
           echo "BACKUP_FILE=${FILENAME}" >> $GITHUB_ENV
           echo "BACKUP_TAG=backup-$(date +"%Y-%m-%d")" >> $GITHUB_ENV
           echo "BACKUP_DATE=$(date +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_ENV
-          echo "BACKUP_SIZE=${FILESIZE}" >> $GITHUB_ENV
+          echo "BACKUP_SIZE=${FILESIZE_HUMAN}" >> $GITHUB_ENV
 
       - name: Upload Backup as Workflow Artifact (90-day retention)
         uses: actions/upload-artifact@v4
