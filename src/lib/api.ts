@@ -684,6 +684,20 @@ export interface HotspotLoanMeta {
   cleanNotes: string;
 }
 
+export interface GroupedHotspotLoan {
+  groupId: string;
+  rootHotspotId: string;
+  rootHotspotLabel: string;
+  cleanNotes: string;
+  borrower_name: string;
+  borrower_contact?: string | null;
+  due_date: string;
+  lent_at: string;
+  returned_at?: string | null;
+  loans: Loan[];
+  totalUnits: number;
+}
+
 export function parseHotspotLoanMeta(notes?: string | null): HotspotLoanMeta | null {
   if (!notes) return null;
   const match = notes.match(/^\[Hotspot Loan:\s*([^|]+)\|([^|]+)\|([^\]]+)\]\s*(.*)$/);
@@ -2769,6 +2783,94 @@ export async function returnLentProject(loanId: string, returnLocationId?: strin
   }
 
   return { ...loan, ...updates };
+}
+
+export async function updateLoan(
+  loanId: string,
+  updates: {
+    borrower_name?: string;
+    borrower_contact?: string | null;
+    due_date?: string;
+    notes?: string | null;
+  }
+): Promise<Loan> {
+  const updatePayload: Record<string, any> = {
+    updated_at: new Date().toISOString()
+  };
+  if (updates.borrower_name !== undefined) updatePayload.borrower_name = updates.borrower_name.trim();
+  if (updates.borrower_contact !== undefined) updatePayload.borrower_contact = updates.borrower_contact?.trim() || null;
+  if (updates.due_date !== undefined) updatePayload.due_date = updates.due_date;
+  if (updates.notes !== undefined) updatePayload.notes = updates.notes?.trim() || null;
+
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    await db.loans.update(loanId, updatePayload);
+    const updated = await db.loans.get(loanId);
+    if (!updated) throw new Error("Loan not found");
+    return updated as Loan;
+  }
+
+  const { data, error } = await supabase
+    .from('loans')
+    .update(updatePayload)
+    .eq('id', loanId)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  if (typeof window !== 'undefined') {
+    await db.loans.update(loanId, updatePayload);
+  }
+
+  return data as Loan;
+}
+
+export async function updateHotspotLoanGroup(
+  groupId: string,
+  updates: {
+    borrower_name?: string;
+    borrower_contact?: string | null;
+    due_date?: string;
+    cleanNotes?: string | null;
+  }
+): Promise<Loan[]> {
+  const allLoans = await getLoans();
+  const matchingLoans = allLoans.filter(l => {
+    const meta = parseHotspotLoanMeta(l.notes);
+    return meta && meta.groupId === groupId;
+  });
+
+  if (matchingLoans.length === 0) {
+    throw new Error("No loans found for this hotspot loan group.");
+  }
+
+  const updatedLoans: Loan[] = [];
+
+  for (const loan of matchingLoans) {
+    const meta = parseHotspotLoanMeta(loan.notes);
+    let newNotes = loan.notes;
+    if (updates.cleanNotes !== undefined && meta) {
+      const userText = updates.cleanNotes?.trim() || "";
+      newNotes = `[Hotspot Loan: ${meta.rootHotspotId}|${meta.rootHotspotLabel}|${meta.groupId}] ${userText}`.trim();
+    }
+
+    const payload: {
+      borrower_name?: string;
+      borrower_contact?: string | null;
+      due_date?: string;
+      notes?: string | null;
+    } = {};
+
+    if (updates.borrower_name !== undefined) payload.borrower_name = updates.borrower_name;
+    if (updates.borrower_contact !== undefined) payload.borrower_contact = updates.borrower_contact;
+    if (updates.due_date !== undefined) payload.due_date = updates.due_date;
+    if (updates.cleanNotes !== undefined) payload.notes = newNotes;
+
+    const res = await updateLoan(loan.id, payload);
+    updatedLoans.push(res);
+  }
+
+  return updatedLoans;
 }
 
 // -------------------------------------------------------------

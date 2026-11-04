@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { getLoans, Loan, calculateLoanDaysRemaining, parseHotspotLoanMeta, returnHotspotLoan } from "@/lib/api";
+import { getLoans, Loan, calculateLoanDaysRemaining, parseHotspotLoanMeta, returnHotspotLoan, GroupedHotspotLoan } from "@/lib/api";
 import { LendModal } from "@/components/loans/LendModal";
 import { ReturnLoanModal } from "@/components/loans/ReturnLoanModal";
+import { EditLoanModal } from "@/components/loans/EditLoanModal";
 import { 
   Plus, 
   Search, 
@@ -20,24 +21,11 @@ import {
   AlertTriangle,
   Layers,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Pencil
 } from "lucide-react";
 import Link from "next/link";
 import { useNetworkState } from "@/hooks/useNetworkState";
-
-interface GroupedHotspotLoan {
-  groupId: string;
-  rootHotspotId: string;
-  rootHotspotLabel: string;
-  cleanNotes: string;
-  borrower_name: string;
-  borrower_contact?: string | null;
-  due_date: string;
-  lent_at: string;
-  returned_at?: string | null;
-  loans: Loan[];
-  totalUnits: number;
-}
 
 type LoanDisplayItem = 
   | { type: 'single'; loan: Loan }
@@ -55,6 +43,7 @@ export default function LoansPage() {
   const [returnLoanItem, setReturnLoanItem] = useState<Loan | null>(null);
   const [returningGroupId, setReturningGroupId] = useState<string | null>(null);
   const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
+  const [editingTarget, setEditingTarget] = useState<LoanDisplayItem | null>(null);
 
   const { isOnline } = useNetworkState();
 
@@ -149,6 +138,29 @@ export default function LoansPage() {
     return items;
   }, [currentTabList]);
 
+  // Compute counts for filter pills based on the currently selected tab
+  const filterCounts = useMemo(() => {
+    let hotspots = 0;
+    let components = 0;
+    let projects = 0;
+    let urgent = 0;
+
+    displayItems.forEach(item => {
+      if (item.type === 'hotspot_group') {
+        hotspots++;
+        const days = calculateLoanDaysRemaining(item.group.due_date);
+        if (days <= 1 && !item.group.returned_at) urgent++;
+      } else {
+        if (item.loan.loan_type === 'component') components++;
+        if (item.loan.loan_type === 'project') projects++;
+        const days = calculateLoanDaysRemaining(item.loan.due_date);
+        if (days <= 1 && !item.loan.returned_at) urgent++;
+      }
+    });
+
+    return { total: displayItems.length, hotspots, components, projects, urgent };
+  }, [displayItems]);
+
   // Filter display items
   const filteredDisplayItems = useMemo(() => {
     return displayItems.filter(item => {
@@ -158,6 +170,7 @@ export default function LoansPage() {
         if (filterType === 'components' && item.loan.loan_type !== 'component') return false;
         if (filterType === 'projects' && item.loan.loan_type !== 'project') return false;
         if (filterType === 'urgent') {
+          if (item.loan.returned_at) return false;
           const days = calculateLoanDaysRemaining(item.loan.due_date);
           if (days > 1) return false;
         }
@@ -165,6 +178,7 @@ export default function LoansPage() {
         // Hotspot group
         if (filterType === 'components' || filterType === 'projects') return false;
         if (filterType === 'urgent') {
+          if (item.group.returned_at) return false;
           const days = calculateLoanDaysRemaining(item.group.due_date);
           if (days > 1) return false;
         }
@@ -198,10 +212,10 @@ export default function LoansPage() {
   }, [displayItems, filterType, searchQuery]);
 
   return (
-    <div className="flex flex-col h-full p-6 bg-brand-bg overflow-y-auto themed-scrollbar">
+    <div className="w-full max-w-7xl mx-auto space-y-6 pb-12">
       
       {/* Header */}
-      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-2">
         <div>
           <h1 className="font-serif text-[28px] font-bold tracking-widest text-white uppercase">LOANS & BORROWERS</h1>
           <p className="mt-1 text-[10px] tracking-[0.2em] text-brand-gold uppercase">
@@ -245,123 +259,144 @@ export default function LoansPage() {
       </div>
 
       {/* Tabs & Controls */}
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#332f2a] pb-4">
-        {/* Main Tabs */}
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#332f2a]">
+        {/* Main Tabs (flush with border-b) */}
+        <div className="flex items-center gap-2 -mb-px">
           <button
             type="button"
-            onClick={() => setActiveTab('active')}
-            className={`px-4 py-2 rounded-t text-xs font-bold uppercase tracking-wider flex items-center gap-2 border-b-2 transition-all ${
+            onClick={() => {
+              setActiveTab('active');
+              setFilterType('all');
+            }}
+            className={`pb-3 px-4 text-xs font-bold uppercase tracking-wider flex items-center gap-2 border-b-2 transition-all ${
               activeTab === 'active'
-                ? 'border-brand-accent text-white bg-[#1a1816]'
+                ? 'border-brand-accent text-white font-semibold'
                 : 'border-transparent text-brand-text-muted hover:text-white'
             }`}
           >
             <span>Active Loans</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-brand-accent/20 text-brand-accent text-[10px] font-mono">
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+              activeTab === 'active'
+                ? 'bg-brand-accent/20 text-brand-accent'
+                : 'bg-[#2a2622] text-zinc-400'
+            }`}>
               {activeLoans.length}
             </span>
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveTab('history')}
-            className={`px-4 py-2 rounded-t text-xs font-bold uppercase tracking-wider flex items-center gap-2 border-b-2 transition-all ${
+            onClick={() => {
+              setActiveTab('history');
+              setFilterType('all');
+            }}
+            className={`pb-3 px-4 text-xs font-bold uppercase tracking-wider flex items-center gap-2 border-b-2 transition-all ${
               activeTab === 'history'
-                ? 'border-brand-accent text-white bg-[#1a1816]'
+                ? 'border-brand-accent text-white font-semibold'
                 : 'border-transparent text-brand-text-muted hover:text-white'
             }`}
           >
             <span>Loan History</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-[#2a2622] text-zinc-400 text-[10px] font-mono">
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+              activeTab === 'history'
+                ? 'bg-brand-accent/20 text-brand-accent'
+                : 'bg-[#2a2622] text-zinc-400'
+            }`}>
               {historyLoans.length}
             </span>
           </button>
         </div>
 
         {/* Search */}
-        <div className="relative w-full sm:w-64">
+        <div className="relative w-full sm:w-72 pb-3 sm:pb-2">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-brand-text-muted pointer-events-none" />
           <input
             type="text"
             placeholder="Search borrower, item, or container..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-[#191715] border border-[#332f2a] rounded pl-8 pr-3 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none"
+            className="w-full bg-[#191715] border border-[#332f2a] rounded pl-8 pr-3 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none transition-colors"
           />
         </div>
       </div>
 
       {/* Filter Pills */}
-      {activeTab === 'active' && (
-        <div className="mb-6 flex items-center gap-2 overflow-x-auto pb-1">
-          <button
-            type="button"
-            onClick={() => setFilterType('all')}
-            className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              filterType === 'all'
-                ? 'bg-brand-accent text-white'
-                : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white'
-            }`}
-          >
-            All Items
-          </button>
+      <div className="flex flex-wrap items-center gap-2 py-1 shrink-0">
+        <button
+          type="button"
+          onClick={() => setFilterType('all')}
+          className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
+            filterType === 'all'
+              ? 'bg-brand-accent text-white shadow-sm'
+              : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white hover:border-[#4a443c]'
+          }`}
+        >
+          <span>All Items</span>
+          <span className="text-[10px] opacity-75 font-mono">({filterCounts.total})</span>
+        </button>
 
-          <button
-            type="button"
-            onClick={() => setFilterType('hotspots')}
-            className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1 ${
-              filterType === 'hotspots'
-                ? 'bg-amber-600 text-white'
-                : 'bg-[#191715] border border-[#332f2a] text-amber-400 hover:text-white'
-            }`}
-          >
-            <Layers className="h-3 w-3" />
-            <span>Hotspots / Containers</span>
-          </button>
+        <button
+          type="button"
+          onClick={() => setFilterType('hotspots')}
+          className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
+            filterType === 'hotspots'
+              ? 'bg-amber-600 text-white shadow-sm'
+              : 'bg-[#191715] border border-[#332f2a] text-amber-400 hover:text-white hover:border-amber-600/50'
+          }`}
+        >
+          <Layers className="h-3.5 w-3.5" />
+          <span>Hotspots / Containers</span>
+          <span className="text-[10px] opacity-75 font-mono">({filterCounts.hotspots})</span>
+        </button>
 
-          <button
-            type="button"
-            onClick={() => setFilterType('components')}
-            className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              filterType === 'components'
-                ? 'bg-brand-accent text-white'
-                : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white'
-            }`}
-          >
-            Individual Components
-          </button>
+        <button
+          type="button"
+          onClick={() => setFilterType('components')}
+          className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
+            filterType === 'components'
+              ? 'bg-brand-accent text-white shadow-sm'
+              : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white hover:border-[#4a443c]'
+          }`}
+        >
+          <Package className="h-3.5 w-3.5" />
+          <span>Components</span>
+          <span className="text-[10px] opacity-75 font-mono">({filterCounts.components})</span>
+        </button>
 
-          <button
-            type="button"
-            onClick={() => setFilterType('projects')}
-            className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              filterType === 'projects'
-                ? 'bg-brand-accent text-white'
-                : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white'
-            }`}
-          >
-            Projects
-          </button>
+        <button
+          type="button"
+          onClick={() => setFilterType('projects')}
+          className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
+            filterType === 'projects'
+              ? 'bg-brand-accent text-white shadow-sm'
+              : 'bg-[#191715] border border-[#332f2a] text-brand-text-muted hover:text-white hover:border-[#4a443c]'
+          }`}
+        >
+          <Compass className="h-3.5 w-3.5" />
+          <span>Projects</span>
+          <span className="text-[10px] opacity-75 font-mono">({filterCounts.projects})</span>
+        </button>
 
+        {activeTab === 'active' && filterCounts.urgent > 0 && (
           <button
             type="button"
             onClick={() => setFilterType('urgent')}
-            className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1 ${
+            className={`px-3 py-1.5 rounded text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 ${
               filterType === 'urgent'
-                ? 'bg-amber-600 text-white'
-                : 'bg-[#191715] border border-amber-900/40 text-amber-400 hover:text-white'
+                ? 'bg-red-600 text-white shadow-sm'
+                : 'bg-[#191715] border border-red-900/40 text-red-400 hover:text-white hover:border-red-600/50'
             }`}
           >
-            <Clock className="h-3 w-3" />
+            <Clock className="h-3.5 w-3.5" />
             <span>Due Soon / Overdue</span>
+            <span className="text-[10px] opacity-75 font-mono">({filterCounts.urgent})</span>
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Content List */}
       {loading ? (
-        <div className="text-brand-text-muted text-sm py-8 text-center">Loading loans...</div>
+        <div className="text-brand-text-muted text-sm py-12 text-center">Loading loans...</div>
       ) : filteredDisplayItems.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-12 text-brand-text-muted border border-[#332f2a] rounded-lg bg-[#141211]">
           <CheckCircle2 className="h-8 w-8 text-emerald-500/50 mb-2" />
@@ -529,9 +564,19 @@ export default function LoansPage() {
                     </div>
                   </div>
 
-                  {/* Bottom Actions: Return Entire Hotspot */}
-                  {!isReturned && isOnline && (
-                    <div className="pt-3 border-t border-[#332f2a] flex justify-end pl-2">
+                  {/* Bottom Actions: Edit & Return Entire Hotspot */}
+                  <div className="pt-3 border-t border-[#332f2a] flex items-center justify-between pl-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingTarget({ type: 'hotspot_group', group })}
+                      className="px-3 py-1.5 bg-[#201d1a] hover:bg-[#2c2823] text-zinc-300 hover:text-white border border-[#38332c] hover:border-brand-gold/60 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+                      title="Edit borrower details, due date, or notes"
+                    >
+                      <Pencil className="h-3.5 w-3.5 text-amber-400" />
+                      <span>Edit</span>
+                    </button>
+
+                    {!isReturned && isOnline && (
                       <button
                         type="button"
                         disabled={returningGroupId === group.groupId}
@@ -541,8 +586,8 @@ export default function LoansPage() {
                         <RotateCcw className="h-3.5 w-3.5" />
                         <span>{returningGroupId === group.groupId ? "Returning..." : "Return Entire Hotspot"}</span>
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               );
             }
@@ -697,9 +742,19 @@ export default function LoansPage() {
                   )}
                 </div>
 
-                {/* Bottom Actions */}
-                {!isReturned && isOnline && (
-                  <div className="pt-3 border-t border-[#332f2a] flex justify-end pl-2">
+                {/* Bottom Actions: Edit & Return Item */}
+                <div className="pt-3 border-t border-[#332f2a] flex items-center justify-between pl-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingTarget({ type: 'single', loan })}
+                    className="px-3 py-1.5 bg-[#201d1a] hover:bg-[#2c2823] text-zinc-300 hover:text-white border border-[#38332c] hover:border-brand-gold/60 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+                    title="Edit borrower details, due date, or notes"
+                  >
+                    <Pencil className="h-3.5 w-3.5 text-brand-gold" />
+                    <span>Edit</span>
+                  </button>
+
+                  {!isReturned && isOnline && (
                     <button
                       type="button"
                       onClick={() => setReturnLoanItem(loan)}
@@ -708,8 +763,8 @@ export default function LoansPage() {
                       <RotateCcw className="h-3.5 w-3.5" />
                       <span>Return Item</span>
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             );
           })}
@@ -736,6 +791,19 @@ export default function LoansPage() {
           onClose={() => setReturnLoanItem(null)}
           onSuccess={() => {
             setReturnLoanItem(null);
+            load();
+          }}
+        />
+      )}
+
+      {editingTarget && (
+        <EditLoanModal
+          isOpen={!!editingTarget}
+          loan={editingTarget.type === 'single' ? editingTarget.loan : null}
+          group={editingTarget.type === 'hotspot_group' ? editingTarget.group : null}
+          onClose={() => setEditingTarget(null)}
+          onSuccess={() => {
+            setEditingTarget(null);
             load();
           }}
         />

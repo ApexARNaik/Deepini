@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { X, StickyNote, Package, MapPin, Trash2, Check, ArrowRightLeft, Sparkles } from "lucide-react";
-import { SpatialNote, SpatialHotspot, ComponentWithTotals, isPersonalItem } from "@/lib/api";
+import { useState, useEffect, useMemo } from "react";
+import { X, StickyNote, Package, MapPin, Trash2, Check, ArrowRightLeft, Sparkles, Loader2 } from "lucide-react";
+import { SpatialNote, SpatialHotspot, ComponentWithTotals, isPersonalItem, getHotspotTreeSummary } from "@/lib/api";
 
 interface Props {
   isOpen: boolean;
@@ -51,15 +51,25 @@ export function SpatialNoteModal({
   const [componentSearch, setComponentSearch] = useState("");
   const [hotspotSearch, setHotspotSearch] = useState("");
 
+  // Hotspot component scoping state
+  const [hotspotComponentsMap, setHotspotComponentsMap] = useState<Map<string, number> | null>(null);
+  const [loadingHotspotComponents, setLoadingHotspotComponents] = useState(false);
+  const [showAllComponents, setShowAllComponents] = useState(false);
+
+  const effectiveHotspotId = selectedHotspotId || defaultHotspotId || initialNote?.hotspot_id || null;
+  const targetHotspotObj = availableHotspots.find(h => h.id === effectiveHotspotId);
+  const hotspotLabel = targetHotspotObj?.label || (effectiveHotspotId ? "This Hotspot" : "");
+
   useEffect(() => {
     if (isOpen) {
+      setShowAllComponents(false);
       if (initialNote) {
         setText(initialNote.text || "");
         setColor(initialNote.color || "amber");
         if (initialNote.component_id) {
           setTargetType("component");
           setSelectedComponentId(initialNote.component_id);
-          setSelectedHotspotId(initialNote.hotspot_id || "");
+          setSelectedHotspotId(initialNote.hotspot_id || defaultHotspotId || "");
         } else if (initialNote.hotspot_id) {
           setTargetType("hotspot");
           setSelectedHotspotId(initialNote.hotspot_id);
@@ -77,7 +87,7 @@ export function SpatialNoteModal({
           setSelectedComponentId(defaultComponentId);
           setSelectedHotspotId(defaultHotspotId || "");
         } else if (defaultHotspotId) {
-          setTargetType("hotspot");
+          setTargetType("component");
           setSelectedHotspotId(defaultHotspotId);
           setSelectedComponentId("");
         } else {
@@ -91,6 +101,52 @@ export function SpatialNoteModal({
     }
   }, [isOpen, initialNote, defaultHotspotId, defaultComponentId, availableHotspots, availableComponents]);
 
+  // Fetch components available at effectiveHotspotId
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (!effectiveHotspotId) {
+      setHotspotComponentsMap(null);
+      setLoadingHotspotComponents(false);
+      return;
+    }
+
+    let isMounted = true;
+    setLoadingHotspotComponents(true);
+
+    getHotspotTreeSummary(effectiveHotspotId)
+      .then((summary) => {
+        if (!isMounted) return;
+        const map = new Map<string, number>();
+        summary.components.forEach((c) => {
+          map.set(c.componentId, (map.get(c.componentId) || 0) + c.quantity);
+        });
+        setHotspotComponentsMap(map);
+
+        // Preselect a component that is actually available at this hotspot if none or not available
+        setSelectedComponentId((prev) => {
+          if (prev && (map.has(prev) || initialNote?.component_id === prev || defaultComponentId === prev)) {
+            return prev;
+          }
+          if (summary.components.length > 0) {
+            return summary.components[0].componentId;
+          }
+          return prev;
+        });
+      })
+      .catch((err) => {
+        console.warn("Failed to load components for hotspot:", err);
+        if (isMounted) setHotspotComponentsMap(null);
+      })
+      .finally(() => {
+        if (isMounted) setLoadingHotspotComponents(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, effectiveHotspotId, defaultComponentId, initialNote?.component_id]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -99,7 +155,7 @@ export function SpatialNoteModal({
 
     const payload: Omit<SpatialNote, 'id' | 'created_at' | 'updated_at'> = {
       photo_id: photoId || initialNote?.photo_id || null,
-      hotspot_id: targetType === "hotspot" ? (selectedHotspotId || null) : (targetType === "component" ? (selectedHotspotId || null) : null),
+      hotspot_id: targetType === "hotspot" ? (selectedHotspotId || null) : (targetType === "component" ? (effectiveHotspotId || selectedHotspotId || null) : null),
       component_id: targetType === "component" ? (selectedComponentId || null) : null,
       text: text.trim(),
       x: initialNote ? initialNote.x : defaultX,
@@ -111,11 +167,18 @@ export function SpatialNoteModal({
     onClose();
   };
 
-  const filteredComponents = availableComponents.filter(c => {
-    if (!componentSearch.trim()) return true;
+  const filteredComponents = useMemo(() => {
+    let list = availableComponents;
+
+    // Limit to components at this hotspot by default unless user toggles "Show all"
+    if (effectiveHotspotId && hotspotComponentsMap && !showAllComponents) {
+      list = list.filter(c => hotspotComponentsMap.has(c.id) || c.id === selectedComponentId);
+    }
+
+    if (!componentSearch.trim()) return list;
     const q = componentSearch.toLowerCase().trim();
-    return (c.name || "").toLowerCase().includes(q) || (c.notes || "").toLowerCase().includes(q);
-  });
+    return list.filter(c => (c.name || "").toLowerCase().includes(q) || (c.notes || "").toLowerCase().includes(q));
+  }, [availableComponents, effectiveHotspotId, hotspotComponentsMap, showAllComponents, selectedComponentId, componentSearch]);
 
   const filteredHotspots = availableHotspots.filter(h => {
     if (!hotspotSearch.trim()) return true;
@@ -221,7 +284,7 @@ export function SpatialNoteModal({
 
           {/* Component Selection */}
           {targetType === "component" && (
-            <div className="space-y-2 bg-[#121110] border border-[#2d2924] p-3.5 rounded-lg animate-fadeIn">
+            <div className="space-y-2.5 bg-[#121110] border border-[#2d2924] p-3.5 rounded-lg animate-fadeIn">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-white flex items-center gap-1.5">
                   <Package className="h-3.5 w-3.5 text-brand-accent" />
@@ -236,25 +299,77 @@ export function SpatialNoteModal({
                 This note stays linked to the chosen component and will automatically follow it on the visual map if it is moved to another compartment or room.
               </p>
 
-              {availableComponents.length > 5 && (
+              {/* Hotspot Scope Indicator / Filter Banner */}
+              {effectiveHotspotId && (
+                <div className="flex items-center justify-between bg-[#191715] border border-[#2e2a25] px-3 py-2 rounded text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <MapPin className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                    <span className="text-zinc-300 truncate text-[11px]">
+                      {showAllComponents ? (
+                        <span>Showing all workshop items</span>
+                      ) : (
+                        <span>
+                          Stored in <strong className="text-white">{hotspotLabel || "this hotspot"}</strong>
+                          {hotspotComponentsMap && (
+                            <span className="text-brand-gold ml-1 font-mono font-bold">
+                              ({hotspotComponentsMap.size} item{hotspotComponentsMap.size === 1 ? '' : 's'})
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAllComponents(!showAllComponents)}
+                    className="text-[10px] uppercase font-bold tracking-wider text-brand-accent hover:text-white px-2 py-0.5 rounded bg-brand-accent/10 hover:bg-brand-accent/20 transition-colors shrink-0 ml-2"
+                  >
+                    {showAllComponents ? "Hotspot Only" : "Show All"}
+                  </button>
+                </div>
+              )}
+
+              {(filteredComponents.length > 5 || componentSearch) && (
                 <input
                   type="text"
                   value={componentSearch}
                   onChange={(e) => setComponentSearch(e.target.value)}
-                  placeholder="Filter components..."
-                  className="w-full bg-[#1b1917] border border-[#38332c] rounded px-3 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none mb-2"
+                  placeholder={`Filter ${effectiveHotspotId && !showAllComponents ? 'hotspot ' : ''}components...`}
+                  className="w-full bg-[#1b1917] border border-[#38332c] rounded px-3 py-1.5 text-xs text-white placeholder-brand-text-muted focus:border-brand-accent focus:outline-none mb-1"
                 />
               )}
 
-              <div className="max-h-40 overflow-y-auto themed-scrollbar space-y-1.5 pr-1">
-                {filteredComponents.length === 0 ? (
-                  <div className="text-center py-4 text-xs text-brand-text-muted">
-                    No components found.
+              <div className="max-h-44 overflow-y-auto themed-scrollbar space-y-1.5 pr-1">
+                {loadingHotspotComponents ? (
+                  <div className="text-center py-6 text-xs text-brand-text-muted flex items-center justify-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-brand-accent" />
+                    <span>Loading components at {hotspotLabel || "hotspot"}...</span>
+                  </div>
+                ) : filteredComponents.length === 0 ? (
+                  <div className="text-center py-6 px-4 bg-[#181614] border border-[#26231f] rounded text-xs space-y-2">
+                    <Package className="h-6 w-6 text-brand-text-muted mx-auto opacity-40" />
+                    <p className="text-zinc-300 font-medium">
+                      {effectiveHotspotId && !showAllComponents 
+                        ? `No components currently stored in "${hotspotLabel}".`
+                        : "No components match your search."}
+                    </p>
+                    {effectiveHotspotId && !showAllComponents && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllComponents(true)}
+                        className="px-3 py-1 bg-[#25221e] hover:bg-[#302c27] text-brand-accent border border-[#3e3830] rounded text-[11px] font-semibold transition-colors"
+                      >
+                        Browse all inventory items
+                      </button>
+                    )}
                   </div>
                 ) : (
                   filteredComponents.map((c) => {
                     const isSelected = selectedComponentId === c.id;
                     const personal = isPersonalItem(c);
+                    const qtyAtHotspot = hotspotComponentsMap?.get(c.id);
+
                     return (
                       <div
                         key={c.id}
@@ -274,6 +389,11 @@ export function SpatialNoteModal({
                           >
                             {c.name}
                           </span>
+                          {qtyAtHotspot !== undefined && (
+                            <span className="text-[10px] px-1.5 py-0.2 bg-[#25221e] text-brand-gold rounded font-mono font-bold shrink-0">
+                              {qtyAtHotspot}x
+                            </span>
+                          )}
                           {personal && (
                             <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-mono shrink-0">
                               Personal

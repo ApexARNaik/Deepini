@@ -2968,8 +2968,8 @@ export function RoomView({ roomId, locateHotspotId }: Props) {
         initialNote={editingNote}
         defaultX={newNoteTarget?.x ?? 0.5}
         defaultY={newNoteTarget?.y ?? 0.5}
-        defaultHotspotId={newNoteTarget?.hotspotId ?? selectedLeafHotspot?.id ?? null}
-        defaultComponentId={newNoteTarget?.componentId ?? null}
+        defaultHotspotId={newNoteTarget?.hotspotId ?? editingNote?.hotspot_id ?? selectedLeafHotspot?.id ?? null}
+        defaultComponentId={newNoteTarget?.componentId ?? editingNote?.component_id ?? null}
         photoId={activePhotoId}
         availableHotspots={hotspots}
         availableComponents={allInventory}
