@@ -147,26 +147,6 @@ export function SpatialNoteModal({
     };
   }, [isOpen, effectiveHotspotId, defaultComponentId, initialNote?.component_id]);
 
-  if (!isOpen) return null;
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!text.trim()) return;
-
-    const payload: Omit<SpatialNote, 'id' | 'created_at' | 'updated_at'> = {
-      photo_id: photoId || initialNote?.photo_id || null,
-      hotspot_id: targetType === "hotspot" ? (selectedHotspotId || null) : (targetType === "component" ? (effectiveHotspotId || selectedHotspotId || null) : null),
-      component_id: targetType === "component" ? (selectedComponentId || null) : null,
-      text: text.trim(),
-      x: initialNote ? initialNote.x : defaultX,
-      y: initialNote ? initialNote.y : defaultY,
-      color
-    };
-
-    onSave(payload);
-    onClose();
-  };
-
   const filteredComponents = useMemo(() => {
     let list = availableComponents;
 
@@ -188,6 +168,26 @@ export function SpatialNoteModal({
 
   const selectedCompObj = availableComponents.find(c => c.id === selectedComponentId);
   const selectedHsObj = availableHotspots.find(h => h.id === selectedHotspotId);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+
+    const payload: Omit<SpatialNote, 'id' | 'created_at' | 'updated_at'> = {
+      photo_id: photoId || initialNote?.photo_id || null,
+      hotspot_id: targetType === "hotspot" ? (selectedHotspotId || null) : (targetType === "component" ? (effectiveHotspotId || selectedHotspotId || null) : null),
+      component_id: targetType === "component" ? (selectedComponentId || null) : null,
+      text: text.trim(),
+      x: initialNote ? initialNote.x : defaultX,
+      y: initialNote ? initialNote.y : defaultY,
+      color
+    };
+
+    onSave(payload);
+    onClose();
+  };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn">

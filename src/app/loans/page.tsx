@@ -60,9 +60,27 @@ export default function LoansPage() {
   const [returnLoanItem, setReturnLoanItem] = useState<Loan | null>(null);
   const [returningGroupId, setReturningGroupId] = useState<string | null>(null);
   const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
+  const [collapsedBorrowerKeys, setCollapsedBorrowerKeys] = useState<Set<string>>(new Set());
   const [editingTarget, setEditingTarget] = useState<LoanDisplayItem | null>(null);
 
   const { isOnline } = useNetworkState();
+
+  const toggleBorrowerCollapsed = (key: string) => {
+    setCollapsedBorrowerKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleAllBorrowersCollapsed = () => {
+    if (collapsedBorrowerKeys.size === borrowerGroups.length) {
+      setCollapsedBorrowerKeys(new Set());
+    } else {
+      setCollapsedBorrowerKeys(new Set(borrowerGroups.map((g) => g.key)));
+    }
+  };
 
   useEffect(() => {
     load();
@@ -505,33 +523,56 @@ export default function LoansPage() {
         </div>
 
         {/* View Switcher: Group by Person vs Individual Items */}
-        <div className="flex items-center bg-[#141210] border border-[#332f2a] rounded p-0.5 shrink-0 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => setViewMode('grouped')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded transition-all ${
-              viewMode === 'grouped'
-                ? 'bg-brand-accent text-white shadow-sm'
-                : 'text-brand-text-muted hover:text-white'
-            }`}
-            title="Group all lends of a person together"
-          >
-            <Users className="h-3.5 w-3.5" />
-            <span>By Person ({borrowerGroups.length})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('individual')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded transition-all ${
-              viewMode === 'individual'
-                ? 'bg-brand-accent text-white shadow-sm'
-                : 'text-brand-text-muted hover:text-white'
-            }`}
-            title="Show individual item cards"
-          >
-            <Package className="h-3.5 w-3.5" />
-            <span>Individual ({filteredDisplayItems.length})</span>
-          </button>
+        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+          {viewMode === 'grouped' && borrowerGroups.length > 1 && (
+            <button
+              type="button"
+              onClick={toggleAllBorrowersCollapsed}
+              className="text-xs text-brand-text-muted hover:text-white transition-colors flex items-center gap-1.5 px-2.5 py-1.5 bg-[#141210] hover:bg-[#1f1d1a] border border-[#332f2a] rounded"
+              title={collapsedBorrowerKeys.size === borrowerGroups.length ? "Expand all borrower lists" : "Minimize all borrower lists"}
+            >
+              {collapsedBorrowerKeys.size === borrowerGroups.length ? (
+                <>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                  <span>Expand All</span>
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="h-3.5 w-3.5" />
+                  <span>Minimize All</span>
+                </>
+              )}
+            </button>
+          )}
+
+          <div className="flex items-center bg-[#141210] border border-[#332f2a] rounded p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode('grouped')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded transition-all ${
+                viewMode === 'grouped'
+                  ? 'bg-brand-accent text-white shadow-sm'
+                  : 'text-brand-text-muted hover:text-white'
+              }`}
+              title="Group all lends of a person together"
+            >
+              <Users className="h-3.5 w-3.5" />
+              <span>By Person ({borrowerGroups.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('individual')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded transition-all ${
+                viewMode === 'individual'
+                  ? 'bg-brand-accent text-white shadow-sm'
+                  : 'text-brand-text-muted hover:text-white'
+              }`}
+              title="Show individual item cards"
+            >
+              <Package className="h-3.5 w-3.5" />
+              <span>Individual ({filteredDisplayItems.length})</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -551,130 +592,327 @@ export default function LoansPage() {
       ) : viewMode === 'grouped' ? (
         /* Grouped by Borrower View */
         <div className="space-y-4">
-          {borrowerGroups.map((bGroup) => (
-            <div
-              key={`borrower-${bGroup.key}`}
-              className={`bg-[#1a1816] border rounded-xl p-5 flex flex-col justify-between transition-all duration-200 relative overflow-hidden shadow-md ${
-                bGroup.isOverdue
-                  ? 'border-red-900/60 shadow-red-950/20'
-                  : bGroup.isToday
-                  ? 'border-orange-900/60 shadow-orange-950/20'
-                  : bGroup.isTomorrow
-                  ? 'border-amber-900/60 shadow-amber-950/20'
-                  : 'border-[#332f2a] hover:border-[#4a443c]'
-              }`}
-            >
-              {/* Status Indicator Stripe */}
-              {!bGroup.isReturned && (
-                <div className={`absolute top-0 left-0 w-1.5 h-full ${
-                  bGroup.isOverdue ? 'bg-red-500' : bGroup.isToday ? 'bg-orange-500' : bGroup.isTomorrow ? 'bg-amber-400' : 'bg-brand-accent'
-                }`} />
-              )}
+          {borrowerGroups.map((bGroup) => {
+            const isCollapsed = collapsedBorrowerKeys.has(bGroup.key);
+            return (
+              <div
+                key={`borrower-${bGroup.key}`}
+                className={`bg-[#1a1816] border rounded-xl p-5 flex flex-col justify-between transition-all duration-200 relative overflow-hidden shadow-md ${
+                  bGroup.isOverdue
+                    ? 'border-red-900/60 shadow-red-950/20'
+                    : bGroup.isToday
+                    ? 'border-orange-900/60 shadow-orange-950/20'
+                    : bGroup.isTomorrow
+                    ? 'border-amber-900/60 shadow-amber-950/20'
+                    : 'border-[#332f2a] hover:border-[#4a443c]'
+                }`}
+              >
+                {/* Status Indicator Stripe */}
+                {!bGroup.isReturned && (
+                  <div className={`absolute top-0 left-0 w-1.5 h-full ${
+                    bGroup.isOverdue ? 'bg-red-500' : bGroup.isToday ? 'bg-orange-500' : bGroup.isTomorrow ? 'bg-amber-400' : 'bg-brand-accent'
+                  }`} />
+                )}
 
-              <div>
-                {/* Borrower Header */}
-                <div className="pl-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-[#2d2924]">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${
-                      bGroup.isOverdue
-                        ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                        : 'bg-brand-accent/15 border-brand-accent/30 text-brand-accent'
-                    }`}>
-                      <User className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="text-base font-bold text-white tracking-wide truncate">
-                          {bGroup.name}
-                        </h2>
-                        <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#141210] text-brand-gold border border-[#2d2924]">
-                          {bGroup.totalItems} {bGroup.totalItems === 1 ? 'item' : 'items'} ({bGroup.totalUnits} {bGroup.totalUnits === 1 ? 'unit' : 'units'})
-                        </span>
-                      </div>
-                      {bGroup.contact && (
-                        <p className="text-xs text-brand-text-muted flex items-center gap-1.5 mt-0.5 truncate">
-                          <Phone className="h-3 w-3 text-brand-gold shrink-0" />
-                          <span className="truncate">{bGroup.contact}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Due Status & Return All */}
-                  <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
-                    {bGroup.isReturned ? (
-                      <span className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
-                        All Returned
-                      </span>
-                    ) : (
-                      <span className={`px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold rounded flex items-center gap-1.5 ${
+                <div>
+                  {/* Borrower Header - Clickable to toggle minimize */}
+                  <div 
+                    onClick={() => toggleBorrowerCollapsed(bGroup.key)}
+                    className={`pl-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none group/hdr ${
+                      isCollapsed ? '' : 'pb-3.5 border-b border-[#2d2924]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border transition-transform group-hover/hdr:scale-105 ${
                         bGroup.isOverdue
-                          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                          : bGroup.isToday
-                          ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
-                          : bGroup.isTomorrow
-                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                          : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
+                          ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                          : 'bg-brand-accent/15 border-brand-accent/30 text-brand-accent'
                       }`}>
-                        {bGroup.isOverdue && <AlertTriangle className="h-3 w-3" />}
-                        {bGroup.isOverdue
-                          ? `Overdue by ${Math.abs(bGroup.daysRemaining)}d`
-                          : bGroup.isToday
-                          ? 'Due Today'
-                          : bGroup.isTomorrow
-                          ? 'Due Tomorrow'
-                          : `Due in ${bGroup.daysRemaining}d`}
-                      </span>
-                    )}
+                        <User className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h2 className="text-base font-bold text-white tracking-wide truncate group-hover/hdr:text-brand-accent transition-colors">
+                            {bGroup.name}
+                          </h2>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#141210] text-brand-gold border border-[#2d2924]">
+                            {bGroup.totalItems} {bGroup.totalItems === 1 ? 'item' : 'items'} ({bGroup.totalUnits} {bGroup.totalUnits === 1 ? 'unit' : 'units'})
+                          </span>
+                        </div>
+                        {bGroup.contact && (
+                          <p className="text-xs text-brand-text-muted flex items-center gap-1.5 mt-0.5 truncate">
+                            <Phone className="h-3 w-3 text-brand-gold shrink-0" />
+                            <span className="truncate">{bGroup.contact}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
 
-                    {!bGroup.isReturned && isOnline && (
+                    {/* Due Status, Minimize Button & Return All */}
+                    <div 
+                      className="flex items-center gap-2 shrink-0 self-start sm:self-center"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {bGroup.isReturned ? (
+                        <span className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                          All Returned
+                        </span>
+                      ) : (
+                        <span className={`px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold rounded flex items-center gap-1.5 ${
+                          bGroup.isOverdue
+                            ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                            : bGroup.isToday
+                            ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30'
+                            : bGroup.isTomorrow
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
+                        }`}>
+                          {bGroup.isOverdue && <AlertTriangle className="h-3 w-3" />}
+                          {bGroup.isOverdue
+                            ? `Overdue by ${Math.abs(bGroup.daysRemaining)}d`
+                            : bGroup.isToday
+                            ? 'Due Today'
+                            : bGroup.isTomorrow
+                            ? 'Due Tomorrow'
+                            : `Due in ${bGroup.daysRemaining}d`}
+                        </span>
+                      )}
+
+                      {!bGroup.isReturned && isOnline && (
+                        <button
+                          type="button"
+                          onClick={() => handleReturnAllForBorrower(bGroup)}
+                          className="px-3.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors shadow-sm"
+                          title={`Return all ${bGroup.totalItems} item(s) lent to ${bGroup.name}`}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span>Return All ({bGroup.totalItems})</span>
+                        </button>
+                      )}
+
+                      {/* Minimize / Expand Toggle Button */}
                       <button
                         type="button"
-                        onClick={() => handleReturnAllForBorrower(bGroup)}
-                        className="px-3.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors shadow-sm"
-                        title={`Return all ${bGroup.totalItems} item(s) lent to ${bGroup.name}`}
+                        onClick={() => toggleBorrowerCollapsed(bGroup.key)}
+                        className={`px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-all border ${
+                          isCollapsed
+                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25'
+                            : 'bg-[#1e1c19] hover:bg-[#282521] text-zinc-300 hover:text-white border-[#38332c] hover:border-[#4d463d]'
+                        }`}
+                        title={isCollapsed ? `Expand items for ${bGroup.name}` : `Minimize items for ${bGroup.name}`}
                       >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Return All ({bGroup.totalItems})</span>
+                        <span>{isCollapsed ? "Expand" : "Minimize"}</span>
+                        {isCollapsed ? (
+                          <ChevronDown className="h-3.5 w-3.5 transition-transform" />
+                        ) : (
+                          <ChevronUp className="h-3.5 w-3.5 transition-transform" />
+                        )}
                       </button>
-                    )}
+                    </div>
                   </div>
-                </div>
 
-                {/* List of items borrowed by this person */}
-                <div className="pl-2 pt-3.5 space-y-2.5">
-                  {bGroup.items.map((item) => {
-                    if (item.type === 'hotspot_group') {
-                      const group = item.group;
-                      const groupDays = calculateLoanDaysRemaining(group.due_date);
-                      const isRet = !!group.returned_at;
-                      const groupOverdue = !isRet && groupDays < 0;
-                      const groupToday = !isRet && groupDays === 0;
-                      const groupTomorrow = !isRet && groupDays === 1;
-                      const isExp = expandedGroupIds.has(group.groupId);
+                  {/* List of items borrowed by this person (Collapsible) */}
+                  {!isCollapsed && (
+                    <div className="pl-2 pt-3.5 space-y-2.5 animate-in fade-in duration-150">
+                      {bGroup.items.map((item) => {
+                        if (item.type === 'hotspot_group') {
+                          const group = item.group;
+                          const groupDays = calculateLoanDaysRemaining(group.due_date);
+                          const isRet = !!group.returned_at;
+                          const groupOverdue = !isRet && groupDays < 0;
+                          const groupToday = !isRet && groupDays === 0;
+                          const groupTomorrow = !isRet && groupDays === 1;
+                          const isExp = expandedGroupIds.has(group.groupId);
 
-                      return (
-                        <div
-                          key={`b-item-hs-${group.groupId}`}
-                          className="p-3.5 bg-[#141210] border border-amber-600/30 hover:border-amber-500/60 rounded-lg transition-colors space-y-2.5"
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          return (
+                            <div
+                              key={`b-item-hs-${group.groupId}`}
+                              className="p-3.5 bg-[#141210] border border-amber-600/30 hover:border-amber-500/60 rounded-lg transition-colors space-y-2.5"
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span className="p-1.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                                    <Layers className="h-4 w-4" />
+                                  </span>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-bold text-white text-sm truncate">
+                                        {group.rootHotspotLabel}
+                                      </span>
+                                      <span className="px-1.5 py-0.2 text-[9px] uppercase tracking-wider font-bold rounded bg-amber-500/15 text-amber-300 border border-amber-500/25">
+                                        Hotspot Container
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-brand-gold font-mono mt-0.5">
+                                      {group.loans.length} components • {group.totalUnits} units total
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                                  {isRet ? (
+                                    <span className="px-2 py-0.5 text-[9px] uppercase tracking-wider font-bold rounded bg-zinc-800 text-zinc-400">
+                                      Returned
+                                    </span>
+                                  ) : (
+                                    <span className={`px-2 py-0.5 text-[9px] uppercase tracking-wider font-bold rounded ${
+                                      groupOverdue ? 'bg-red-500/20 text-red-400' : groupToday ? 'bg-orange-500/20 text-orange-400' : groupTomorrow ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-800 text-zinc-300'
+                                    }`}>
+                                      Due {new Date(group.due_date).toLocaleDateString()}
+                                    </span>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleGroupExpanded(group.groupId)}
+                                    className="px-2 py-1 bg-[#1e1c19] hover:bg-[#282521] text-zinc-300 hover:text-white border border-[#38332c] rounded text-[11px] font-medium flex items-center gap-1 transition-colors"
+                                  >
+                                    <span>{isExp ? "Hide" : "View"} {group.loans.length} items</span>
+                                    {isExp ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingTarget({ type: 'hotspot_group', group })}
+                                    className="p-1.5 bg-[#1e1c19] hover:bg-[#282521] text-zinc-300 hover:text-white border border-[#38332c] hover:border-brand-gold/60 rounded transition-colors"
+                                    title="Edit loan details"
+                                  >
+                                    <Pencil className="h-3 w-3 text-amber-400" />
+                                  </button>
+
+                                  {!isRet && isOnline && (
+                                    <button
+                                      type="button"
+                                      disabled={returningGroupId === group.groupId}
+                                      onClick={() => handleReturnHotspotGroup(group)}
+                                      className="px-2.5 py-1 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1 transition-colors disabled:opacity-50"
+                                      title="Return this entire container"
+                                    >
+                                      <RotateCcw className="h-3 w-3" />
+                                      <span>{returningGroupId === group.groupId ? "Returning..." : "Return"}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Expanded Hotspot Components List */}
+                              {isExp && (
+                                <div className="pt-2 border-t border-[#2d2924] space-y-1.5 pl-2">
+                                  {group.loans.map((subLoan) => (
+                                    <div
+                                      key={subLoan.id}
+                                      className="flex items-center justify-between text-xs py-1 border-b border-[#22201d] last:border-b-0"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0 pr-2">
+                                        <span className="font-mono text-brand-gold font-bold shrink-0">{subLoan.quantity}x</span>
+                                        {subLoan.component_id ? (
+                                          <Link
+                                            href={`/inventory/${subLoan.component_id}`}
+                                            className="font-medium text-white hover:text-brand-accent transition-colors truncate"
+                                          >
+                                            {subLoan.component_name || subLoan.component?.name || "Component"}
+                                          </Link>
+                                        ) : (
+                                          <span className="font-medium text-white truncate">
+                                            {subLoan.component_name || subLoan.component?.name || "Component"}
+                                          </span>
+                                        )}
+                                        {subLoan.source_location_label && (
+                                          <span className="text-[10px] text-brand-text-muted truncate hidden md:inline">
+                                            ({subLoan.source_location_label})
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {!subLoan.returned_at && isOnline && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setReturnLoanItem(subLoan)}
+                                          className="p-1 text-emerald-400 hover:text-white hover:bg-emerald-600/30 rounded border border-emerald-500/30 transition-colors shrink-0"
+                                          title="Return this item individually"
+                                        >
+                                          <RotateCcw className="h-3 w-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        // Single Loan (Component or Project)
+                        const loan = item.loan;
+                        const isComp = loan.loan_type === 'component';
+                        const itmName = isComp
+                          ? (loan.component_name || loan.component?.name || "Component")
+                          : (loan.project_name || loan.project?.name || "Project");
+                        const loanDays = calculateLoanDaysRemaining(loan.due_date);
+                        const isRet = !!loan.returned_at;
+                        const loanOverdue = !isRet && loanDays < 0;
+                        const loanToday = !isRet && loanDays === 0;
+                        const loanTomorrow = !isRet && loanDays === 1;
+
+                        return (
+                          <div
+                            key={`b-item-single-${loan.id}`}
+                            className="p-3.5 bg-[#141210] border border-[#2e2a25] hover:border-[#423d34] rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                          >
                             <div className="flex items-center gap-2.5 min-w-0">
-                              <span className="p-1.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                                <Layers className="h-4 w-4" />
+                              <span className={`p-1.5 rounded shrink-0 ${
+                                isComp ? 'bg-brand-accent/20 text-brand-accent' : 'bg-emerald-500/20 text-emerald-400'
+                              }`}>
+                                {isComp ? <Package className="h-4 w-4" /> : <Compass className="h-4 w-4" />}
                               </span>
+
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-bold text-white text-sm truncate">
-                                    {group.rootHotspotLabel}
-                                  </span>
-                                  <span className="px-1.5 py-0.2 text-[9px] uppercase tracking-wider font-bold rounded bg-amber-500/15 text-amber-300 border border-amber-500/25">
-                                    Hotspot Container
+                                  {isComp && loan.component_id ? (
+                                    <Link
+                                      href={`/inventory/${loan.component_id}`}
+                                      className="font-bold text-white text-sm hover:text-brand-accent transition-colors truncate"
+                                    >
+                                      {itmName}
+                                    </Link>
+                                  ) : !isComp && loan.project_id ? (
+                                    <Link
+                                      href={`/projects/${loan.project_id}`}
+                                      className="font-bold text-white text-sm hover:text-brand-accent transition-colors truncate"
+                                    >
+                                      {itmName}
+                                    </Link>
+                                  ) : (
+                                    <span className="font-bold text-white text-sm truncate">{itmName}</span>
+                                  )}
+
+                                  {loan.quantity > 1 && (
+                                    <span className="text-xs font-mono font-bold text-brand-gold">
+                                      {loan.quantity}x
+                                    </span>
+                                  )}
+
+                                  <span className={`px-1.5 py-0.2 text-[9px] uppercase tracking-wider font-bold rounded ${
+                                    isComp ? 'bg-brand-accent/15 text-brand-accent' : 'bg-emerald-500/15 text-emerald-400'
+                                  }`}>
+                                    {loan.loan_type}
                                   </span>
                                 </div>
-                                <p className="text-[11px] text-brand-gold font-mono mt-0.5">
-                                  {group.loans.length} components • {group.totalUnits} units total
-                                </p>
+
+                                <div className="flex items-center gap-3 text-[11px] text-brand-text-muted mt-0.5 flex-wrap">
+                                  {loan.source_location_label && (
+                                    <span className="flex items-center gap-1 text-zinc-400 truncate">
+                                      <MapPin className="h-3 w-3 text-amber-400 shrink-0" />
+                                      <span className="truncate">{loan.source_location_label}</span>
+                                    </span>
+                                  )}
+                                  {loan.notes && (
+                                    <span className="flex items-center gap-1 italic text-zinc-400 truncate max-w-[200px]">
+                                      <FileText className="h-2.5 w-2.5 text-brand-gold shrink-0" />
+                                      <span className="truncate">{loan.notes}</span>
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
 
@@ -685,207 +923,42 @@ export default function LoansPage() {
                                 </span>
                               ) : (
                                 <span className={`px-2 py-0.5 text-[9px] uppercase tracking-wider font-bold rounded ${
-                                  groupOverdue ? 'bg-red-500/20 text-red-400' : groupToday ? 'bg-orange-500/20 text-orange-400' : groupTomorrow ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-800 text-zinc-300'
+                                  loanOverdue ? 'bg-red-500/20 text-red-400' : loanToday ? 'bg-orange-500/20 text-orange-400' : loanTomorrow ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-800 text-zinc-300'
                                 }`}>
-                                  Due {new Date(group.due_date).toLocaleDateString()}
+                                  Due {new Date(loan.due_date).toLocaleDateString()}
                                 </span>
                               )}
 
                               <button
                                 type="button"
-                                onClick={() => toggleGroupExpanded(group.groupId)}
-                                className="px-2 py-1 bg-[#1e1c19] hover:bg-[#282521] text-zinc-300 hover:text-white border border-[#38332c] rounded text-[11px] font-medium flex items-center gap-1 transition-colors"
-                              >
-                                <span>{isExp ? "Hide" : "View"} {group.loans.length} items</span>
-                                {isExp ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => setEditingTarget({ type: 'hotspot_group', group })}
+                                onClick={() => setEditingTarget({ type: 'single', loan })}
                                 className="p-1.5 bg-[#1e1c19] hover:bg-[#282521] text-zinc-300 hover:text-white border border-[#38332c] hover:border-brand-gold/60 rounded transition-colors"
                                 title="Edit loan details"
                               >
-                                <Pencil className="h-3 w-3 text-amber-400" />
+                                <Pencil className="h-3 w-3 text-brand-gold" />
                               </button>
 
                               {!isRet && isOnline && (
                                 <button
                                   type="button"
-                                  disabled={returningGroupId === group.groupId}
-                                  onClick={() => handleReturnHotspotGroup(group)}
-                                  className="px-2.5 py-1 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1 transition-colors disabled:opacity-50"
-                                  title="Return this entire container"
+                                  onClick={() => setReturnLoanItem(loan)}
+                                  className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1 transition-colors"
+                                  title="Return this item"
                                 >
                                   <RotateCcw className="h-3 w-3" />
-                                  <span>{returningGroupId === group.groupId ? "Returning..." : "Return"}</span>
+                                  <span>Return</span>
                                 </button>
                               )}
                             </div>
                           </div>
-
-                          {/* Expanded Hotspot Components List */}
-                          {isExp && (
-                            <div className="pt-2 border-t border-[#2d2924] space-y-1.5 pl-2">
-                              {group.loans.map((subLoan) => (
-                                <div
-                                  key={subLoan.id}
-                                  className="flex items-center justify-between text-xs py-1 border-b border-[#22201d] last:border-b-0"
-                                >
-                                  <div className="flex items-center gap-2 min-w-0 pr-2">
-                                    <span className="font-mono text-brand-gold font-bold shrink-0">{subLoan.quantity}x</span>
-                                    {subLoan.component_id ? (
-                                      <Link
-                                        href={`/inventory/${subLoan.component_id}`}
-                                        className="font-medium text-white hover:text-brand-accent transition-colors truncate"
-                                      >
-                                        {subLoan.component_name || subLoan.component?.name || "Component"}
-                                      </Link>
-                                    ) : (
-                                      <span className="font-medium text-white truncate">
-                                        {subLoan.component_name || subLoan.component?.name || "Component"}
-                                      </span>
-                                    )}
-                                    {subLoan.source_location_label && (
-                                      <span className="text-[10px] text-brand-text-muted truncate hidden md:inline">
-                                        ({subLoan.source_location_label})
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  {!subLoan.returned_at && isOnline && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setReturnLoanItem(subLoan)}
-                                      className="p-1 text-emerald-400 hover:text-white hover:bg-emerald-600/30 rounded border border-emerald-500/30 transition-colors shrink-0"
-                                      title="Return this item individually"
-                                    >
-                                      <RotateCcw className="h-3 w-3" />
-                                    </button>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-
-                    // Single Loan (Component or Project)
-                    const loan = item.loan;
-                    const isComp = loan.loan_type === 'component';
-                    const itmName = isComp
-                      ? (loan.component_name || loan.component?.name || "Component")
-                      : (loan.project_name || loan.project?.name || "Project");
-                    const loanDays = calculateLoanDaysRemaining(loan.due_date);
-                    const isRet = !!loan.returned_at;
-                    const loanOverdue = !isRet && loanDays < 0;
-                    const loanToday = !isRet && loanDays === 0;
-                    const loanTomorrow = !isRet && loanDays === 1;
-
-                    return (
-                      <div
-                        key={`b-item-single-${loan.id}`}
-                        className="p-3.5 bg-[#141210] border border-[#2e2a25] hover:border-[#423d34] rounded-lg transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className={`p-1.5 rounded shrink-0 ${
-                            isComp ? 'bg-brand-accent/20 text-brand-accent' : 'bg-emerald-500/20 text-emerald-400'
-                          }`}>
-                            {isComp ? <Package className="h-4 w-4" /> : <Compass className="h-4 w-4" />}
-                          </span>
-
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {isComp && loan.component_id ? (
-                                <Link
-                                  href={`/inventory/${loan.component_id}`}
-                                  className="font-bold text-white text-sm hover:text-brand-accent transition-colors truncate"
-                                >
-                                  {itmName}
-                                </Link>
-                              ) : !isComp && loan.project_id ? (
-                                <Link
-                                  href={`/projects/${loan.project_id}`}
-                                  className="font-bold text-white text-sm hover:text-brand-accent transition-colors truncate"
-                                >
-                                  {itmName}
-                                </Link>
-                              ) : (
-                                <span className="font-bold text-white text-sm truncate">{itmName}</span>
-                              )}
-
-                              {loan.quantity > 1 && (
-                                <span className="text-xs font-mono font-bold text-brand-gold">
-                                  {loan.quantity}x
-                                </span>
-                              )}
-
-                              <span className={`px-1.5 py-0.2 text-[9px] uppercase tracking-wider font-bold rounded ${
-                                isComp ? 'bg-brand-accent/15 text-brand-accent' : 'bg-emerald-500/15 text-emerald-400'
-                              }`}>
-                                {loan.loan_type}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-3 text-[11px] text-brand-text-muted mt-0.5 flex-wrap">
-                              {loan.source_location_label && (
-                                <span className="flex items-center gap-1 text-zinc-400 truncate">
-                                  <MapPin className="h-3 w-3 text-amber-400 shrink-0" />
-                                  <span className="truncate">{loan.source_location_label}</span>
-                                </span>
-                              )}
-                              {loan.notes && (
-                                <span className="flex items-center gap-1 italic text-zinc-400 truncate max-w-[200px]">
-                                  <FileText className="h-2.5 w-2.5 text-brand-gold shrink-0" />
-                                  <span className="truncate">{loan.notes}</span>
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                          {isRet ? (
-                            <span className="px-2 py-0.5 text-[9px] uppercase tracking-wider font-bold rounded bg-zinc-800 text-zinc-400">
-                              Returned
-                            </span>
-                          ) : (
-                            <span className={`px-2 py-0.5 text-[9px] uppercase tracking-wider font-bold rounded ${
-                              loanOverdue ? 'bg-red-500/20 text-red-400' : loanToday ? 'bg-orange-500/20 text-orange-400' : loanTomorrow ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-800 text-zinc-300'
-                            }`}>
-                              Due {new Date(loan.due_date).toLocaleDateString()}
-                            </span>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => setEditingTarget({ type: 'single', loan })}
-                            className="p-1.5 bg-[#1e1c19] hover:bg-[#282521] text-zinc-300 hover:text-white border border-[#38332c] hover:border-brand-gold/60 rounded transition-colors"
-                            title="Edit loan details"
-                          >
-                            <Pencil className="h-3 w-3 text-brand-gold" />
-                          </button>
-
-                          {!isRet && isOnline && (
-                            <button
-                              type="button"
-                              onClick={() => setReturnLoanItem(loan)}
-                              className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1 transition-colors"
-                              title="Return this item"
-                            >
-                              <RotateCcw className="h-3 w-3" />
-                              <span>Return</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
